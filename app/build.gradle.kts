@@ -276,7 +276,7 @@ dependencies {
     implementation(libs.vorbisjava.core)
     implementation(libs.wavy.slider)
     implementation(libs.androidx.graphics.shapes)
-    implementation("com.google.ai.edge.litert:litert:1.4.2")
+    implementation("com.google.ai.edge.litert:litert:2.2.0")
 
     // Networking & Serialization
     implementation(libs.retrofit)
@@ -337,7 +337,7 @@ dependencies {
     testRuntimeOnly(libs.junit.vintage.engine)
     testRuntimeOnly(libs.junitplatformlauncher)
     testImplementation(libs.kotlinx.coroutines.test)
-    testImplementation("org.json:json:20240303")
+    testImplementation("org.json:json:20260814")
     testImplementation(libs.mockk)
     testImplementation(libs.turbine)
     testImplementation(libs.truth)
