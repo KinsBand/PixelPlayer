@@ -30,4 +30,28 @@ class NewPipeExecutionTest {
         } finally { release.countDown(); job.cancel() }
         Unit
     }
+
+    @Test fun `saturated background lane does not delay playback extraction`() = runBlocking {
+        val release = CountDownLatch(1)
+        val started = CountDownLatch(3)
+        val blockers = List(3) {
+            launch(Dispatchers.IO + NewPipeExecution.Background) {
+                NewPipeExecution.run { started.countDown(); release.await(5, TimeUnit.SECONDS) }
+            }
+        }
+        try {
+            assertTrue(started.await(2, TimeUnit.SECONDS))
+            val result = withTimeout(1_000) { NewPipeExecution.run { "playback" } }
+            assertEquals("playback", result)
+            // An explicit lane wins over the caller's context.
+            val explicit = withTimeout(1_000) {
+                withContext(NewPipeExecution.Background) { NewPipeExecution.run(NewPipeExecution.Lane.PLAYBACK) { 1 } }
+            }
+            assertEquals(1, explicit)
+        } finally {
+            release.countDown()
+            blockers.forEach { it.cancel() }
+        }
+        Unit
+    }
 }

@@ -22,7 +22,10 @@ import javax.inject.Singleton
 
 /** Public music metadata and direct audio. NewPipe handles extraction when signatures are required. */
 @Singleton
-class InnerTubeClient @Inject constructor(@YouTubeOkHttpClient client: OkHttpClient) {
+class InnerTubeClient @Inject constructor(
+    @YouTubeOkHttpClient client: OkHttpClient,
+    private val versionStore: InnerTubeVersionStore = InnerTubeVersionStore(null)
+) {
     private val http = client.newBuilder().callTimeout(5, TimeUnit.SECONDS).build()
     private val locks = KeyedMutex<String>()
     private data class Cached(val items: List<SearchResultItem>, val expiry: Long)
@@ -37,8 +40,17 @@ class InnerTubeClient @Inject constructor(@YouTubeOkHttpClient client: OkHttpCli
         cache[key(query, filter)]?.takeIf { it.expiry > System.currentTimeMillis() }?.items.orEmpty()
     }
 
+    /** True while [version] came from disk and has not yet been accepted by a request. */
+    @Volatile private var versionFromDisk = false
+
     private suspend fun clientVersion(): String = locks.withKey("clientVersion") {
         version?.let { return@withKey it }
+        // A version scraped earlier saves downloading the whole homepage on a cold start.
+        versionStore.load()?.let { stored ->
+            version = stored
+            versionFromDisk = true
+            return@withKey stored
+        }
         http.newCall(Request.Builder().url("https://music.youtube.com/").build()).awaitResponse().use { response ->
             check(response.isSuccessful) { "YouTube Music is unavailable (${response.code})" }
             val html = response.body.string()
@@ -46,12 +58,15 @@ class InnerTubeClient @Inject constructor(@YouTubeOkHttpClient client: OkHttpCli
                 .find(html)?.groupValues?.get(1)
             check(!found.isNullOrBlank()) { "YouTube Music client configuration unavailable" }
             version = found
+            versionFromDisk = false
+            versionStore.save(found)
             found
         }
     }
 
     private suspend fun post(path: String, body: JSONObject): JSONObject {
         val clientVersion = clientVersion()
+        val staleCandidate = versionFromDisk
         body.put("context", JSONObject().put("client", JSONObject()
             .put("clientName", "WEB_REMIX").put("clientVersion", clientVersion)
             .put("hl", "en").put("gl", Locale.getDefault().country.ifBlank { "US" })))
@@ -60,11 +75,21 @@ class InnerTubeClient @Inject constructor(@YouTubeOkHttpClient client: OkHttpCli
             .header("Referer", "https://music.youtube.com/")
             .header("X-Youtube-Client-Name", "67").header("X-Youtube-Client-Version", clientVersion)
             .post(body.toString().toRequestBody("application/json".toMediaType())).build()
-        return http.newCall(request).awaitResponse().use { response ->
-            if (response.code == 400) version = null
+        val result = http.newCall(request).awaitResponse().use { response ->
+            if (response.code == 400) {
+                version = null
+                if (staleCandidate) {
+                    // The remembered version expired: scrape a fresh one and retry once below.
+                    versionFromDisk = false
+                    versionStore.clear()
+                    return@use null
+                }
+            }
             check(response.isSuccessful) { "YouTube Music request failed (${response.code})" }
+            if (staleCandidate) versionFromDisk = false
             JSONObject(response.body.string()).also { check(!it.has("error")) { "YouTube Music returned an error" } }
         }
+        return result ?: post(path, body)
     }
 
     suspend fun search(query: String, filter: SearchFilterType): List<SearchResultItem> = withContext(Dispatchers.IO) {

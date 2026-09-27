@@ -97,6 +97,7 @@ class PlaybackDispatchStateHolder @Inject constructor(
     private val themeStateHolder: ThemeStateHolder,
     private val spotifyToYouTubeResolver: SpotifyToYouTubeResolver,
     @param:ApplicationContext private val context: Context,
+    private val catalogPlaybackResolver: com.theveloper.pixelplay.data.accounts.CatalogPlaybackResolver,
 ) {
 
     private lateinit var cb: PlaybackDispatchCallbacks
@@ -524,23 +525,50 @@ class PlaybackDispatchStateHolder @Inject constructor(
         }
     }
 
+    /**
+     * Hydration for local playback: library lookups for songs without a URI (one batched
+     * query), but no YouTube matching. Catalog songs keep their catalog URI and are matched by
+     * the player when it reaches them; the start song is matched while its item is built.
+     * Matching a whole catalog queue first meant one YouTube search per song before playback.
+     */
+    private suspend fun hydrateForLocalStart(songs: List<Song>): List<Song> {
+        if (songs.none { it.contentUriString.isBlank() }) return songs
+        val hydratedById = getSongsByIdsChunked(songs.filter { it.contentUriString.isBlank() }.map { it.id })
+            .associateBy { it.id }
+        return songs.mapNotNull { original ->
+            (hydratedById[original.id] ?: original).takeIf { it.contentUriString.isNotBlank() }
+        }
+    }
+
     fun playSongs(songsToPlay: List<Song>, startSong: Song, queueName: String = "None", playlistId: String? = null) {
         cancelPendingFullQueuePlayback()
         val requestToken = beginDirectPlaybackRequest()
         directPlaybackJob = cb.scope.launch {
             cb.cancelTransitionScheduler()
 
-            val validSongs = hydrateSongsIfNeeded(songsToPlay)
+            // A cast receiver cannot match catalog songs itself, so it still gets a fully
+            // matched queue.
+            val casting = castStateHolder.castSession.value?.remoteMediaClient != null
+            val hydratedSongs = if (casting) hydrateSongsIfNeeded(songsToPlay) else hydrateForLocalStart(songsToPlay)
             throwIfDirectPlaybackRequestIsStale(requestToken)
 
-            if (validSongs.isEmpty()) {
+            if (hydratedSongs.isEmpty()) {
                 cb.emitToast(context.getString(R.string.player_view_model_no_valid_songs))
                 return@launch
             }
 
             // Adjust startSong if it was filtered out
-            val validStartSong =
-                validSongs.firstOrNull { it.id == startSong.id } ?: validSongs.first()
+            val requestedStartSong =
+                hydratedSongs.firstOrNull { it.id == startSong.id } ?: hydratedSongs.first()
+            // Only the song that plays first is matched before playback starts.
+            val validStartSong = if (requestedStartSong.requiresHydration()) {
+                hydrateSongsIfNeeded(listOf(requestedStartSong)).firstOrNull() ?: requestedStartSong
+            } else {
+                requestedStartSong
+            }
+            throwIfDirectPlaybackRequestIsStale(requestToken)
+            val validSongs = if (validStartSong === requestedStartSong) hydratedSongs
+            else hydratedSongs.map { if (it.id == validStartSong.id) validStartSong else it }
 
             // Store the original order so we can "unshuffle" later if the user turns shuffle off
             queueStateHolder.setOriginalQueueOrder(validSongs)
@@ -823,6 +851,8 @@ class PlaybackDispatchStateHolder @Inject constructor(
         if (continuousMixRuntime.flavor.value != null) continuousMixRuntime.stop()
         queueRevision++
         val effectiveStartSong = songsToPlay.firstOrNull { it.id == startSong.id } ?: songsToPlay.first()
+        // Lets the player match queued catalog songs on demand.
+        catalogPlaybackResolver.register(songsToPlay)
 
         // Update dynamic shortcut for last played playlist
         if (playlistId != null && queueName != "None") {
@@ -1017,6 +1047,9 @@ class PlaybackDispatchStateHolder @Inject constructor(
         val effectiveSong = if (song.youtubeId != null && com.theveloper.pixelplay.data.accounts.CatalogTracks.isCatalogUri(song.contentUriString)) {
             song.copy(contentUriString = "youtube://${song.youtubeId}")
         } else {
+            if (com.theveloper.pixelplay.data.accounts.CatalogTracks.isCatalogUri(song.contentUriString)) {
+                catalogPlaybackResolver.register(listOf(song))
+            }
             song
         }
         val baseItem = MediaItemBuilder.build(effectiveSong)

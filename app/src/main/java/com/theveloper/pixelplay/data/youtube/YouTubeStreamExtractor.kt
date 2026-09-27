@@ -42,7 +42,7 @@ class YouTubeStreamExtractor @Inject constructor(private val innerTube: InnerTub
             if (!MemoryHeadroom.hasAtLeast(RELATED_MIN_FREE_BYTES)) return@withPermit emptyList()
             withContext(Dispatchers.IO) {
                 val items = try {
-                    NewPipeExecution.run {
+                    NewPipeExecution.run(NewPipeExecution.Lane.BACKGROUND) {
                         val extractor = ServiceList.YouTube.getStreamExtractor("https://www.youtube.com/watch?v=$id")
                         extractor.fetchPage()
                         extractor.relatedItems?.items.orEmpty()
@@ -143,9 +143,15 @@ class YouTubeStreamExtractor @Inject constructor(private val innerTube: InnerTub
         const val RELATED_MIN_FREE_BYTES = 48L * 1024 * 1024
     }
 
-    fun invalidate(videoId: String) {
+    /**
+     * Drops the cached manifest. [penalizeDirect] also sends the next lookups to full
+     * extraction for a while; use it only when a URL from the direct client was rejected.
+     */
+    fun invalidate(videoId: String, penalizeDirect: Boolean = true) {
         val id = videoId.removePrefix("yt_")
         synchronized(manifests) { manifests.remove(id) }
-        synchronized(directCooldown) { directCooldown[id] = System.currentTimeMillis() + 120_000 }
+        if (penalizeDirect) {
+            synchronized(directCooldown) { directCooldown[id] = System.currentTimeMillis() + 120_000 }
+        }
     }
 }
