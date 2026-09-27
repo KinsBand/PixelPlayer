@@ -31,7 +31,8 @@ val enableAbiSplits = providers.gradleProperty("pixelplay.enableAbiSplits")
     .toBoolean()
 
 // ABIs we ship splits for. Keep in sync with the `splits.abi.include` call below.
-val supportedAbiSplits = listOf("arm64-v8a", "armeabi-v7a")
+// Only 64-bit ARM: every supported phone (minSdk 30) that isn't an emulator runs arm64-v8a.
+val supportedAbiSplits = listOf("arm64-v8a")
 
 // Android Studio passes -Pandroid.injected.build.abi=<device abis> whenever you Run/Debug on a
 // device. AGP reacts by disabling every variant output except the one matching that ABI
