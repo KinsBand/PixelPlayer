@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import com.theveloper.pixelplay.presentation.screens.radio.RadioHomeCard
 import com.theveloper.pixelplay.presentation.navigation.navigateSafely
 import com.theveloper.pixelplay.presentation.navigation.navigateSafelyReplacing
 
@@ -516,6 +517,10 @@ fun HomeScreen(
 
                                 Spacer(modifier = Modifier.height(24.dp))
 
+                                RadioHomeCard(onClick = { navController.navigateSafely(Screen.Radio.route) })
+
+                                Spacer(modifier = Modifier.height(24.dp))
+
                                 if (homeStatsOverview != null) {
                                     StatsOverviewCard(
                                         summary = homeStatsOverview,
@@ -560,6 +565,16 @@ fun HomeScreen(
                         if (!sheetState.isVisible) {
                             showOptionsBottomSheet = false
                             navController.navigateSafely(Screen.DJSpace.route)
+                        }
+                    }
+                },
+                onNavigateToRadio = {
+                    scope.launch {
+                        sheetState.hide()
+                    }.invokeOnCompletion {
+                        if (!sheetState.isVisible) {
+                            showOptionsBottomSheet = false
+                            navController.navigateSafely(Screen.Radio.route)
                         }
                     }
                 }
