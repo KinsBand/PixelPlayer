@@ -43,19 +43,53 @@ class DownloadNotificationManager @Inject constructor(
         }
     }
 
-    fun showProgress(songTitle: String, percent: Int, notifId: Int = notificationId): Int {
+    fun showProgress(songTitle: String, percent: Int, notifId: Int = notificationId, songId: String? = null): Int {
         val id = notifId
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle("Downloading")
             .setContentText(songTitle)
             .setProgress(100, percent, false)
             .setOngoing(true)
             .setSilent(true)
-            .build()
-        notificationManager.notify(id, notification)
+            .setOnlyAlertOnce(true)
+        if (songId != null) {
+            builder.addAction(0, "Pause", songAction(DownloadActionReceiver.ACTION_PAUSE, songId, id * 4))
+            builder.addAction(0, "Cancel", songAction(DownloadActionReceiver.ACTION_CANCEL, songId, id * 4 + 1))
+        }
+        notificationManager.notify(id, builder.build())
         return id
     }
+
+    /** A paused download: stays until resumed or cancelled. */
+    fun showPaused(songTitle: String, percent: Int, notifId: Int, songId: String) {
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setContentTitle("Download paused")
+            .setContentText(songTitle)
+            .setProgress(100, percent, false)
+            .setSilent(true)
+            .setOnlyAlertOnce(true)
+            .addAction(0, "Resume", songAction(DownloadActionReceiver.ACTION_RESUME, songId, notifId * 4 + 2))
+            .addAction(0, "Cancel", songAction(DownloadActionReceiver.ACTION_CANCEL, songId, notifId * 4 + 3))
+            .build()
+        notificationManager.notify(notifId, notification)
+    }
+
+    /** Removes the notification of a single-song download (same id [showResolving] uses). */
+    fun cancelForSong(songId: String) {
+        notificationManager.cancel(kotlin.math.abs(songId.hashCode()) % 10000 + NOTIFICATION_ID_BASE)
+    }
+
+    private fun songAction(action: String, songId: String, requestCode: Int): PendingIntent =
+        PendingIntent.getBroadcast(
+            context,
+            requestCode,
+            Intent(context, DownloadActionReceiver::class.java)
+                .setAction(action)
+                .putExtra(DownloadActionReceiver.EXTRA_SONG_ID, songId),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
 
     fun showResolving(songTitle: String, songId: String? = null): Int {
         val id = songId?.hashCode()?.let { kotlin.math.abs(it) % 10000 + NOTIFICATION_ID_BASE } ?: notificationId

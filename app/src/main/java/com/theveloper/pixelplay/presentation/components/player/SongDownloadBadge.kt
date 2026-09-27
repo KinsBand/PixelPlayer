@@ -25,6 +25,8 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.HighQuality
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SdCard
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -63,7 +65,7 @@ import com.theveloper.pixelplay.data.youtube.DownloadQuality
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerDownloadViewModel
 import java.util.Locale
 
-private enum class BadgeState { DOWNLOADED, DOWNLOADING, CAN_DOWNLOAD, NONE }
+private enum class BadgeState { DOWNLOADED, DOWNLOADING, PAUSED, CAN_DOWNLOAD, NONE }
 
 /**
  * The one place the full player shows whether the current song is saved on the device:
@@ -71,7 +73,8 @@ private enum class BadgeState { DOWNLOADED, DOWNLOADING, CAN_DOWNLOAD, NONE }
  * button when it can be downloaded, and a progress ring while it downloads.
  *
  * Tapping download opens a small quality menu right under the button (High / Medium / Low
- * with size and time); a long press downloads High straight away.
+ * with size and time); a long press downloads High straight away. While downloading, a tap
+ * pauses and the next tap resumes; a long press cancels.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -94,6 +97,7 @@ fun SongDownloadBadge(
         isOnline && (song.isDownloaded || song.id in downloadedIds || progress is DownloadProgress.Completed) -> BadgeState.DOWNLOADED
         isOnline && (progress is DownloadProgress.Resolving || progress is DownloadProgress.Downloading ||
             progress is DownloadProgress.Tagging || progress is DownloadProgress.Scanning) -> BadgeState.DOWNLOADING
+        isOnline && progress is DownloadProgress.Paused -> BadgeState.PAUSED
         isOnline -> BadgeState.CAN_DOWNLOAD
         isOnDevice -> BadgeState.DOWNLOADED
         else -> BadgeState.NONE
@@ -107,6 +111,12 @@ fun SongDownloadBadge(
         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         viewModel.download(song, DownloadQuality.HIGH)
     }
+    val togglePause = { viewModel.togglePause(song.id) }
+    val cancelDownload = {
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        viewModel.cancelDownload(song.id)
+    }
+    val active = state == BadgeState.DOWNLOADING || state == BadgeState.PAUSED
 
     val outer = if (boxed) {
         modifier
@@ -114,9 +124,17 @@ fun SongDownloadBadge(
             .clip(RoundedCornerShape(14.dp))
             .background(containerColor)
             .then(
-                if (state == BadgeState.CAN_DOWNLOAD) {
-                    Modifier.combinedClickable(onClick = openMenu, onLongClick = quickDownload, onLongClickLabel = "Download in high quality")
-                } else Modifier
+                when {
+                    state == BadgeState.CAN_DOWNLOAD ->
+                        Modifier.combinedClickable(onClick = openMenu, onLongClick = quickDownload, onLongClickLabel = "Download in high quality")
+                    active -> Modifier.combinedClickable(
+                        onClick = togglePause,
+                        onClickLabel = if (state == BadgeState.PAUSED) "Resume download" else "Pause download",
+                        onLongClick = cancelDownload,
+                        onLongClickLabel = "Cancel download"
+                    )
+                    else -> Modifier
+                }
             )
     } else modifier
 
@@ -140,9 +158,27 @@ fun SongDownloadBadge(
                 )
             }
 
-            BadgeState.DOWNLOADING -> Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+            BadgeState.DOWNLOADING, BadgeState.PAUSED -> Box(
+                Modifier
+                    .size(24.dp)
+                    .then(
+                        if (boxed) Modifier
+                        else Modifier.clip(CircleShape).combinedClickable(onClick = togglePause, onLongClick = cancelDownload)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
                 val percent = (progress as? DownloadProgress.Downloading)?.percent
-                if (percent != null && percent > 0) {
+                    ?: (progress as? DownloadProgress.Paused)?.percent
+                if (target == BadgeState.PAUSED) {
+                    CircularProgressIndicator(
+                        progress = { (percent ?: 0) / 100f },
+                        color = tint.copy(alpha = 0.6f),
+                        trackColor = tint.copy(alpha = 0.2f),
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Icon(Icons.Rounded.PlayArrow, contentDescription = "Resume download", tint = tint, modifier = Modifier.size(12.dp))
+                } else if (percent != null && percent > 0) {
                     CircularProgressIndicator(
                         progress = { percent / 100f },
                         color = tint,
@@ -152,6 +188,9 @@ fun SongDownloadBadge(
                     )
                 } else {
                     CircularProgressIndicator(color = tint, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                }
+                if (target == BadgeState.DOWNLOADING) {
+                    Icon(Icons.Rounded.Pause, contentDescription = "Pause download", tint = tint, modifier = Modifier.size(10.dp))
                 }
             }
 

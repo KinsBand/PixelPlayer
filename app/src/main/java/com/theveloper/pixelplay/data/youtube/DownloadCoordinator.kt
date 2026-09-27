@@ -198,19 +198,53 @@ class DownloadCoordinator @Inject constructor(
 
     fun estimateSeconds(bytes: Long): Long = songDownloadManager.estimateSeconds(bytes)
 
+    /** Running single-song downloads, so they can be paused or cancelled. */
+    private val songJobs = java.util.concurrent.ConcurrentHashMap<String, Job>()
+    /** What was asked for, so a paused download resumes with the same song and quality. */
+    private val songRequests = java.util.concurrent.ConcurrentHashMap<String, Pair<Song, DownloadQuality?>>()
+
     /** Starts (or joins) a download for [song]. Safe to call repeatedly. */
     fun download(song: Song, quality: DownloadQuality? = null) {
         if (!isOnlineSong(song)) {
             announce("This song is already on your device")
             return
         }
-        scope.launch {
+        if (songJobs[song.id]?.isActive == true) return
+        songRequests[song.id] = song to quality
+        val job = scope.launch {
             val ok = downloadWithNotification(song, notifyUser = true, quality = quality)
+            if (ok) songRequests.remove(song.id)
             // Keep the liked-downloads playlist current once the user has created it.
             if (ok && playlistPreferencesRepository.getPlaylistsOnce().any { it.id == LIKED_DOWNLOADS_PLAYLIST_ID }) {
                 syncLikedDownloadsPlaylist()
             }
         }
+        songJobs[song.id] = job
+        job.invokeOnCompletion { songJobs.remove(song.id, job) }
+    }
+
+    fun isPaused(songId: String): Boolean = progress.value[songId] is DownloadProgress.Paused
+
+    /** Pause keeps the bytes downloaded so far; [resume] continues from them. */
+    fun pause(songId: String) {
+        val job = songJobs[songId] ?: return
+        songDownloadManager.requestPause(songId)
+        job.cancel()
+    }
+
+    fun resume(songId: String) {
+        val (song, quality) = songRequests[songId] ?: return
+        download(song, quality)
+    }
+
+    fun togglePause(songId: String) = if (isPaused(songId)) resume(songId) else pause(songId)
+
+    /** Stops the download and throws away what was downloaded so far. */
+    fun cancel(songId: String) {
+        songJobs[songId]?.cancel()
+        songRequests.remove(songId)
+        songDownloadManager.discard(songId)
+        notifications.cancelForSong(songId)
     }
 
     /**
@@ -234,7 +268,7 @@ class DownloadCoordinator @Inject constructor(
                 val p = map[song.id] as? DownloadProgress.Downloading ?: return@collect
                 if (p.percent != lastPercent) {
                     lastPercent = p.percent
-                    notifications.showProgress(song.title, p.percent, notifId)
+                    notifications.showProgress(song.title, p.percent, notifId, song.id)
                 }
             }
         }
@@ -254,7 +288,9 @@ class DownloadCoordinator @Inject constructor(
                 }
             )
         } catch (e: CancellationException) {
-            notifications.cancel(notifId)
+            val paused = songDownloadManager.downloadProgressMap.value[song.id] as? DownloadProgress.Paused
+            if (paused != null) notifications.showPaused(song.title, paused.percent, notifId, song.id)
+            else notifications.cancel(notifId)
             throw e
         } finally {
             progressJob.cancel()

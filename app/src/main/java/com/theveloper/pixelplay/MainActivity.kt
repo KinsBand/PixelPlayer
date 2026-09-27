@@ -340,6 +340,7 @@ class MainActivity : ComponentActivity() {
                             when (progress) {
                                 is DownloadProgress.Resolving,
                                 is DownloadProgress.Downloading,
+                                is DownloadProgress.Paused,
                                 is DownloadProgress.Tagging,
                                 is DownloadProgress.Scanning -> true
                                 else -> false
@@ -352,7 +353,8 @@ class MainActivity : ComponentActivity() {
 
             CompositionLocalProvider(
                 LocalShowScrollbar provides showScrollbar,
-                LocalDownloadingSongIds provides downloadingSongIds
+                LocalDownloadingSongIds provides downloadingSongIds,
+                com.theveloper.pixelplay.presentation.components.LocalDownloadProgressMap provides songDownloadManager.downloadProgressMap
             ) {
                 PixelPlayTheme(
                     darkTheme = useDarkTheme

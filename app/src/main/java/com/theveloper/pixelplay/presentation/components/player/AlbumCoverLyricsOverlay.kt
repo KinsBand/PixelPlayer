@@ -350,10 +350,15 @@ internal fun CoverSyncedLyrics(
                             derivedStateOf { latestPosition() in startMs until endMs }
                         }
                         Box(rowModifier, contentAlignment = Alignment.Center) {
+                            // Same trace as the lyrics sheet: top middle → bottom middle over the break.
+                            val span = endMs - startMs
                             com.theveloper.pixelplay.utils.MusicNoteBubbles(
                                 active = active,
                                 color = colors.highlight,
-                                sizeScale = noteScale
+                                sizeScale = noteScale,
+                                breakProgress = if (active && endMs != Long.MAX_VALUE && span in 1_500L..900_000L) {
+                                    { ((latestPosition() - startMs).toFloat() / span).coerceIn(0f, 1f) }
+                                } else null
                             )
                         }
                     } else {

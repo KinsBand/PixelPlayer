@@ -12,6 +12,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Download
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -105,5 +110,106 @@ fun AmbientDownloadCoverOverlay(
                     else Modifier.fillMaxSize(0.42f).sizeIn(minWidth = 16.dp, minHeight = 16.dp, maxWidth = 52.dp, maxHeight = 52.dp)
                 )
         )
+    }
+}
+
+/**
+ * Live download progress for every song (the download manager's map). Read by
+ * [DownloadTraceCoverOverlay]; provided once at the app root.
+ */
+val LocalDownloadProgressMap = androidx.compose.runtime.staticCompositionLocalOf<
+    kotlinx.coroutines.flow.StateFlow<Map<String, com.theveloper.pixelplay.data.youtube.DownloadProgress>>
+> { kotlinx.coroutines.flow.MutableStateFlow(emptyMap()) }
+
+/**
+ * The player cover while its song downloads: a line a few dp inside the cover's edge that
+ * starts at the top middle, grows left and right at once, runs down both sides and meets at
+ * the bottom middle when the download finishes (the same motion as the music-note breaks).
+ * A paused download keeps its line and shows a pause mark.
+ */
+@Composable
+fun DownloadTraceCoverOverlay(
+    songId: String,
+    corner: Dp,
+    modifier: Modifier = Modifier,
+) {
+    val progressMap = LocalDownloadProgressMap.current
+    val state by androidx.compose.runtime.remember(progressMap, songId) {
+        progressMap.map { it[songId] }.distinctUntilChanged()
+    }.collectAsState(initial = progressMap.value[songId])
+    val fraction = when (val s = state) {
+        is com.theveloper.pixelplay.data.youtube.DownloadProgress.Downloading -> s.percent / 100f
+        is com.theveloper.pixelplay.data.youtube.DownloadProgress.Paused -> s.percent / 100f
+        is com.theveloper.pixelplay.data.youtube.DownloadProgress.Tagging,
+        is com.theveloper.pixelplay.data.youtube.DownloadProgress.Scanning,
+        is com.theveloper.pixelplay.data.youtube.DownloadProgress.Completed -> 1f
+        else -> 0f
+    }
+    val animated by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = fraction,
+        animationSpec = tween(durationMillis = 450, easing = androidx.compose.animation.core.LinearOutSlowInEasing),
+        label = "downloadTrace"
+    )
+    val paused = state is com.theveloper.pixelplay.data.youtube.DownloadProgress.Paused
+    val color = MaterialTheme.colorScheme.primary
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .downloadTrace(progress = { animated }, color = color, corner = corner),
+        contentAlignment = Alignment.Center
+    ) {
+        if (paused) {
+            Box(
+                Modifier
+                    .size(56.dp)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .drawBehind { drawRect(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.35f)) },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Pause,
+                    contentDescription = "Download paused",
+                    tint = androidx.compose.ui.graphics.Color.White,
+                    modifier = Modifier.size(30.dp)
+                )
+            }
+        }
+    }
+}
+
+/** Draws [progress] (0..1) as the top-middle → bottom-middle trace, inset inside the edge. */
+private fun Modifier.downloadTrace(
+    progress: () -> Float,
+    color: androidx.compose.ui.graphics.Color,
+    corner: Dp,
+): Modifier = this.drawWithCache {
+    val stroke = 4.dp.toPx()
+    val inset = stroke / 2f + 5.dp.toPx()
+    val maxRad = (minOf(size.width, size.height) / 2f - inset).coerceAtLeast(0f)
+    val rad = (corner.toPx() - inset).coerceIn(0f, maxRad)
+    val (left, right) = com.theveloper.pixelplay.utils.splitOutlineFromTop(
+        inset, inset, size.width - inset, size.height - inset, rad
+    )
+    val mLeft = androidx.compose.ui.graphics.PathMeasure().apply { setPath(left, false) }
+    val mRight = androidx.compose.ui.graphics.PathMeasure().apply { setPath(right, false) }
+    val segLeft = androidx.compose.ui.graphics.Path()
+    val segRight = androidx.compose.ui.graphics.Path()
+    val track = androidx.compose.ui.graphics.drawscope.Stroke(stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+    onDrawWithContent {
+        drawContent()
+        drawPath(left, color.copy(alpha = 0.18f), style = track)
+        drawPath(right, color.copy(alpha = 0.18f), style = track)
+        val p = progress().coerceIn(0f, 1f)
+        if (p <= 0f) return@onDrawWithContent
+        segLeft.reset()
+        segRight.reset()
+        mLeft.getSegment(0f, mLeft.length * p, segLeft, true)
+        mRight.getSegment(0f, mRight.length * p, segRight, true)
+        drawPath(segLeft, color, style = track)
+        drawPath(segRight, color, style = track)
+        if (p < 1f) {
+            drawCircle(color, radius = stroke * 1.1f, center = mLeft.getPosition(mLeft.length * p))
+            drawCircle(color, radius = stroke * 1.1f, center = mRight.getPosition(mRight.length * p))
+        }
     }
 }

@@ -23,6 +23,8 @@ class PlayerDownloadViewModel @Inject constructor(
     fun download(song: Song, quality: DownloadQuality? = null) = coordinator.download(song, quality)
     suspend fun downloadOptions(song: Song): List<DownloadOption> = coordinator.downloadOptions(song)
     fun estimateSeconds(bytes: Long): Long = coordinator.estimateSeconds(bytes)
+    fun togglePause(songId: String) = coordinator.togglePause(songId)
+    fun cancelDownload(songId: String) = coordinator.cancel(songId)
 
     suspend fun likedSongsToDownloadCount(): Int = coordinator.likedSongsToDownload().size
     suspend fun likedSongsDownloadedCount(): Int = coordinator.likedSongsDownloadedCount()

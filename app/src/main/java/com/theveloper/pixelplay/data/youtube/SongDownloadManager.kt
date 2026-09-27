@@ -40,6 +40,8 @@ sealed class DownloadProgress {
     data object Idle : DownloadProgress()
     data class Resolving(val songId: String) : DownloadProgress()
     data class Downloading(val songId: String, val percent: Int) : DownloadProgress()
+    /** Paused by the user; the bytes so far are kept and [SongDownloadManager] resumes from them. */
+    data class Paused(val songId: String, val percent: Int) : DownloadProgress()
     data class Tagging(val songId: String) : DownloadProgress()
     data class Scanning(val songId: String) : DownloadProgress()
     data class Completed(val songId: String, val filePath: String) : DownloadProgress()
@@ -179,12 +181,13 @@ class SongDownloadManager @Inject constructor(
 
             // Step 2: Download audio file
             updateProgress(songId, DownloadProgress.Downloading(songId, 0))
-            val sourceKey = java.security.MessageDigest.getInstance("SHA-256")
-                .digest(songId.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }.take(16)
+            val sourceKey = sourceKeyFor(songId)
             val fileName = "${sanitizeFileName(videoId)}-$sourceKey.${stream.fileExtension}"
             val outputFile = File(downloadDir, fileName)
-            // Same filesystem, genuine extension for the tagger, invisible to the library.
-            val partial = File.createTempFile(".download-", ".${stream.fileExtension}", downloadDir)
+            // Same filesystem, genuine extension for the tagger, invisible to the library. The name
+            // is fixed per song + rendition so a paused download resumes from the same bytes.
+            val partial = partialFile(sourceKey, renditionKey, stream.fileExtension)
+            if (!partial.exists()) partial.createNewFile()
             stagingFile = partial
 
             // Resumable: a failed attempt keeps the bytes already written and continues from
@@ -328,7 +331,14 @@ class SongDownloadManager @Inject constructor(
             Result.success(outputFile)
 
         } catch (e: CancellationException) {
-            _downloadProgressMap.update { it - songId }
+            if (pauseRequested.remove(songId)) {
+                // Paused: keep the partial file so resuming continues from here.
+                val percent = (_downloadProgressMap.value[songId] as? DownloadProgress.Downloading)?.percent ?: 0
+                stagingFile = null
+                _downloadProgressMap.update { it + (songId to DownloadProgress.Paused(songId, percent)) }
+            } else {
+                _downloadProgressMap.update { it - songId }
+            }
             throw e
         } catch (e: Exception) {
             Timber.tag(TAG).e(e, "Download failed for song: $songId")
@@ -514,6 +524,29 @@ class SongDownloadManager @Inject constructor(
             throw java.io.IOException("Audio metadata verification failed")
         }
     }
+
+    /** Song ids whose next cancellation is a pause (keep bytes) rather than a cancel. */
+    private val pauseRequested: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /** Call right before cancelling [songId]'s job to pause instead of cancel. */
+    fun requestPause(songId: String) {
+        pauseRequested += songId
+    }
+
+    /** Forget a paused/cancelled download: drop its progress and any bytes kept for resuming. */
+    fun discard(songId: String) {
+        pauseRequested -= songId
+        _downloadProgressMap.update { it - songId }
+        val key = sourceKeyFor(songId)
+        downloadDir.listFiles { file -> file.name.startsWith(".partial-$key-") }?.forEach { it.delete() }
+    }
+
+    private fun sourceKeyFor(songId: String): String =
+        java.security.MessageDigest.getInstance("SHA-256")
+            .digest(songId.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }.take(16)
+
+    private fun partialFile(sourceKey: String, renditionKey: String, extension: String): File =
+        File(downloadDir, ".partial-$sourceKey-${renditionKey.hashCode().toUInt().toString(16)}.$extension")
 
     fun resetProgress() {
         _downloadProgressMap.value = emptyMap()
