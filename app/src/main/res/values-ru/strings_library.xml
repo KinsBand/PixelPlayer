@@ -1,0 +1,493 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Library Screen -->
+    <string name="library_screen_title">Ð‘Ð¸Ð±Ð»Ð¸Ð¾Ñ‚ÐµÐºÐ°</string>
+    <string name="library_tabs_sheet_title">Ð’ÐºÐ»Ð°Ð´ÐºÐ¸ Ð±Ð¸Ð±Ð»Ð¸Ð¾Ñ‚ÐµÐºÐ¸</string>
+    <string name="library_tabs_sheet_subtitle">Ð‘Ñ‹ÑÑ‚Ñ€Ð¾ Ð¿ÐµÑ€ÐµÑ…Ð¾Ð´Ð¸Ñ‚Ðµ Ð¼ÐµÐ¶Ð´Ñƒ Ð²ÐºÐ»Ð°Ð´ÐºÐ°Ð¼Ð¸ Ð¸ Ð¼ÐµÐ½ÑÐ¹Ñ‚Ðµ Ð¸Ñ… Ð¿Ð¾Ñ€ÑÐ´Ð¾Ðº.</string>
+    <string name="library_reorder_tabs_label">Ð˜Ð·Ð¼ÐµÐ½Ð¸Ñ‚ÑŒ Ð¿Ð¾Ñ€ÑÐ´Ð¾Ðº Ð²ÐºÐ»Ð°Ð´Ð¾Ðº</string>
+    <!-- Library Tab Names -->
+    <string name="library_tab_songs">ÐŸÐµÑÐ½Ð¸</string>
+    <string name="library_tab_albums">ÐÐ»ÑŒÐ±Ð¾Ð¼Ñ‹</string>
+    <string name="library_tab_artists">Ð˜ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»Ð¸</string>
+    <string name="library_tab_playlists">ÐŸÐ»ÐµÐ¹Ð»Ð¸ÑÑ‚Ñ‹</string>
+    <string name="library_tab_folders">ÐŸÐ°Ð¿ÐºÐ¸</string>
+    <string name="library_tab_liked">Ð˜Ð·Ð±Ñ€Ð°Ð½Ð½Ð¾Ðµ</string>
+    <!-- Library Toasts -->
+    <string name="library_toast_playlist_created">ÐŸÐ»ÐµÐ¹Ð»Ð¸ÑÑ‚ ÑƒÑÐ¿ÐµÑˆÐ½Ð¾ ÑÐ¾Ð·Ð´Ð°Ð½</string>
+    <string name="library_toast_set_ai_provider_api_key_first">Ð¡Ð½Ð°Ñ‡Ð°Ð»Ð° ÑƒÐºÐ°Ð¶Ð¸Ñ‚Ðµ API-ÐºÐ»ÑŽÑ‡ AI-Ð¿Ñ€Ð¾Ð²Ð°Ð¹Ð´ÐµÑ€Ð°</string>
+    <string name="library_toast_set_gemini_api_key_first">Ð¡Ð½Ð°Ñ‡Ð°Ð»Ð° ÑƒÐºÐ°Ð¶Ð¸Ñ‚Ðµ API-ÐºÐ»ÑŽÑ‡ Gemini</string>
+    <string name="library_toast_added_to_queue">Ð”Ð¾Ð±Ð°Ð²Ð»ÐµÐ½Ð¾ Ð² Ð¾Ñ‡ÐµÑ€ÐµÐ´ÑŒ</string>
+    <string name="library_toast_playing_next">Ð‘ÑƒÐ´ÐµÑ‚ Ð²Ð¾ÑÐ¿Ñ€Ð¾Ð¸Ð·Ð²ÐµÐ´ÐµÐ½Ð¾ ÑÐ»ÐµÐ´ÑƒÑŽÑ‰Ð¸Ð¼</string>
+    <!-- Library Toolbar & Navigation -->
+    <string name="library_cd_open_settings">ÐÐ°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ¸</string>
+    <string name="library_tab_edit">Ð˜Ð·Ð¼ÐµÐ½Ð¸Ñ‚ÑŒ</string>
+    <string name="library_cd_reorder_tabs">Ð˜Ð·Ð¼ÐµÐ½Ð¸Ñ‚ÑŒ Ð¿Ð¾Ñ€ÑÐ´Ð¾Ðº Ð²ÐºÐ»Ð°Ð´Ð¾Ðº</string>
+    <string name="library_cd_expand_tab_menu">Ð Ð°Ð·Ð²ÐµÑ€Ð½ÑƒÑ‚ÑŒ Ð¼ÐµÐ½ÑŽ</string>
+    <!-- Library Multi-Selection & Folders -->
+    <string name="library_toast_max_albums_selection">ÐœÐ¾Ð¶Ð½Ð¾ Ð²Ñ‹Ð±Ñ€Ð°Ñ‚ÑŒ Ð½Ðµ Ð±Ð¾Ð»ÐµÐµ %1$d Ð°Ð»ÑŒÐ±Ð¾Ð¼Ð¾Ð²</string>
+    <string name="library_folder_name_fallback">ÐŸÐ°Ð¿ÐºÐ°</string>
+    <string name="library_cd_folder">ÐŸÐ°Ð¿ÐºÐ°</string>
+    <!-- Library Sort & View Bottom Sheet -->
+    <string name="library_sort_by_title">Ð¡Ð¾Ñ€Ñ‚Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ð¿Ð¾</string>
+    <string name="library_sort_section_view">Ð’Ð¸Ð´</string>
+    <string name="library_sort_toggle_playlist_view">Ð ÐµÐ¶Ð¸Ð¼ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Ð¾Ð²</string>
+    <string name="library_view_mode_grid">Ð¡ÐµÑ‚ÐºÐ°</string>
+    <string name="library_view_mode_list">Ð¡Ð¿Ð¸ÑÐ¾Ðº</string>
+    <string name="library_storage_internal">Ð’Ð½ÑƒÑ‚Ñ€ÐµÐ½Ð½ÑÑ Ð¿Ð°Ð¼ÑÑ‚ÑŒ</string>
+    <string name="library_storage_sd_card">SD-ÐºÐ°Ñ€Ñ‚Ð°</string>
+    <string name="library_storage_sd_card_unavailable">SD-ÐºÐ°Ñ€Ñ‚Ð° ÑÐµÐ¹Ñ‡Ð°Ñ Ð½ÐµÐ´Ð¾ÑÑ‚ÑƒÐ¿Ð½Ð°.</string>
+    <string name="library_sort_section_cloud">ÐžÐ±Ð»Ð°ÐºÐ¾</string>
+    <string name="library_cloud_sources_heading">ÐžÐ±Ð»Ð°ÐºÐ¾</string>
+    <string name="library_cloud_only_label">Ð¢Ð¾Ð»ÑŒÐºÐ¾ Ð¾Ð±Ð»Ð°ÐºÐ¾</string>
+    <!-- Library AI Metadata Processing -->
+    <string name="library_generating_ai_metadata">Ð“ÐµÐ½ÐµÑ€Ð°Ñ†Ð¸Ñ Ð¼ÐµÑ‚Ð°Ð´Ð°Ð½Ð½Ñ‹Ñ… Ñ Ð¿Ð¾Ð¼Ð¾Ñ‰ÑŒÑŽ Ð˜Ð˜â€¦</string>
+    <!-- Library list errors -->
+    <string name="library_error_loading_songs">ÐžÑˆÐ¸Ð±ÐºÐ° Ð·Ð°Ð³Ñ€ÑƒÐ·ÐºÐ¸ Ñ‚Ñ€ÐµÐºÐ¾Ð²</string>
+    <string name="library_album_detail_error_loading_albums">ÐžÑˆÐ¸Ð±ÐºÐ° Ð·Ð°Ð³Ñ€ÑƒÐ·ÐºÐ¸ Ð°Ð»ÑŒÐ±Ð¾Ð¼Ð¾Ð²</string>
+    <string name="library_artist_error_loading_artists">ÐžÑˆÐ¸Ð±ÐºÐ° Ð·Ð°Ð³Ñ€ÑƒÐ·ÐºÐ¸ Ð¸ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÐµÐ¹</string>
+    <string name="library_action_retry">ÐŸÐ¾Ð²Ñ‚Ð¾Ñ€Ð¸Ñ‚ÑŒ</string>
+    <!-- Library empty (paginated) -->
+    <string name="library_no_songs_in_library_message">Ð’ Ð²Ð°ÑˆÐµÐ¹ Ð±Ð¸Ð±Ð»Ð¸Ð¾Ñ‚ÐµÐºÐµ Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½Ð¾ Ñ‚Ñ€ÐµÐºÐ¾Ð².</string>
+    <string name="library_no_songs_rescan_hint">ÐŸÐ¾Ð¿Ñ€Ð¾Ð±ÑƒÐ¹Ñ‚Ðµ Ð¿Ð¾Ð²Ñ‚Ð¾Ñ€Ð½Ð¾ Ð¿Ñ€Ð¾ÑÐºÐ°Ð½Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ð±Ð¸Ð±Ð»Ð¸Ð¾Ñ‚ÐµÐºÑƒ Ð² Ð½Ð°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ°Ñ…, ÐµÑÐ»Ð¸ Ð¼ÑƒÐ·Ñ‹ÐºÐ° ÐµÑÑ‚ÑŒ Ð½Ð° ÑƒÑÑ‚Ñ€Ð¾Ð¹ÑÑ‚Ð²Ðµ.</string>
+    <string name="library_cd_no_songs_in_library">Ð¢Ñ€ÐµÐºÐ¸ Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½Ñ‹</string>
+    <!-- Library action row -->
+    <string name="library_action_new">Ð¡Ð¾Ð·Ð´Ð°Ñ‚ÑŒ</string>
+    <string name="library_cd_create_new_playlist">Ð¡Ð¾Ð·Ð´Ð°Ñ‚ÑŒ Ð½Ð¾Ð²Ñ‹Ð¹ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚</string>
+    <string name="library_cd_import_m3u_playlist">Ð˜Ð¼Ð¿Ð¾Ñ€Ñ‚Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚ M3U</string>
+    <string name="library_cd_locate_current_song">ÐÐ°Ð¹Ñ‚Ð¸ Ñ‚ÐµÐºÑƒÑ‰Ð¸Ð¹ Ñ‚Ñ€ÐµÐº</string>
+    <string name="library_storage_filter_all_songs">Ð’ÑÐµ Ñ‚Ñ€ÐµÐºÐ¸</string>
+    <string name="library_storage_filter_online">ÐžÐ‘Ð›ÐÐšÐž</string>
+    <string name="library_storage_filter_offline">Ð›ÐžÐšÐÐ›Ð¬ÐÐž</string>
+    <string name="library_cd_sort_options">ÐŸÐ°Ñ€Ð°Ð¼ÐµÑ‚Ñ€Ñ‹ ÑÐ¾Ñ€Ñ‚Ð¸Ñ€Ð¾Ð²ÐºÐ¸</string>
+    <!-- Library selection action row -->
+    <string name="library_selection_all">Ð’ÑÐµ</string>
+    <string name="library_selection_deselect">Ð¡Ð½ÑÑ‚ÑŒ Ð²Ñ‹Ð±Ð¾Ñ€</string>
+    <string name="library_selection_more_options">Ð”Ð¾Ð¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÑŒÐ½Ñ‹Ðµ Ð¿Ð°Ñ€Ð°Ð¼ÐµÑ‚Ñ€Ñ‹</string>
+    <!-- Library Syncing -->
+    <string name="library_sync_scanning">Ð¡ÐºÐ°Ð½Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ðµ Ð¼ÑƒÐ·Ñ‹ÐºÐ°Ð»ÑŒÐ½Ñ‹Ñ… Ñ„Ð°Ð¹Ð»Ð¾Ð²â€¦</string>
+    <string name="library_sync_processing">ÐžÐ±Ñ€Ð°Ð±Ð¾Ñ‚ÐºÐ° Ñ„Ð°Ð¹Ð»Ð¾Ð²â€¦</string>
+    <string name="library_sync_files_progress">%1$d Ð¸Ð· %2$d Ñ„Ð°Ð¹Ð»Ð¾Ð²</string>
+    <string name="library_sync_in_progress">Ð¡Ð¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñ Ð±Ð¸Ð±Ð»Ð¸Ð¾Ñ‚ÐµÐºÐ¸â€¦</string>
+    <string name="library_sync_complete">Ð¡Ð¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñ Ð·Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð°</string>
+    <string name="library_sync_pending">ÐžÐ¶Ð¸Ð´Ð°Ð½Ð¸Ðµâ€¦</string>
+    <string name="library_syncing">Ð¡Ð¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñ Ð±Ð¸Ð±Ð»Ð¸Ð¾Ñ‚ÐµÐºÐ¸â€¦</string>
+    <string name="library_sync_cache">ÐžÑ‡Ð¸ÑÑ‚ÐºÐ° ÐºÑÑˆÐ° Ð¾Ð±Ð»Ð¾Ð¶ÐµÐº Ð°Ð»ÑŒÐ±Ð¾Ð¼Ð¾Ð²â€¦</string>
+    <string name="library_sync_cloud">Ð¡Ð¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñ Ð¾Ð±Ð»Ð°Ñ‡Ð½Ñ‹Ñ… Ð¸ÑÑ‚Ð¾Ñ‡Ð½Ð¸ÐºÐ¾Ð²â€¦</string>
+    <string name="library_sync_lyrics">Ð¡ÐºÐ°Ð½Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ðµ Ñ‚ÐµÐºÑÑ‚Ð¾Ð² Ð¿ÐµÑÐµÐ½â€¦</string>
+    <!-- Library Empty State -->
+    <string name="library_empty_songs_all_title">ÐŸÐ¾ÐºÐ° Ð½ÐµÑ‚ Ñ‚Ñ€ÐµÐºÐ¾Ð²</string>
+    <string name="library_empty_songs_all_subtitle">Ð”Ð¾Ð±Ð°Ð²ÑŒÑ‚Ðµ Ð¼ÑƒÐ·Ñ‹ÐºÑƒ Ð½Ð° ÑƒÑÑ‚Ñ€Ð¾Ð¹ÑÑ‚Ð²Ð¾ Ð¸Ð»Ð¸ ÑÐ¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð¸Ñ€ÑƒÐ¹Ñ‚Ðµ Ð¾Ð±Ð»Ð°Ñ‡Ð½Ñ‹Ð¹ Ð¸ÑÑ‚Ð¾Ñ‡Ð½Ð¸Ðº, Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð½Ð°Ñ‡Ð°Ñ‚ÑŒ Ð¿Ñ€Ð¾ÑÐ»ÑƒÑˆÐ¸Ð²Ð°Ð½Ð¸Ðµ.</string>
+    <string name="library_empty_songs_offline_title">Ð›Ð¾ÐºÐ°Ð»ÑŒÐ½Ñ‹Ðµ Ñ‚Ñ€ÐµÐºÐ¸ Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½Ñ‹</string>
+    <string name="library_empty_songs_offline_subtitle">ÐŸÐ¾Ð¿Ñ€Ð¾Ð±ÑƒÐ¹Ñ‚Ðµ Ð´Ñ€ÑƒÐ³Ð¾Ð¹ Ñ„Ð¸Ð»ÑŒÑ‚Ñ€ Ð¸ÑÑ‚Ð¾Ñ‡Ð½Ð¸ÐºÐ¾Ð² Ð¸Ð»Ð¸ Ð¿Ð¾Ð²Ñ‚Ð¾Ñ€Ð½Ð¾ Ð¿Ñ€Ð¾ÑÐºÐ°Ð½Ð¸Ñ€ÑƒÐ¹Ñ‚Ðµ Ð±Ð¸Ð±Ð»Ð¸Ð¾Ñ‚ÐµÐºÑƒ ÑƒÑÑ‚Ñ€Ð¾Ð¹ÑÑ‚Ð²Ð°.</string>
+    <string name="library_empty_songs_online_title">ÐžÐ±Ð»Ð°Ñ‡Ð½Ñ‹Ðµ Ñ‚Ñ€ÐµÐºÐ¸ Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½Ñ‹</string>
+    <string name="library_empty_songs_online_subtitle">Sync cloud songs, or switch to local source.</string>
+    <string name="library_empty_albums_all_title">ÐÐµÑ‚ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð½Ñ‹Ñ… Ð°Ð»ÑŒÐ±Ð¾Ð¼Ð¾Ð²</string>
+    <string name="library_empty_albums_all_subtitle">ÐÐ»ÑŒÐ±Ð¾Ð¼Ñ‹ Ð¿Ð¾ÑÐ²ÑÑ‚ÑÑ Ð·Ð´ÐµÑÑŒ Ð¿Ð¾ÑÐ»Ðµ Ð³Ñ€ÑƒÐ¿Ð¿Ð¸Ñ€Ð¾Ð²ÐºÐ¸ Ñ‚Ñ€ÐµÐºÐ¾Ð² Ð² Ð±Ð¸Ð±Ð»Ð¸Ð¾Ñ‚ÐµÐºÐµ.</string>
+    <string name="library_empty_albums_offline_title">Ð›Ð¾ÐºÐ°Ð»ÑŒÐ½Ñ‹Ðµ Ð°Ð»ÑŒÐ±Ð¾Ð¼Ñ‹ Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½Ñ‹</string>
+    <string name="library_empty_albums_offline_subtitle">Ð”Ð»Ñ ÑÐ¾Ð·Ð´Ð°Ð½Ð¸Ñ Ð»Ð¾ÐºÐ°Ð»ÑŒÐ½Ñ‹Ñ… Ð°Ð»ÑŒÐ±Ð¾Ð¼Ð¾Ð² Ð½ÐµÐ¾Ð±Ñ…Ð¾Ð´Ð¸Ð¼Ñ‹ Ð»Ð¾ÐºÐ°Ð»ÑŒÐ½Ñ‹Ðµ Ñ‚Ñ€ÐµÐºÐ¸.</string>
+    <string name="library_empty_albums_online_title">ÐžÐ±Ð»Ð°Ñ‡Ð½Ñ‹Ðµ Ð°Ð»ÑŒÐ±Ð¾Ð¼Ñ‹ Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½Ñ‹</string>
+    <string name="library_empty_albums_online_subtitle">ÐžÐ±Ð»Ð°Ñ‡Ð½Ñ‹Ðµ Ñ‚Ñ€ÐµÐºÐ¸ Ñ Ð´Ð°Ð½Ð½Ñ‹Ð¼Ð¸ Ð°Ð»ÑŒÐ±Ð¾Ð¼Ð¾Ð² Ð¿Ð¾ÑÐ²ÑÑ‚ÑÑ Ð·Ð´ÐµÑÑŒ Ð¿Ð¾ÑÐ»Ðµ ÑÐ¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð°Ñ†Ð¸Ð¸.</string>
+    <string name="library_empty_artists_all_title">ÐÐµÑ‚ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð½Ñ‹Ñ… Ð¸ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÐµÐ¹</string>
+    <string name="library_empty_artists_all_subtitle">Ð˜ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»Ð¸ Ð¿Ð¾ÑÐ²ÑÑ‚ÑÑ Ð¿Ð¾ÑÐ»Ðµ Ð¸Ð½Ð´ÐµÐºÑÐ°Ñ†Ð¸Ð¸ Ñ‚Ñ€ÐµÐºÐ¾Ð² Ð¸Ð· Ð»ÑŽÐ±Ð¾Ð³Ð¾ Ð¸ÑÑ‚Ð¾Ñ‡Ð½Ð¸ÐºÐ°.</string>
+    <string name="library_empty_artists_offline_title">Ð›Ð¾ÐºÐ°Ð»ÑŒÐ½Ñ‹Ðµ Ð¸ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»Ð¸ Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½Ñ‹</string>
+    <string name="library_empty_artists_offline_subtitle">Ð”Ð»Ñ Ð»Ð¾ÐºÐ°Ð»ÑŒÐ½Ñ‹Ñ… Ñ‚Ñ€ÐµÐºÐ¾Ð² ÑÐµÐ¹Ñ‡Ð°Ñ Ð¾Ñ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÑŽÑ‚ Ð´Ð°Ð½Ð½Ñ‹Ðµ Ð¾Ð± Ð¸ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÑÑ….</string>
+    <string name="library_empty_artists_online_title">ÐžÐ±Ð»Ð°Ñ‡Ð½Ñ‹Ðµ Ð¸ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»Ð¸ Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½Ñ‹</string>
+    <string name="library_empty_artists_online_subtitle">ÐžÐ±Ð»Ð°Ñ‡Ð½Ñ‹Ðµ Ð¸ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»Ð¸ Ð¿Ð¾ÑÐ²ÑÑ‚ÑÑ Ð¿Ð¾ÑÐ»Ðµ ÑÐ¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð°Ñ†Ð¸Ð¸ ÑƒÐ´Ð°Ð»Ñ‘Ð½Ð½Ñ‹Ñ… Ñ‚Ñ€ÐµÐºÐ¾Ð².</string>
+    <string name="library_empty_liked_all_title">ÐŸÐ¾ÐºÐ° Ð½ÐµÑ‚ Ð¸Ð·Ð±Ñ€Ð°Ð½Ð½Ñ‹Ñ… Ñ‚Ñ€ÐµÐºÐ¾Ð²</string>
+    <string name="library_empty_liked_all_subtitle">ÐÐ°Ð¶Ð¼Ð¸Ñ‚Ðµ Ð·Ð½Ð°Ñ‡Ð¾Ðº ÑÐµÑ€Ð´Ñ†Ð° Ð²Ð¾ Ð²Ñ€ÐµÐ¼Ñ Ð²Ð¾ÑÐ¿Ñ€Ð¾Ð¸Ð·Ð²ÐµÐ´ÐµÐ½Ð¸Ñ, Ñ‡Ñ‚Ð¾Ð±Ñ‹ ÑÐ¾Ñ…Ñ€Ð°Ð½Ð¸Ñ‚ÑŒ Ñ‚Ñ€ÐµÐº Ð·Ð´ÐµÑÑŒ.</string>
+    <string name="library_empty_liked_offline_title">ÐÐµÑ‚ Ð¸Ð·Ð±Ñ€Ð°Ð½Ð½Ñ‹Ñ… Ð»Ð¾ÐºÐ°Ð»ÑŒÐ½Ñ‹Ñ… Ñ‚Ñ€ÐµÐºÐ¾Ð²</string>
+    <string name="library_empty_liked_offline_subtitle">Ð¡Ð¼ÐµÐ½Ð¸Ñ‚Ðµ Ñ„Ð¸Ð»ÑŒÑ‚Ñ€ Ð¸ÑÑ‚Ð¾Ñ‡Ð½Ð¸ÐºÐ° Ð¸Ð»Ð¸ Ð´Ð¾Ð±Ð°Ð²ÑŒÑ‚Ðµ Ð² Ð¸Ð·Ð±Ñ€Ð°Ð½Ð½Ð¾Ðµ Ñ‚Ñ€ÐµÐºÐ¸ Ñ ÑƒÑÑ‚Ñ€Ð¾Ð¹ÑÑ‚Ð²Ð°.</string>
+    <string name="library_empty_liked_online_title">ÐÐµÑ‚ Ð¸Ð·Ð±Ñ€Ð°Ð½Ð½Ñ‹Ñ… Ð¾Ð±Ð»Ð°Ñ‡Ð½Ñ‹Ñ… Ñ‚Ñ€ÐµÐºÐ¾Ð²</string>
+    <string name="library_empty_liked_online_subtitle">Like cloud tracks to see them in this view.</string>
+    <string name="library_empty_folders_title">ÐŸÐ°Ð¿ÐºÐ¸ Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½Ñ‹</string>
+    <string name="library_empty_folders_subtitle">Ð—Ð´ÐµÑÑŒ Ð±ÑƒÐ´ÑƒÑ‚ Ð¾Ñ‚Ð¾Ð±Ñ€Ð°Ð¶Ð°Ñ‚ÑŒÑÑ Ð¿Ð°Ð¿ÐºÐ¸ Ñ Ð¼ÑƒÐ·Ñ‹ÐºÐ¾Ð¹ Ð¸Ð· Ð²Ð½ÑƒÑ‚Ñ€ÐµÐ½Ð½ÐµÐ³Ð¾ Ñ…Ñ€Ð°Ð½Ð¸Ð»Ð¸Ñ‰Ð°.</string>
+    <string name="library_empty_playlists_title">ÐŸÐ¾ÐºÐ° Ð½ÐµÑ‚ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Ð¾Ð²</string>
+    <string name="library_empty_playlists_subtitle">Ð¡Ð¾Ð·Ð´Ð°Ð¹Ñ‚Ðµ ÑÐ²Ð¾Ð¹ Ð¿ÐµÑ€Ð²Ñ‹Ð¹ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚ Ð´Ð»Ñ Ð¾Ñ€Ð³Ð°Ð½Ð¸Ð·Ð°Ñ†Ð¸Ð¸ Ð±Ð¸Ð±Ð»Ð¸Ð¾Ñ‚ÐµÐºÐ¸.</string>
+    <!-- SongInfoBottomSheet, MultiSelectionBottomSheet, PlaylistMultiSelectionBottomSheet -->
+    <string name="song_info_cd_edit_metadata">Ð ÐµÐ´Ð°ÐºÑ‚Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ñ‚ÐµÐ³Ð¸ Ñ‚Ñ€ÐµÐºÐ°</string>
+    <string name="song_info_action_play">Ð’Ð¾ÑÐ¿Ñ€Ð¾Ð¸Ð·Ð²ÐµÑÑ‚Ð¸</string>
+    <string name="song_info_cd_play">Ð’Ð¾ÑÐ¿Ñ€Ð¾Ð¸Ð·Ð²ÐµÑÑ‚Ð¸ Ñ‚Ñ€ÐµÐº</string>
+    <string name="song_info_action_play_all">Ð’Ð¾ÑÐ¿Ñ€Ð¾Ð¸Ð·Ð²ÐµÑÑ‚Ð¸ Ð²ÑÑ‘</string>
+    <string name="song_info_cd_play_all">Ð’Ð¾ÑÐ¿Ñ€Ð¾Ð¸Ð·Ð²ÐµÑÑ‚Ð¸ Ð²ÑÑ‘</string>
+    <string name="song_info_cd_add_to_favorites">Ð”Ð¾Ð±Ð°Ð²Ð¸Ñ‚ÑŒ Ð² Ð¸Ð·Ð±Ñ€Ð°Ð½Ð½Ð¾Ðµ</string>
+    <string name="song_info_cd_add_to_favorites_all">Ð”Ð¾Ð±Ð°Ð²Ð¸Ñ‚ÑŒ Ð²ÑÑ‘ Ð² Ð¸Ð·Ð±Ñ€Ð°Ð½Ð½Ð¾Ðµ</string>
+    <string name="song_info_cd_remove_from_favorites">Ð£Ð´Ð°Ð»Ð¸Ñ‚ÑŒ Ð¸Ð· Ð¸Ð·Ð±Ñ€Ð°Ð½Ð½Ð¾Ð³Ð¾</string>
+    <string name="song_info_cd_remove_from_favorites_all">Ð£Ð´Ð°Ð»Ð¸Ñ‚ÑŒ Ð²ÑÑ‘ Ð¸Ð· Ð¸Ð·Ð±Ñ€Ð°Ð½Ð½Ð¾Ð³Ð¾</string>
+    <string name="song_info_share_chooser_title">ÐŸÐ¾Ð´ÐµÐ»Ð¸Ñ‚ÑŒÑÑ Ð°ÑƒÐ´Ð¸Ð¾Ñ„Ð°Ð¹Ð»Ð¾Ð¼ Ñ‡ÐµÑ€ÐµÐ·</string>
+    <string name="song_info_cd_share_song_file">ÐŸÐ¾Ð´ÐµÐ»Ð¸Ñ‚ÑŒÑÑ Ð°ÑƒÐ´Ð¸Ð¾Ñ„Ð°Ð¹Ð»Ð¾Ð¼</string>
+    <string name="song_info_cd_share_all_as_zip">ÐŸÐ¾Ð´ÐµÐ»Ð¸Ñ‚ÑŒÑÑ Ð²ÑÐµÐ¼ ÐºÐ°Ðº ZIP</string>
+    <string name="song_info_error_share_song">ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð¿Ð¾Ð´ÐµÐ»Ð¸Ñ‚ÑŒÑÑ Ñ‚Ñ€ÐµÐºÐ¾Ð¼: %1$s</string>
+    <string name="song_info_action_add_to_queue">Ð”Ð¾Ð±Ð°Ð²Ð¸Ñ‚ÑŒ Ð² Ð¾Ñ‡ÐµÑ€ÐµÐ´ÑŒ</string>
+    <string name="song_info_cd_add_to_queue">Ð”Ð¾Ð±Ð°Ð²Ð¸Ñ‚ÑŒ Ð² Ð¾Ñ‡ÐµÑ€ÐµÐ´ÑŒ</string>
+    <string name="song_info_action_queue_next">Ð¡Ð»ÐµÐ´ÑƒÑŽÑ‰Ð¸Ð¹</string>
+    <string name="song_info_cd_queue_next">Ð’Ð¾ÑÐ¿Ñ€Ð¾Ð¸Ð·Ð²ÐµÑÑ‚Ð¸ ÑÐ»ÐµÐ´ÑƒÑŽÑ‰Ð¸Ð¼</string>
+    <string name="song_info_cd_add_to_playlist">Ð”Ð¾Ð±Ð°Ð²Ð¸Ñ‚ÑŒ Ð² Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚</string>
+    <string name="song_info_action_delete">Ð£Ð´Ð°Ð»Ð¸Ñ‚ÑŒ</string>
+    <string name="song_info_action_delete_all">Ð£Ð´Ð°Ð»Ð¸Ñ‚ÑŒ Ð²ÑÑ‘</string>
+    <string name="song_info_set_sound_as_short">Ð£ÑÑ‚Ð°Ð½Ð¾Ð²Ð¸Ñ‚ÑŒ ÐºÐ°Ðº</string>
+    <string name="song_info_set_sound_as_long">Ð£ÑÑ‚Ð°Ð½Ð¾Ð²Ð¸Ñ‚ÑŒ ÐºÐ°Ðº Ð·Ð²ÑƒÐº</string>
+    <string name="song_info_cd_set_sound_as">Ð’Ñ‹Ð±ÐµÑ€Ð¸Ñ‚Ðµ, ÐºÐ°Ðº Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÑŒ ÑÑ‚Ð¾Ñ‚ Ñ‚Ñ€ÐµÐº Ð² ÐºÐ°Ñ‡ÐµÑÑ‚Ð²Ðµ ÑÐ¸ÑÑ‚ÐµÐ¼Ð½Ð¾Ð³Ð¾ Ð·Ð²ÑƒÐºÐ°</string>
+    <string name="song_info_tone_picker_title">Ð˜ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÑŒ ÑÑ‚Ð¾Ñ‚ Ñ‚Ñ€ÐµÐº ÐºÐ°Ðº</string>
+    <string name="song_info_tone_picker_body">Ð’Ñ‹Ð±ÐµÑ€Ð¸Ñ‚Ðµ, ÐºÑƒÐ´Ð° PixelPlayer Ð´Ð¾Ð»Ð¶ÐµÐ½ ÑƒÑÑ‚Ð°Ð½Ð¾Ð²Ð¸Ñ‚ÑŒ ÑÑ‚Ð¾Ñ‚ Ð·Ð²ÑƒÐº.</string>
+    <string name="song_info_tone_ringtone_title">Ð Ð¸Ð½Ð³Ñ‚Ð¾Ð½</string>
+    <string name="song_info_tone_ringtone_subtitle">Ð’Ñ…Ð¾Ð´ÑÑ‰Ð¸Ðµ Ð²Ñ‹Ð·Ð¾Ð²Ñ‹</string>
+    <string name="song_info_tone_notification_title">Ð—Ð²ÑƒÐº ÑƒÐ²ÐµÐ´Ð¾Ð¼Ð»ÐµÐ½Ð¸Ñ</string>
+    <string name="song_info_tone_notification_subtitle">Ð¡Ð¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ñ Ð¸ ÑƒÐ²ÐµÐ´Ð¾Ð¼Ð»ÐµÐ½Ð¸Ñ Ð¿Ñ€Ð¸Ð»Ð¾Ð¶ÐµÐ½Ð¸Ð¹</string>
+    <string name="song_info_tone_alarm_title">Ð—Ð²ÑƒÐº Ð±ÑƒÐ´Ð¸Ð»ÑŒÐ½Ð¸ÐºÐ°</string>
+    <string name="song_info_tone_alarm_subtitle">Ð‘ÑƒÐ´Ð¸Ð»ÑŒÐ½Ð¸ÐºÐ¸</string>
+    <string name="song_info_tone_confirm_title">ÐŸÐ¾Ð´Ñ‚Ð²ÐµÑ€Ð´Ð¸Ñ‚ÑŒ ÑÐ¼ÐµÐ½Ñƒ Ð·Ð²ÑƒÐºÐ°</string>
+    <string name="song_info_tone_confirm_body">Ð£ÑÑ‚Ð°Ð½Ð¾Ð²Ð¸Ñ‚ÑŒ Â«%1$sÂ» ÐºÐ°Ðº %2$s?</string>
+    <string name="song_info_tone_confirm_action">Ð£ÑÑ‚Ð°Ð½Ð¾Ð²Ð¸Ñ‚ÑŒ Ð·Ð²ÑƒÐº</string>
+    <string name="song_info_tone_success">Â«%1$sÂ» ÑƒÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½ ÐºÐ°Ðº %2$s</string>
+    <string name="song_info_tone_ringtone_label">Ñ€Ð¸Ð½Ð³Ñ‚Ð¾Ð½</string>
+    <string name="song_info_tone_notification_label">Ð·Ð²ÑƒÐº ÑƒÐ²ÐµÐ´Ð¾Ð¼Ð»ÐµÐ½Ð¸Ñ</string>
+    <string name="song_info_tone_alarm_label">Ð·Ð²ÑƒÐº Ð±ÑƒÐ´Ð¸Ð»ÑŒÐ½Ð¸ÐºÐ°</string>
+    <string name="song_info_ringtone_permission_prompt">Ð’ÐºÐ»ÑŽÑ‡Ð¸Ñ‚Ðµ Ñ€Ð°Ð·Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ Â«Ð˜Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ðµ ÑÐ¸ÑÑ‚ÐµÐ¼Ð½Ñ‹Ñ… Ð½Ð°ÑÑ‚Ñ€Ð¾ÐµÐºÂ», Ð·Ð°Ñ‚ÐµÐ¼ Ð²ÐµÑ€Ð½Ð¸Ñ‚ÐµÑÑŒ Ð² PixelPlayer Ð´Ð»Ñ Ð°Ð²Ñ‚Ð¾Ð¼Ð°Ñ‚Ð¸Ñ‡ÐµÑÐºÐ¾Ð³Ð¾ Ð·Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð¸Ñ.</string>
+    <string name="song_info_ringtone_permission_missing">Ð Ð°Ð·Ñ€ÐµÑˆÐµÐ½Ð¸Ðµ Â«Ð˜Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ðµ ÑÐ¸ÑÑ‚ÐµÐ¼Ð½Ñ‹Ñ… Ð½Ð°ÑÑ‚Ñ€Ð¾ÐµÐºÂ» Ð½Ðµ Ð±Ñ‹Ð»Ð¾ Ð¿Ñ€ÐµÐ´Ð¾ÑÑ‚Ð°Ð²Ð»ÐµÐ½Ð¾.</string>
+    <string name="song_info_ringtone_success">Â«%1$sÂ» ÑƒÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½ ÐºÐ°Ðº Ñ€Ð¸Ð½Ð³Ñ‚Ð¾Ð½</string>
+    <string name="song_info_ringtone_local_only">Ð¢Ð¾Ð»ÑŒÐºÐ¾ Ð»Ð¾ÐºÐ°Ð»ÑŒÐ½Ñ‹Ðµ Ñ‚Ñ€ÐµÐºÐ¸ Ð¼Ð¾Ð¶Ð½Ð¾ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÑŒ ÐºÐ°Ðº Ñ€Ð¸Ð½Ð³Ñ‚Ð¾Ð½Ñ‹.</string>
+    <string name="song_info_ringtone_missing_file">ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð¿Ð¾Ð´Ð³Ð¾Ñ‚Ð¾Ð²Ð¸Ñ‚ÑŒ ÑÑ‚Ð¾Ñ‚ Ð°ÑƒÐ´Ð¸Ð¾Ñ„Ð°Ð¹Ð» Ð´Ð»Ñ Ñ€Ð¸Ð½Ð³Ñ‚Ð¾Ð½Ð°.</string>
+    <string name="song_info_ringtone_failed">ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ ÑƒÑÑ‚Ð°Ð½Ð¾Ð²Ð¸Ñ‚ÑŒ Ñ€Ð¸Ð½Ð³Ñ‚Ð¾Ð½: %1$s</string>
+    <string name="song_info_tab_options">ÐŸÐ°Ñ€Ð°Ð¼ÐµÑ‚Ñ€Ñ‹</string>
+    <string name="song_info_tab_options_badge">ÐŸÐÐ ÐÐœÐ•Ð¢Ð Ð«</string>
+    <string name="song_info_tab_info">Ð˜Ð½Ñ„Ð¾Ñ€Ð¼Ð°Ñ†Ð¸Ñ</string>
+    <string name="song_info_tab_info_badge">Ð˜ÐÐ¤Ðž</string>
+    <string name="song_info_duration_label">Ð”Ð»Ð¸Ñ‚ÐµÐ»ÑŒÐ½Ð¾ÑÑ‚ÑŒ</string>
+    <string name="song_info_genre_label">Ð–Ð°Ð½Ñ€</string>
+    <string name="song_info_album_label">ÐÐ»ÑŒÐ±Ð¾Ð¼</string>
+    <string name="song_info_artist_label">Ð˜ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÑŒ</string>
+    <string name="song_info_audio_format_label">Ð˜Ð½Ñ„Ð¾Ñ€Ð¼Ð°Ñ†Ð¸Ñ Ð¾ Ñ‚Ñ€ÐµÐºÐµ</string>
+    <string name="song_info_cd_provider">Ð˜ÑÑ‚Ð¾Ñ‡Ð½Ð¸Ðº</string>
+    <string name="song_info_cd_file">Ð¤Ð°Ð¹Ð»</string>
+    <string name="multi_selection_songs_count_upper">%1$d Ð¢Ð Ð•ÐšÐžÐ’</string>
+    <string name="multi_selection_songs_selected">Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð¾</string>
+    <string name="multi_selection_playlists_count_upper">%1$d ÐŸÐ›Ð•Ð™Ð›Ð˜Ð¡Ð¢ÐžÐ’</string>
+    <string name="multi_selection_albums_count_upper">%1$d ÐÐ›Ð¬Ð‘ÐžÐœÐžÐ’</string>
+    <string name="multi_selection_albums_selected">Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð¾</string>
+    <string name="multi_selection_albums_selected_limit">Ð›Ð¸Ð¼Ð¸Ñ‚: %1$d Ð°Ð»ÑŒÐ±Ð¾Ð¼Ð¾Ð² Ð·Ð° Ð¾Ð´Ð½Ð¾ Ð²Ñ‹Ð´ÐµÐ»ÐµÐ½Ð¸Ðµ.</string>
+    <string name="multi_selection_albums_queue_hint">ÐžÑ‡ÐµÑ€ÐµÐ´ÑŒ + Ð²Ð¾ÑÐ¿Ñ€Ð¾Ð¸Ð·Ð²ÐµÐ´ÐµÐ½Ð¸Ðµ ÑÐ¾Ñ…Ñ€Ð°Ð½ÑÑŽÑ‚ Ð¿Ð¾Ñ€ÑÐ´Ð¾Ðº Ð²Ð°ÑˆÐµÐ³Ð¾ Ð²Ñ‹Ð±Ð¾Ñ€Ð°.</string>
+    <string name="multi_selection_genres_count_upper">%1$d Ð–ÐÐÐ ÐžÐ’</string>
+    <string name="multi_selection_genres_selected">Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð¾</string>
+    <string name="multi_selection_genres_queue_hint">Ð’Ñ‹Ð¿Ð¾Ð»Ð½ÑÐ¹Ñ‚Ðµ Ð¿Ð°ÐºÐµÑ‚Ð½Ñ‹Ðµ Ð¾Ð¿ÐµÑ€Ð°Ñ†Ð¸Ð¸ Ð´Ð»Ñ Ð²ÑÐµÑ… Ñ‚Ñ€ÐµÐºÐ¾Ð² Ð² ÑÑ‚Ð¸Ñ… Ð¶Ð°Ð½Ñ€Ð°Ñ….</string>
+    <!-- Sort Option Display Names -->
+    <string name="sort_display_default_order">ÐŸÐ¾Ñ€ÑÐ´Ð¾Ðº Ð¿Ð¾ ÑƒÐ¼Ð¾Ð»Ñ‡Ð°Ð½Ð¸ÑŽ</string>
+    <string name="sort_display_title_az">ÐÐ°Ð·Ð²Ð°Ð½Ð¸Ðµ (Ð-Ð¯)</string>
+    <string name="sort_display_title_za">ÐÐ°Ð·Ð²Ð°Ð½Ð¸Ðµ (Ð¯-Ð)</string>
+    <string name="sort_display_artist">Ð˜ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÑŒ</string>
+    <string name="sort_display_artist_za">Ð˜ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÑŒ (Ð¯-Ð)</string>
+    <string name="sort_display_album">ÐÐ»ÑŒÐ±Ð¾Ð¼</string>
+    <string name="sort_display_album_za">ÐÐ»ÑŒÐ±Ð¾Ð¼ (Ð¯-Ð)</string>
+    <string name="sort_display_date_added">Ð”Ð°Ñ‚Ð° Ð´Ð¾Ð±Ð°Ð²Ð»ÐµÐ½Ð¸Ñ</string>
+    <string name="sort_display_date_added_oldest">Ð”Ð°Ñ‚Ð° Ð´Ð¾Ð±Ð°Ð²Ð»ÐµÐ½Ð¸Ñ (ÑÐ½Ð°Ñ‡Ð°Ð»Ð° ÑÑ‚Ð°Ñ€Ñ‹Ðµ)</string>
+    <string name="sort_display_duration">Ð”Ð»Ð¸Ñ‚ÐµÐ»ÑŒÐ½Ð¾ÑÑ‚ÑŒ</string>
+    <string name="sort_display_duration_shortest">Ð”Ð»Ð¸Ñ‚ÐµÐ»ÑŒÐ½Ð¾ÑÑ‚ÑŒ (ÑÐ½Ð°Ñ‡Ð°Ð»Ð° ÐºÐ¾Ñ€Ð¾Ñ‚ÐºÐ¸Ðµ)</string>
+    <string name="sort_display_release_year">Ð“Ð¾Ð´ Ð²Ñ‹Ð¿ÑƒÑÐºÐ°</string>
+    <string name="sort_display_release_year_oldest">Ð“Ð¾Ð´ Ð²Ñ‹Ð¿ÑƒÑÐºÐ° (ÑÐ½Ð°Ñ‡Ð°Ð»Ð° ÑÑ‚Ð°Ñ€Ñ‹Ðµ)</string>
+    <string name="sort_display_fewest_songs">ÐœÐµÐ½ÑŒÑˆÐµ Ð²ÑÐµÐ³Ð¾ Ð¿ÐµÑÐµÐ½</string>
+    <string name="sort_display_most_songs">Ð‘Ð¾Ð»ÑŒÑˆÐµ Ð²ÑÐµÐ³Ð¾ Ð¿ÐµÑÐµÐ½</string>
+    <string name="sort_display_name_az">Ð˜Ð¼Ñ (Ð-Ð¯)</string>
+    <string name="sort_display_name_za">Ð˜Ð¼Ñ (Ð¯-Ð)</string>
+    <string name="sort_display_num_songs_most">ÐšÐ¾Ð»Ð¸Ñ‡ÐµÑÑ‚Ð²Ð¾ Ð¿ÐµÑÐµÐ½ (Ð±Ð¾Ð»ÑŒÑˆÐµ)</string>
+    <string name="sort_display_num_songs_fewest">ÐšÐ¾Ð»Ð¸Ñ‡ÐµÑÑ‚Ð²Ð¾ Ð¿ÐµÑÐµÐ½ (Ð¼ÐµÐ½ÑŒÑˆÐµ)</string>
+    <string name="sort_display_date_created">Ð”Ð°Ñ‚Ð° ÑÐ¾Ð·Ð´Ð°Ð½Ð¸Ñ</string>
+    <string name="sort_display_date_created_oldest">Ð”Ð°Ñ‚Ð° ÑÐ¾Ð·Ð´Ð°Ð½Ð¸Ñ (ÑÐ½Ð°Ñ‡Ð°Ð»Ð° ÑÑ‚Ð°Ñ€Ñ‹Ðµ)</string>
+    <string name="sort_display_date_liked">Ð”Ð°Ñ‚Ð° Ð´Ð¾Ð±Ð°Ð²Ð»ÐµÐ½Ð¸Ñ Ð² Ð¸Ð·Ð±Ñ€Ð°Ð½Ð½Ð¾Ðµ</string>
+    <string name="sort_display_date_liked_oldest">Ð”Ð°Ñ‚Ð° Ð´Ð¾Ð±Ð°Ð²Ð»ÐµÐ½Ð¸Ñ Ð² Ð¸Ð·Ð±Ñ€Ð°Ð½Ð½Ð¾Ðµ (ÑÐ½Ð°Ñ‡Ð°Ð»Ð° ÑÑ‚Ð°Ñ€Ñ‹Ðµ)</string>
+    <string name="sort_display_fewest_subfolders">ÐœÐµÐ½ÑŒÑˆÐµ Ð²ÑÐµÐ³Ð¾ Ð¿Ð¾Ð´Ð¿Ð°Ð¿Ð¾Ðº</string>
+    <string name="sort_display_most_subfolders">Ð‘Ð¾Ð»ÑŒÑˆÐµ Ð²ÑÐµÐ³Ð¾ Ð¿Ð¾Ð´Ð¿Ð°Ð¿Ð¾Ðº</string>
+    <!-- Sort Option Method Labels -->
+    <string name="sort_method_title">ÐÐ°Ð·Ð²Ð°Ð½Ð¸Ðµ</string>
+    <string name="sort_method_artist">Ð˜ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÑŒ</string>
+    <string name="sort_method_album">ÐÐ»ÑŒÐ±Ð¾Ð¼</string>
+    <string name="sort_method_date_added">Ð”Ð°Ñ‚Ð° Ð´Ð¾Ð±Ð°Ð²Ð»ÐµÐ½Ð¸Ñ</string>
+    <string name="sort_method_duration">Ð”Ð»Ð¸Ñ‚ÐµÐ»ÑŒÐ½Ð¾ÑÑ‚ÑŒ</string>
+    <string name="sort_method_release_year">Ð“Ð¾Ð´ Ð²Ñ‹Ð¿ÑƒÑÐºÐ°</string>
+    <string name="sort_method_song_count">ÐšÐ¾Ð»Ð¸Ñ‡ÐµÑÑ‚Ð²Ð¾ Ð¿ÐµÑÐµÐ½</string>
+    <string name="sort_method_name">Ð˜Ð¼Ñ</string>
+    <string name="sort_method_num_songs">ÐšÐ¾Ð»Ð¸Ñ‡ÐµÑÑ‚Ð²Ð¾ Ð¿ÐµÑÐµÐ½</string>
+    <string name="sort_method_date_created">Ð”Ð°Ñ‚Ð° ÑÐ¾Ð·Ð´Ð°Ð½Ð¸Ñ</string>
+    <string name="sort_method_date_liked">Ð”Ð°Ñ‚Ð° Ð´Ð¾Ð±Ð°Ð²Ð»ÐµÐ½Ð¸Ñ Ð² Ð¸Ð·Ð±Ñ€Ð°Ð½Ð½Ð¾Ðµ</string>
+    <string name="sort_method_subfolder_count">ÐšÐ¾Ð»Ð¸Ñ‡ÐµÑÑ‚Ð²Ð¾ Ð¿Ð¾Ð´Ð¿Ð°Ð¿Ð¾Ðº</string>
+    <!-- LibrarySortBottomSheet-->
+    <string name="library_sort_source">Ð˜ÑÑ‚Ð¾Ñ‡Ð½Ð¸Ðº</string>
+    <string name="library_sort_order">ÐŸÐ¾Ñ€ÑÐ´Ð¾Ðº</string>
+    <string name="library_sort_descending">ÐŸÐ¾ ÑƒÐ±Ñ‹Ð²Ð°Ð½Ð¸ÑŽ</string>
+    <string name="library_sort_ascending">ÐŸÐ¾ Ð²Ð¾Ð·Ñ€Ð°ÑÑ‚Ð°Ð½Ð¸ÑŽ</string>
+    <string name="library_sort_original_order">Ð˜ÑÑ…Ð¾Ð´Ð½Ñ‹Ð¹ Ð¿Ð¾Ñ€ÑÐ´Ð¾Ðº</string>
+    <string name="library_sort_tap_ascending">ÐÐ°Ð¶Ð¼Ð¸Ñ‚Ðµ, Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð¿ÐµÑ€ÐµÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Ð½Ð° ÑÐ¾Ñ€Ñ‚Ð¸Ñ€Ð¾Ð²ÐºÑƒ Ð¿Ð¾ Ð²Ð¾Ð·Ñ€Ð°ÑÑ‚Ð°Ð½Ð¸ÑŽ</string>
+    <string name="library_sort_tap_descending">ÐÐ°Ð¶Ð¼Ð¸Ñ‚Ðµ, Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð¿ÐµÑ€ÐµÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Ð½Ð° ÑÐ¾Ñ€Ñ‚Ð¸Ñ€Ð¾Ð²ÐºÑƒ Ð¿Ð¾ ÑƒÐ±Ñ‹Ð²Ð°Ð½Ð¸ÑŽ</string>
+    <string name="library_sort_keeps_order">Ð­Ñ‚Ð¾Ñ‚ ÑÐ¿Ð¾ÑÐ¾Ð± ÑÐ¾Ñ€Ñ‚Ð¸Ñ€Ð¾Ð²ÐºÐ¸ ÑÐ¾Ñ…Ñ€Ð°Ð½ÑÐµÑ‚ Ð¸ÑÑ…Ð¾Ð´Ð½Ñ‹Ð¹ Ð¿Ð¾Ñ€ÑÐ´Ð¾Ðº</string>
+    <string name="library_sort_cd_switch_on">ÐŸÐµÑ€ÐµÐºÐ»ÑŽÑ‡Ð°Ñ‚ÐµÐ»ÑŒ Ð²ÐºÐ»ÑŽÑ‡Ñ‘Ð½</string>
+    <!-- ReorderTabsSheet-->
+    <string name="reorder_tabs_sheet_title">Ð˜Ð·Ð¼ÐµÐ½Ð¸Ñ‚ÑŒ Ð¿Ð¾Ñ€ÑÐ´Ð¾Ðº Ð²ÐºÐ»Ð°Ð´Ð¾Ðº Ð±Ð¸Ð±Ð»Ð¸Ð¾Ñ‚ÐµÐºÐ¸</string>
+    <string name="reorder_tabs_reset_dialog_title">Ð¡Ð±Ñ€Ð¾ÑÐ¸Ñ‚ÑŒ Ð¿Ð¾Ñ€ÑÐ´Ð¾Ðº</string>
+    <string name="reorder_tabs_reset_dialog_body">Ð¡Ð±Ñ€Ð¾ÑÐ¸Ñ‚ÑŒ Ð¿Ð¾Ñ€ÑÐ´Ð¾Ðº Ð²ÐºÐ»Ð°Ð´Ð¾Ðº Ðº Ð·Ð½Ð°Ñ‡ÐµÐ½Ð¸ÑÐ¼ Ð¿Ð¾ ÑƒÐ¼Ð¾Ð»Ñ‡Ð°Ð½Ð¸ÑŽ?</string>
+    <string name="reorder_tabs_reordering">Ð˜Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ðµ Ð¿Ð¾Ñ€ÑÐ´ÐºÐ° Ð²ÐºÐ»Ð°Ð´Ð¾Ðºâ€¦</string>
+    <string name="reorder_tabs_cd_drag_handle">ÐœÐ°Ñ€ÐºÐµÑ€ Ð¿ÐµÑ€ÐµÑ‚Ð°ÑÐºÐ¸Ð²Ð°Ð½Ð¸Ñ</string>
+    <!-- PlayerArtistPickerBottomSheet -->
+    <string name="artist_picker_title">Ð’Ñ‹Ð±ÐµÑ€Ð¸Ñ‚Ðµ Ð¸ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»Ñ</string>
+    <string name="artist_picker_count_single">1 Ð¸ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÑŒ</string>
+    <string name="artist_picker_count_multiple">%1$d Ð¸ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÐµÐ¹</string>
+    <string name="artist_picker_primary_label">ÐžÑÐ½Ð¾Ð²Ð½Ð¾Ð¹ Ð¸ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÑŒ</string>
+    <string name="artist_picker_shortcut_label">Ð¡Ñ‚Ñ€Ð°Ð½Ð¸Ñ†Ð° Ð¸ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»Ñ</string>
+    <!-- EditSongSheet -->
+    <string name="edit_song_toolbar_title">Ð ÐµÐ´Ð°ÐºÑ‚Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ñ‚Ñ€ÐµÐº</string>
+    <string name="edit_song_cd_show_metadata_info">ÐŸÐ¾ÐºÐ°Ð·Ð°Ñ‚ÑŒ Ð¸Ð½Ñ„Ð¾Ñ€Ð¼Ð°Ñ†Ð¸ÑŽ</string>
+    <string name="edit_song_dialog_title">Ð ÐµÐ´Ð°ÐºÑ‚Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ðµ Ð¼ÐµÑ‚Ð°Ð´Ð°Ð½Ð½Ñ‹Ñ… Ñ‚Ñ€ÐµÐºÐ°</string>
+    <string name="edit_song_dialog_body">Ð ÐµÐ´Ð°ÐºÑ‚Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ðµ Ð¼ÐµÑ‚Ð°Ð´Ð°Ð½Ð½Ñ‹Ñ… Ñ‚Ñ€ÐµÐºÐ° Ð¼Ð¾Ð¶ÐµÑ‚ Ð¿Ð¾Ð²Ð»Ð¸ÑÑ‚ÑŒ Ð½Ð° ÐµÐ³Ð¾ Ð¾Ñ‚Ð¾Ð±Ñ€Ð°Ð¶ÐµÐ½Ð¸Ðµ Ð¸ Ð¾Ñ€Ð³Ð°Ð½Ð¸Ð·Ð°Ñ†Ð¸ÑŽ Ð² Ð²Ð°ÑˆÐµÐ¹ Ð±Ð¸Ð±Ð»Ð¸Ð¾Ñ‚ÐµÐºÐµ. Ð˜Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ñ ÑÐ²Ð»ÑÑŽÑ‚ÑÑ Ð¿Ð¾ÑÑ‚Ð¾ÑÐ½Ð½Ñ‹Ð¼Ð¸ Ð¸ Ð¼Ð¾Ð³ÑƒÑ‚ Ð±Ñ‹Ñ‚ÑŒ Ð½ÐµÐ¾Ð±Ñ€Ð°Ñ‚Ð¸Ð¼Ñ‹Ð¼Ð¸.</string>
+    <string name="edit_song_dialog_got_it">ÐŸÐ¾Ð½ÑÑ‚Ð½Ð¾</string>
+    <string name="edit_song_cd_info_icon">Ð˜Ð½Ñ„Ð¾Ñ€Ð¼Ð°Ñ†Ð¸Ñ</string>
+    <string name="edit_song_cover_art_heading">ÐžÐ±Ð»Ð¾Ð¶ÐºÐ°</string>
+    <string name="edit_song_cover_art_hint">Ð’Ñ‹Ð±ÐµÑ€Ð¸Ñ‚Ðµ ÐºÐ²Ð°Ð´Ñ€Ð°Ñ‚Ð½Ð¾Ðµ Ð¸Ð·Ð¾Ð±Ñ€Ð°Ð¶ÐµÐ½Ð¸Ðµ Ð¸ Ð½Ð°ÑÑ‚Ñ€Ð¾Ð¹Ñ‚Ðµ ÐµÐ³Ð¾, Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð¾Ð±Ð»Ð¾Ð¶ÐºÐ° Ð¾Ñ‚Ð»Ð¸Ñ‡Ð½Ð¾ Ð²Ñ‹Ð³Ð»ÑÐ´ÐµÐ»Ð° Ð²Ð¾ Ð²ÑÑ‘Ð¼ Ð¿Ñ€Ð¸Ð»Ð¾Ð¶ÐµÐ½Ð¸Ð¸.</string>
+    <string name="edit_song_action_change_cover">Ð˜Ð·Ð¼ÐµÐ½Ð¸Ñ‚ÑŒ Ð¾Ð±Ð»Ð¾Ð¶ÐºÑƒ</string>
+    <string name="edit_song_action_delete_cover">Ð£Ð´Ð°Ð»Ð¸Ñ‚ÑŒ Ð¾Ð±Ð»Ð¾Ð¶ÐºÑƒ</string>
+    <string name="edit_song_field_title">ÐÐ°Ð·Ð²Ð°Ð½Ð¸Ðµ</string>
+    <string name="edit_song_field_artist">Ð˜ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÑŒ</string>
+    <string name="edit_song_field_album">ÐÐ»ÑŒÐ±Ð¾Ð¼</string>
+    <string name="edit_song_field_album_artist">Ð˜ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÑŒ Ð°Ð»ÑŒÐ±Ð¾Ð¼Ð°</string>
+    <string name="edit_song_field_genre">Ð–Ð°Ð½Ñ€</string>
+    <string name="edit_song_field_composer">ÐšÐ¾Ð¼Ð¿Ð¾Ð·Ð¸Ñ‚Ð¾Ñ€</string>
+    <string name="edit_song_field_track_number">ÐÐ¾Ð¼ÐµÑ€ Ñ‚Ñ€ÐµÐºÐ°</string>
+    <string name="edit_song_field_disc_number">ÐÐ¾Ð¼ÐµÑ€ Ð´Ð¸ÑÐºÐ°</string>
+    <string name="edit_song_field_replaygain_track">ReplayGain Ñ‚Ñ€ÐµÐºÐ° (Ð´Ð‘)</string>
+    <string name="edit_song_field_replaygain_album">ReplayGain Ð°Ð»ÑŒÐ±Ð¾Ð¼Ð° (Ð´Ð‘)</string>
+    <string name="edit_song_replaygain_track_placeholder">-6.50</string>
+    <string name="edit_song_replaygain_album_placeholder">-8.20</string>
+    <string name="edit_song_cd_cover_preview">ÐŸÑ€ÐµÐ´Ð¿Ñ€Ð¾ÑÐ¼Ð¾Ñ‚Ñ€ Ð½Ð¾Ð²Ð¾Ð¹ Ð¾Ð±Ð»Ð¾Ð¶ÐºÐ¸</string>
+    <string name="edit_song_cd_current_cover">Ð¢ÐµÐºÑƒÑ‰Ð°Ñ Ð¾Ð±Ð»Ð¾Ð¶ÐºÐ° Ñ‚Ñ€ÐµÐºÐ°</string>
+    <string name="edit_song_crop_dialog_title">ÐÐ°ÑÑ‚Ñ€Ð¾Ð¹Ñ‚Ðµ Ð¾Ð±Ð»Ð¾Ð¶ÐºÑƒ</string>
+    <string name="edit_song_crop_dialog_hint">Ð˜ÑÐ¿Ð¾Ð»ÑŒÐ·ÑƒÐ¹Ñ‚Ðµ Ð¶ÐµÑÑ‚Ñ‹ Ð¼Ð°ÑÑˆÑ‚Ð°Ð±Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ñ Ð¸ Ð¿ÐµÑ€ÐµÑ‚Ð°ÑÐºÐ¸Ð²Ð°Ð½Ð¸Ñ Ð´Ð»Ñ Ð¸Ð´ÐµÐ°Ð»ÑŒÐ½Ð¾Ð³Ð¾ ÐºÐ°Ð´Ñ€Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ñ.</string>
+    <string name="edit_song_action_apply_cover">ÐŸÑ€Ð¸Ð¼ÐµÐ½Ð¸Ñ‚ÑŒ Ð¾Ð±Ð»Ð¾Ð¶ÐºÑƒ</string>
+    <string name="edit_song_unable_to_load_image">ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð·Ð°Ð³Ñ€ÑƒÐ·Ð¸Ñ‚ÑŒ Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½Ð¾Ðµ Ð¸Ð·Ð¾Ð±Ñ€Ð°Ð¶ÐµÐ½Ð¸Ðµ</string>
+    <string name="edit_song_cd_search_lyrics_lrclib">ÐŸÐ¾Ð¸ÑÐº Ñ‚ÐµÐºÑÑ‚Ð° Ð¿ÐµÑÐ½Ð¸ Ð½Ð° lrclib.net</string>
+    <!-- EditMultipleSongsSheet -->
+    <string name="batch_edit_toolbar_title">Ð ÐµÐ´Ð°ÐºÑ‚Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ %d Ñ‚Ñ€ÐµÐºÐ¾Ð²</string>
+    <string name="batch_edit_info_message">Ð‘ÑƒÐ´ÑƒÑ‚ Ð¾Ð±Ð½Ð¾Ð²Ð»ÐµÐ½Ñ‹ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð¸Ð·Ð¼ÐµÐ½Ñ‘Ð½Ð½Ñ‹Ðµ Ð¿Ð¾Ð»Ñ. ÐžÑÑ‚Ð°Ð²ÑŒÑ‚Ðµ Ð¿Ð¾Ð»Ñ Ð¿ÑƒÑÑ‚Ñ‹Ð¼Ð¸, Ñ‡Ñ‚Ð¾Ð±Ñ‹ ÑÐ¾Ñ…Ñ€Ð°Ð½Ð¸Ñ‚ÑŒ ÑÑƒÑ‰ÐµÑÑ‚Ð²ÑƒÑŽÑ‰Ð¸Ðµ Ð·Ð½Ð°Ñ‡ÐµÐ½Ð¸Ñ.</string>
+    <string name="batch_edit_mixed_values">(Ð¡Ð¼ÐµÑˆÐ°Ð½Ð½Ñ‹Ðµ Ð·Ð½Ð°Ñ‡ÐµÐ½Ð¸Ñ)</string>
+    <string name="batch_edit_optional">(ÐÐµÐ¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ð¾ â€” Ð¾ÑÑ‚Ð°Ð²ÑŒÑ‚Ðµ Ð¿ÑƒÑÑ‚Ñ‹Ð¼, Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð¿Ñ€Ð¾Ð¿ÑƒÑÑ‚Ð¸Ñ‚ÑŒ)</string>
+    <string name="batch_edit_success">Ð£ÑÐ¿ÐµÑˆÐ½Ð¾ Ð¾Ð±Ð½Ð¾Ð²Ð»ÐµÐ½Ð¾ %d Ñ‚Ñ€ÐµÐºÐ¾Ð²</string>
+    <string name="batch_edit_partial_success">ÐžÐ±Ð½Ð¾Ð²Ð»ÐµÐ½Ð¾ %1$d Ð¸Ð· %2$d Ñ‚Ñ€ÐµÐºÐ¾Ð². ÐÐµÐºÐ¾Ñ‚Ð¾Ñ€Ñ‹Ðµ Ñ„Ð°Ð¹Ð»Ñ‹ Ð½Ðµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð¸Ð·Ð¼ÐµÐ½Ð¸Ñ‚ÑŒ.</string>
+    <string name="batch_edit_failed">ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð¾Ð±Ð½Ð¾Ð²Ð¸Ñ‚ÑŒ Ñ‚Ñ€ÐµÐºÐ¸</string>
+    <string name="batch_edit_cover_art_heading">ÐœÐ°ÑÑÐ¾Ð²Ð°Ñ ÑÐ¼ÐµÐ½Ð° Ð¾Ð±Ð»Ð¾Ð¶ÐºÐ¸</string>
+    <string name="batch_edit_cover_art_hint">Ð­Ñ‚Ð¾ Ð·Ð°Ð¼ÐµÐ½Ð¸Ñ‚ Ð¾Ð±Ð»Ð¾Ð¶ÐºÑƒ Ð´Ð»Ñ Ð²ÑÐµÑ… %d Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½Ñ‹Ñ… Ñ‚Ñ€ÐµÐºÐ¾Ð²</string>
+    <string name="batch_edit_set_cover_art">Ð£ÑÑ‚Ð°Ð½Ð¾Ð²Ð¸Ñ‚ÑŒ Ð¾Ð±Ð»Ð¾Ð¶ÐºÑƒ Ð´Ð»Ñ Ð²ÑÐµÑ…</string>
+    <string name="batch_edit_remove_all_art">Ð£Ð´Ð°Ð»Ð¸Ñ‚ÑŒ Ð²ÑÐµ Ð¾Ð±Ð»Ð¾Ð¶ÐºÐ¸</string>
+    <string name="batch_edit_multiple_covers">(ÐÐµÑÐºÐ¾Ð»ÑŒÐºÐ¾ Ñ€Ð°Ð·Ð½Ñ‹Ñ… Ð¾Ð±Ð»Ð¾Ð¶ÐµÐº)</string>
+    <!-- Playlist dismissed message -->
+    <string name="playlist_dismissed_message">ÐŸÐ»ÐµÐ¹Ð»Ð¸ÑÑ‚ ÑÐºÑ€Ñ‹Ñ‚</string>
+    <!-- PlaylistCreationDialogs -->
+    <string name="playlist_creation_create_playlist_title">Ð¡Ð¾Ð·Ð´Ð°Ñ‚ÑŒ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚</string>
+    <string name="playlist_creation_create_playlist_subtitle">Ð’Ñ‹Ð±ÐµÑ€Ð¸Ñ‚Ðµ ÑÐ¿Ð¾ÑÐ¾Ð± ÑÐ¾Ð·Ð´Ð°Ð½Ð¸Ñ.</string>
+    <string name="playlist_creation_mode_manual_title">Ð’Ñ€ÑƒÑ‡Ð½ÑƒÑŽ</string>
+    <string name="playlist_creation_mode_manual_subtitle">Ð¡Ð¾Ð·Ð´Ð°Ð¹Ñ‚Ðµ Ð¾Ð±Ð»Ð¾Ð¶ÐºÑƒ, Ð·Ð½Ð°Ñ‡Ð¾Ðº, Ñ„Ð¾Ñ€Ð¼Ñƒ Ð¸ Ð²Ñ‹Ð±ÐµÑ€Ð¸Ñ‚Ðµ Ð¿ÐµÑÐ½Ð¸ ÑÐ°Ð¼Ð¾ÑÑ‚Ð¾ÑÑ‚ÐµÐ»ÑŒÐ½Ð¾.</string>
+    <string name="playlist_creation_mode_ai_title">Ð¡ Ð¿Ð¾Ð¼Ð¾Ñ‰ÑŒÑŽ Ð˜Ð˜</string>
+    <string name="playlist_creation_mode_ai_subtitle_enabled">Ð¡Ð¾Ð·Ð´Ð°Ð¹Ñ‚Ðµ Ñ‚Ñ‰Ð°Ñ‚ÐµÐ»ÑŒÐ½Ð¾ Ð¿Ð¾Ð´Ð¾Ð±Ñ€Ð°Ð½Ð½Ñ‹Ð¹ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚ Ñ Ñ€Ð°ÑÑˆÐ¸Ñ€ÐµÐ½Ð½Ñ‹Ð¼Ð¸ Ð½Ð°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ°Ð¼Ð¸.</string>
+    <string name="playlist_creation_mode_ai_subtitle_disabled">Ð¢Ñ€ÐµÐ±ÑƒÐµÑ‚ÑÑ ÐºÐ»ÑŽÑ‡ API Gemini, Ð½Ð°ÑÑ‚Ñ€Ð¾ÐµÐ½Ð½Ñ‹Ð¹ Ð² Ð¿Ð°Ñ€Ð°Ð¼ÐµÑ‚Ñ€Ð°Ñ….</string>
+    <string name="playlist_creation_setup_api_key">ÐÐ°ÑÑ‚Ñ€Ð¾Ð¸Ñ‚ÑŒ ÐºÐ»ÑŽÑ‡ API</string>
+    <!-- AI playlist lab -->
+    <string name="playlist_creation_ai_lab_title">Ð›Ð°Ð±Ð¾Ñ€Ð°Ñ‚Ð¾Ñ€Ð¸Ñ Ð˜Ð˜-Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Ð¾Ð²</string>
+    <string name="playlist_creation_ai_reset">Ð¡Ð±Ñ€Ð¾ÑÐ¸Ñ‚ÑŒ</string>
+    <string name="playlist_creation_ai_generating">Ð¡Ð¾Ð·Ð´Ð°Ð½Ð¸Ðµâ€¦</string>
+    <string name="playlist_creation_ai_generate">Ð¡Ð¾Ð·Ð´Ð°Ñ‚ÑŒ</string>
+    <string name="playlist_creation_ai_section_intent">Ð—Ð°Ð¼Ñ‹ÑÐµÐ»</string>
+    <string name="playlist_creation_ai_name_optional">ÐÐ°Ð·Ð²Ð°Ð½Ð¸Ðµ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Ð° (Ð½ÐµÐ¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ð¾)</string>
+    <string name="playlist_creation_ai_feel_label">ÐšÐ°ÐºÐ¸Ð¼ Ð´Ð¾Ð»Ð¶Ð½Ð¾ Ð±Ñ‹Ñ‚ÑŒ Ð½Ð°ÑÑ‚Ñ€Ð¾ÐµÐ½Ð¸Ðµ ÑÑ‚Ð¾Ð³Ð¾ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Ð°?</string>
+    <string name="playlist_creation_ai_feel_placeholder">ÐÐ°Ð¿Ñ€Ð¸Ð¼ÐµÑ€: Ð·Ð°ÐºÐ°Ñ‚Ð½Ð°Ñ Ð¿Ð¾ÐµÐ·Ð´ÐºÐ° Ñ Ñ‚Ñ‘Ð¿Ð»Ñ‹Ð¼Ð¸ ÑÐ¸Ð½Ñ‚ÐµÐ·Ð°Ñ‚Ð¾Ñ€Ð°Ð¼Ð¸</string>
+    <string name="playlist_creation_ai_section_direction">ÐÐ°Ð¿Ñ€Ð°Ð²Ð»ÐµÐ½Ð¸Ðµ</string>
+    <string name="playlist_creation_ai_mood_label">ÐÐ°ÑÑ‚Ñ€Ð¾ÐµÐ½Ð¸Ðµ</string>
+    <string name="playlist_creation_ai_activity_label">ÐÐºÑ‚Ð¸Ð²Ð½Ð¾ÑÑ‚ÑŒ</string>
+    <string name="playlist_creation_ai_era_label">Ð­Ð¿Ð¾Ñ…Ð°</string>
+    <string name="playlist_creation_ai_section_curation">ÐÐ»Ð³Ð¾Ñ€Ð¸Ñ‚Ð¼ Ð¿Ð¾Ð´Ð±Ð¾Ñ€Ð°</string>
+    <string name="playlist_creation_ai_energy_label">Ð­Ð½ÐµÑ€Ð³Ð¸Ñ</string>
+    <string name="playlist_creation_ai_energy_desc">Ð£Ð¿Ñ€Ð°Ð²Ð»ÑÐµÑ‚ Ð¸Ð½Ñ‚ÐµÐ½ÑÐ¸Ð²Ð½Ð¾ÑÑ‚ÑŒÑŽ Ð¸ Ñ‚ÐµÐ¼Ð¿Ð¾Ð¼ Ð¿ÐµÑÐµÐ½. 1 = ÑÐ¿Ð¾ÐºÐ¾Ð¹Ð½Ð¾/Ð¼ÐµÐ´Ð»ÐµÐ½Ð½Ð¾, 5 = ÑÐ½ÐµÑ€Ð³Ð¸Ñ‡Ð½Ð¾/Ð±Ñ‹ÑÑ‚Ñ€Ð¾.</string>
+    <string name="playlist_creation_ai_discovery_label">ÐžÑ‚ÐºÑ€Ñ‹Ñ‚Ð¸Ñ</string>
+    <string name="playlist_creation_ai_discovery_desc">ÐžÐ¿Ñ€ÐµÐ´ÐµÐ»ÑÐµÑ‚ ÑÑ‚ÐµÐ¿ÐµÐ½ÑŒ Ð·Ð½Ð°ÐºÐ¾Ð¼Ð¾ÑÑ‚Ð¸ Ð¿Ð¾Ð´Ð±Ð¾Ñ€ÐºÐ¸. 1 = Ð²Ð°ÑˆÐ¸ ÑÐ°Ð¼Ñ‹Ðµ Ð»ÑŽÐ±Ð¸Ð¼Ñ‹Ðµ Ð¸ Ñ‡Ð°ÑÑ‚Ð¾ Ð¿Ñ€Ð¾ÑÐ»ÑƒÑˆÐ¸Ð²Ð°ÐµÐ¼Ñ‹Ðµ Ñ‚Ñ€ÐµÐºÐ¸, 5 = Ñ€ÐµÐ´ÐºÐ¾ Ð²Ð¾ÑÐ¿Ñ€Ð¾Ð¸Ð·Ð²Ð¾Ð´Ð¸Ð¼Ñ‹Ðµ ÑÐºÑ€Ñ‹Ñ‚Ñ‹Ðµ Ð¶ÐµÐ¼Ñ‡ÑƒÐ¶Ð¸Ð½Ñ‹.</string>
+    <string name="playlist_creation_ai_min_songs">ÐœÐ¸Ð½. Ð¿ÐµÑÐµÐ½</string>
+    <string name="playlist_creation_ai_max_songs">ÐœÐ°ÐºÑ. Ð¿ÐµÑÐµÐ½</string>
+    <string name="playlist_creation_ai_section_filters">Ð¤Ð¸Ð»ÑŒÑ‚Ñ€Ñ‹</string>
+    <string name="playlist_creation_ai_prioritize_genres">ÐŸÑ€ÐµÐ´Ð¿Ð¾Ñ‡Ð¸Ñ‚Ð°ÐµÐ¼Ñ‹Ðµ Ð¶Ð°Ð½Ñ€Ñ‹ (Ð½ÐµÐ¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ð¾)</string>
+    <string name="playlist_creation_ai_prioritize_genres_placeholder">Ð½Ð°Ð¿Ñ€Ð¸Ð¼ÐµÑ€: synthwave, indie pop</string>
+    <string name="playlist_creation_ai_avoid_genres">Ð˜ÑÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Ð¶Ð°Ð½Ñ€Ñ‹ (Ð½ÐµÐ¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ð¾)</string>
+    <string name="playlist_creation_ai_avoid_genres_placeholder">Ð½Ð°Ð¿Ñ€Ð¸Ð¼ÐµÑ€: metal, hard trap</string>
+    <string name="playlist_creation_ai_preferred_language">ÐŸÑ€ÐµÐ´Ð¿Ð¾Ñ‡Ð¸Ñ‚Ð°ÐµÐ¼Ñ‹Ð¹ ÑÐ·Ñ‹Ðº (Ð½ÐµÐ¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ð¾)</string>
+    <string name="playlist_creation_ai_preferred_language_placeholder">Ð½Ð°Ð¿Ñ€Ð¸Ð¼ÐµÑ€: Ð°Ð½Ð³Ð»Ð¸Ð¹ÑÐºÐ¸Ð¹, Ð¸ÑÐ¿Ð°Ð½ÑÐºÐ¸Ð¹, Ð¸Ð½ÑÑ‚Ñ€ÑƒÐ¼ÐµÐ½Ñ‚Ð°Ð»ÑŒÐ½Ð°Ñ Ð¼ÑƒÐ·Ñ‹ÐºÐ°</string>
+    <string name="playlist_creation_ai_prioritize_favorites">ÐžÑ‚Ð´Ð°Ð²Ð°Ñ‚ÑŒ Ð¿Ñ€Ð¸Ð¾Ñ€Ð¸Ñ‚ÐµÑ‚ Ð¸Ð·Ð±Ñ€Ð°Ð½Ð½Ð¾Ð¼Ñƒ</string>
+    <string name="playlist_creation_ai_avoid_explicit">Ð˜Ð·Ð±ÐµÐ³Ð°Ñ‚ÑŒ Ð½ÐµÑ†ÐµÐ½Ð·ÑƒÑ€Ð½Ð¾Ð³Ð¾ ÐºÐ¾Ð½Ñ‚ÐµÐ½Ñ‚Ð°</string>
+    <string name="playlist_creation_ai_section_prompt_preview">ÐŸÑ€ÐµÐ´Ð¿Ñ€Ð¾ÑÐ¼Ð¾Ñ‚Ñ€ Ð·Ð°Ð¿Ñ€Ð¾ÑÐ°</string>
+    <string name="playlist_creation_ai_prompt_preview_empty">Ð’Ð°Ñˆ Ð¸Ñ‚Ð¾Ð³Ð¾Ð²Ñ‹Ð¹ Ð·Ð°Ð¿Ñ€Ð¾Ñ Ð¿Ð¾ÑÐ²Ð¸Ñ‚ÑÑ Ð·Ð´ÐµÑÑŒ Ð¿Ð¾ÑÐ»Ðµ Ð´Ð¾Ð±Ð°Ð²Ð»ÐµÐ½Ð¸Ñ Ð¿Ñ€ÐµÐ´Ð¿Ð¾Ñ‡Ñ‚ÐµÐ½Ð¸Ð¹.</string>
+    <string name="playlist_creation_ai_hero_title">Ð¢Ð¾Ñ‡Ð½Ð°Ñ Ð½Ð°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ° Ð¿Ð¾Ð´Ð±Ð¾Ñ€ÐºÐ¸</string>
+    <string name="playlist_creation_ai_hero_subtitle">Ð—Ð°Ð´Ð°Ð¹Ñ‚Ðµ Ð½Ð°ÑÑ‚Ñ€Ð¾ÐµÐ½Ð¸Ðµ, Ð°ÐºÑ‚Ð¸Ð²Ð½Ð¾ÑÑ‚ÑŒ, Ð¾Ð³Ñ€Ð°Ð½Ð¸Ñ‡ÐµÐ½Ð¸Ñ Ð¸ Ð³Ð»ÑƒÐ±Ð¸Ð½Ñƒ Ð¿Ð¾Ð´Ð±Ð¾Ñ€Ð°.</string>
+    <string name="playlist_creation_ai_hero_library_note">Ð˜Ð˜ Ð±ÑƒÐ´ÐµÑ‚ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÑŒ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð¿ÐµÑÐ½Ð¸ Ð¸Ð· Ð²Ð°ÑˆÐµÐ¹ Ð»Ð¾ÐºÐ°Ð»ÑŒÐ½Ð¾Ð¹ Ð¼ÐµÐ´Ð¸Ð°Ñ‚ÐµÐºÐ¸.</string>
+    <string name="playlist_creation_ai_error_add_instruction">Ð”Ð¾Ð±Ð°Ð²ÑŒÑ‚Ðµ Ñ…Ð¾Ñ‚Ñ Ð±Ñ‹ Ð¾Ð´Ð½Ñƒ Ð¸Ð½ÑÑ‚Ñ€ÑƒÐºÑ†Ð¸ÑŽ Ð´Ð»Ñ Ð˜Ð˜.</string>
+    <string name="playlist_creation_ai_error_song_range">Ð£ÐºÐ°Ð¶Ð¸Ñ‚Ðµ Ð´Ð¾Ð¿ÑƒÑÑ‚Ð¸Ð¼Ñ‹Ð¹ Ð´Ð¸Ð°Ð¿Ð°Ð·Ð¾Ð½ ÐºÐ¾Ð»Ð¸Ñ‡ÐµÑÑ‚Ð²Ð° Ð¿ÐµÑÐµÐ½.</string>
+    <string name="playlist_creation_ai_level_out_of_five">%1$d/5</string>
+    <string name="playlist_creation_ai_custom_chip">Ð”Ñ€ÑƒÐ³Ð¾Ðµâ€¦</string>
+    <string name="playlist_creation_ai_enter_custom_title">Ð’Ð²ÐµÐ´Ð¸Ñ‚Ðµ ÑÐ²Ð¾Ñ‘ Ð·Ð½Ð°Ñ‡ÐµÐ½Ð¸Ðµ</string>
+    <string name="playlist_creation_ai_enter_custom_label">Ð’Ð²ÐµÐ´Ð¸Ñ‚Ðµ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»ÑŒÑÐºÐ¾Ðµ Ð·Ð½Ð°Ñ‡ÐµÐ½Ð¸Ðµ</string>
+    <!-- AI prompt -->
+    <string name="playlist_creation_ai_era_any">Ð›ÑŽÐ±Ð°Ñ ÑÐ¿Ð¾Ñ…Ð°</string>
+    <string name="playlist_creation_ai_prompt_core_request">ÐžÑÐ½Ð¾Ð²Ð½Ð¾Ð¹ Ð·Ð°Ð¿Ñ€Ð¾Ñ: %1$s.</string>
+    <string name="playlist_creation_ai_prompt_mood">Ð–ÐµÐ»Ð°ÐµÐ¼Ð¾Ðµ Ð½Ð°ÑÑ‚Ñ€Ð¾ÐµÐ½Ð¸Ðµ: %1$s.</string>
+    <string name="playlist_creation_ai_prompt_activity">ÐšÐ¾Ð½Ñ‚ÐµÐºÑÑ‚ Ð°ÐºÑ‚Ð¸Ð²Ð½Ð¾ÑÑ‚Ð¸: %1$s.</string>
+    <string name="playlist_creation_ai_prompt_era">Ð¤Ð¾ÐºÑƒÑ Ð½Ð° ÑÐ¿Ð¾Ñ…Ðµ: %1$s.</string>
+    <string name="playlist_creation_ai_prompt_prioritize_genres">ÐŸÑ€ÐµÐ´Ð¿Ð¾Ñ‡Ð¸Ñ‚Ð°ÐµÐ¼Ñ‹Ðµ Ð¶Ð°Ð½Ñ€Ñ‹: %1$s.</string>
+    <string name="playlist_creation_ai_prompt_avoid_genres">Ð˜Ð·Ð±ÐµÐ³Ð°Ñ‚ÑŒ Ð¶Ð°Ð½Ñ€Ð¾Ð²: %1$s.</string>
+    <string name="playlist_creation_ai_prompt_preferred_language">ÐŸÑ€ÐµÐ´Ð¿Ð¾Ñ‡Ð¸Ñ‚Ð°ÐµÐ¼Ñ‹Ð¹ ÑÐ·Ñ‹Ðº: %1$s.</string>
+    <string name="playlist_creation_ai_prompt_energy">Ð¦ÐµÐ»ÐµÐ²Ð¾Ð¹ ÑƒÑ€Ð¾Ð²ÐµÐ½ÑŒ ÑÐ½ÐµÑ€Ð³Ð¸Ð¸: %1$d/5.</string>
+    <string name="playlist_creation_ai_prompt_discovery">Ð£Ñ€Ð¾Ð²ÐµÐ½ÑŒ Ð½Ð¾Ð²Ð¸Ð·Ð½Ñ‹: %1$d/5, Ð³Ð´Ðµ 1 â€” Ð·Ð½Ð°ÐºÐ¾Ð¼Ñ‹Ðµ Ñ‚Ñ€ÐµÐºÐ¸, Ð° 5 â€” Ñ€ÐµÐ´ÐºÐ¸Ðµ Ð½Ð°Ñ…Ð¾Ð´ÐºÐ¸.</string>
+    <string name="playlist_creation_ai_prompt_prioritize_favorites">ÐŸÐ¾ Ð²Ð¾Ð·Ð¼Ð¾Ð¶Ð½Ð¾ÑÑ‚Ð¸ Ð¾Ñ‚Ð´Ð°Ð²Ð°Ñ‚ÑŒ Ð¿Ñ€Ð¸Ð¾Ñ€Ð¸Ñ‚ÐµÑ‚ Ð»ÑŽÐ±Ð¸Ð¼Ñ‹Ð¼ Ñ‚Ñ€ÐµÐºÐ°Ð¼ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»Ñ.</string>
+    <string name="playlist_creation_ai_prompt_avoid_explicit">ÐŸÐ¾ Ð²Ð¾Ð·Ð¼Ð¾Ð¶Ð½Ð¾ÑÑ‚Ð¸ Ð¸Ð·Ð±ÐµÐ³Ð°Ñ‚ÑŒ Ñ‚Ñ€ÐµÐºÐ¾Ð² Ñ Ð½ÐµÐ½Ð¾Ñ€Ð¼Ð°Ñ‚Ð¸Ð²Ð½Ð¾Ð¹ Ð»ÐµÐºÑÐ¸ÐºÐ¾Ð¹.</string>
+    <string name="playlist_creation_ai_prompt_smooth_transitions">ÐžÐ±ÐµÑÐ¿ÐµÑ‡Ð¸Ñ‚ÑŒ Ð¿Ð»Ð°Ð²Ð½Ñ‹Ðµ Ð¿ÐµÑ€ÐµÑ…Ð¾Ð´Ñ‹ Ð¸ Ð¸Ð·Ð±ÐµÐ³Ð°Ñ‚ÑŒ Ñ‡Ð°ÑÑ‚Ð¾Ð³Ð¾ Ð¿Ð¾Ð²Ñ‚Ð¾Ñ€ÐµÐ½Ð¸Ñ Ð¾Ð´Ð½Ð¾Ð³Ð¾ Ð¸ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»Ñ Ð¿Ð¾Ð´Ñ€ÑÐ´.</string>
+    <string-array name="playlist_creation_ai_mood_options">
+        <item>Ð¡Ð¿Ð¾ÐºÐ¾Ð¹Ð½Ð¾Ðµ</item>
+        <item>Ð­Ð½ÐµÑ€Ð³Ð¸Ñ‡Ð½Ð¾Ðµ</item>
+        <item>Ð Ð°Ð´Ð¾ÑÑ‚Ð½Ð¾Ðµ</item>
+        <item>ÐœÑ€Ð°Ñ‡Ð½Ð¾Ðµ</item>
+        <item>Ð Ð¾Ð¼Ð°Ð½Ñ‚Ð¸Ñ‡Ð½Ð¾Ðµ</item>
+        <item>ÐœÐµÐ»Ð°Ð½Ñ…Ð¾Ð»Ð¸Ñ‡Ð½Ð¾Ðµ</item>
+    </string-array>
+    <string-array name="playlist_creation_ai_activity_options">
+        <item>Ð¢Ñ€ÐµÐ½Ð¸Ñ€Ð¾Ð²ÐºÐ°</item>
+        <item>ÐšÐ¾Ð½Ñ†ÐµÐ½Ñ‚Ñ€Ð°Ñ†Ð¸Ñ</item>
+        <item>ÐŸÐ¾ÐµÐ·Ð´ÐºÐ°</item>
+        <item>Ð’ÐµÑ‡ÐµÑ€Ð¸Ð½ÐºÐ°</item>
+        <item>Ð£Ñ‡Ñ‘Ð±Ð°</item>
+        <item>ÐŸÐ¾Ð·Ð´Ð½Ð¸Ð¹ Ð²ÐµÑ‡ÐµÑ€</item>
+    </string-array>
+    <string-array name="playlist_creation_ai_era_options">
+        <item>@string/playlist_creation_ai_era_any</item>
+        <item>70-Ðµ</item>
+        <item>80-Ðµ</item>
+        <item>90-Ðµ</item>
+        <item>2000-Ðµ</item>
+        <item>2010-Ðµ</item>
+        <item>2020-Ðµ</item>
+    </string-array>
+    <!-- PlaylistContainer -->
+    <string name="playlist_container_no_playlist_created">ÐŸÐ»ÐµÐ¹Ð»Ð¸ÑÑ‚Ñ‹ ÐµÑ‰Ñ‘ Ð½Ðµ ÑÐ¾Ð·Ð´Ð°Ð½Ñ‹.</string>
+    <string name="playlist_container_new_playlist_hint">ÐÐ°Ð¶Ð¼Ð¸Ñ‚Ðµ ÐºÐ½Ð¾Ð¿ÐºÑƒ Â«ÐÐ¾Ð²Ñ‹Ð¹ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Â», Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð½Ð°Ñ‡Ð°Ñ‚ÑŒ.</string>
+    <string name="playlist_container_create_playlist_title">ÐÐ¾Ð²Ñ‹Ð¹ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚</string>
+    <string name="playlist_container_create_playlist_name_label">ÐÐ°Ð·Ð²Ð°Ð½Ð¸Ðµ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Ð°</string>
+    <string name="playlist_container_create_playlist_name_placeholder">ÐœÐ¾Ð¹ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚</string>
+    <!-- PlaylistBottomSheet -->
+    <string name="playlist_sheet_add_songs_title">Ð”Ð¾Ð±Ð°Ð²Ð¸Ñ‚ÑŒ %1$d Ñ‚Ñ€ÐµÐºÐ¾Ð² Ð²â€¦</string>
+    <string name="playlist_sheet_select_playlists">Ð’Ñ‹Ð±ÐµÑ€Ð¸Ñ‚Ðµ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Ñ‹</string>
+    <string name="playlist_sheet_search_playlists_hint">ÐŸÐ¾Ð¸ÑÐº Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Ð¾Ð²â€¦</string>
+    <string name="playlist_sheet_song_added_to_playlists">Ð¢Ñ€ÐµÐºÐ¸ Ð´Ð¾Ð±Ð°Ð²Ð»ÐµÐ½Ñ‹ Ð² Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Ñ‹</string>
+    <string name="playlist_sheet_created_and_songs_added">ÐŸÐ»ÐµÐ¹Ð»Ð¸ÑÑ‚ ÑÐ¾Ð·Ð´Ð°Ð½, Ñ‚Ñ€ÐµÐºÐ¸ Ð´Ð¾Ð±Ð°Ð²Ð»ÐµÐ½Ñ‹</string>
+    <string name="playlist_sheet_internal_storage">Ð’Ð½ÑƒÑ‚Ñ€ÐµÐ½Ð½ÐµÐµ Ñ…Ñ€Ð°Ð½Ð¸Ð»Ð¸Ñ‰Ðµ</string>
+    <!-- SongPickerBottomSheet -->
+    <string name="song_picker_title">Ð”Ð¾Ð±Ð°Ð²Ð¸Ñ‚ÑŒ Ñ‚Ñ€ÐµÐºÐ¸</string>
+    <string name="song_picker_cd_confirm_add_songs">Ð”Ð¾Ð±Ð°Ð²Ð¸Ñ‚ÑŒ Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½Ñ‹Ðµ Ñ‚Ñ€ÐµÐºÐ¸</string>
+    <string name="song_picker_action_add">Ð”Ð¾Ð±Ð°Ð²Ð¸Ñ‚ÑŒ</string>
+    <string name="song_picker_search_label">ÐŸÐ¾Ð¸ÑÐº Ð¸Ð»Ð¸ Ñ„Ð¸Ð»ÑŒÑ‚Ñ€Ð°Ñ†Ð¸Ñ Ñ‚Ñ€ÐµÐºÐ¾Ð²â€¦</string>
+    <string name="song_picker_filter_favorites">Ð›ÑŽÐ±Ð¸Ð¼Ñ‹Ðµ</string>
+    <string name="song_picker_error_load_failed">ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð·Ð°Ð³Ñ€ÑƒÐ·Ð¸Ñ‚ÑŒ Ñ‚Ñ€ÐµÐºÐ¸</string>
+    <string name="song_picker_load_more">Ð—Ð°Ð³Ñ€ÑƒÐ·Ð¸Ñ‚ÑŒ ÐµÑ‰Ñ‘</string>
+    <!-- Merge Playlists Dialog -->
+    <string name="merge_playlists_dialog_title">ÐžÐ±ÑŠÐµÐ´Ð¸Ð½Ð¸Ñ‚ÑŒ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Ñ‹</string>
+    <string name="merge_playlists_dialog_prompt">Ð’Ð²ÐµÐ´Ð¸Ñ‚Ðµ Ð½Ð°Ð·Ð²Ð°Ð½Ð¸Ðµ Ð´Ð»Ñ Ð¾Ð±ÑŠÐµÐ´Ð¸Ð½Ñ‘Ð½Ð½Ð¾Ð³Ð¾ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Ð°:</string>
+    <string name="merge_playlists_dialog_placeholder">ÐžÐ±ÑŠÐµÐ´Ð¸Ð½Ñ‘Ð½Ð½Ñ‹Ð¹ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚</string>
+    <string name="merge_playlists_dialog_body">Ð­Ñ‚Ð¾ Ð¾Ð±ÑŠÐµÐ´Ð¸Ð½Ð¸Ñ‚ %1$d Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½Ñ‹Ñ… Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Ð¾Ð² Ð² Ð¾Ð´Ð¸Ð½.</string>
+    <!-- PlayerViewModel -->
+    <string name="player_view_model_no_valid_songs">ÐÐµ Ð½Ð°Ð¹Ð´ÐµÐ½Ð¾ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð½Ñ‹Ñ… Ð´Ð»Ñ Ð²Ð¾ÑÐ¿Ñ€Ð¾Ð¸Ð·Ð²ÐµÐ´ÐµÐ½Ð¸Ñ Ñ‚Ñ€ÐµÐºÐ¾Ð²</string>
+    <string name="player_view_model_song_not_found_in_list">Ð¢Ñ€ÐµÐº Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½ Ð² Ñ‚ÐµÐºÑƒÑ‰ÐµÐ¼ ÑÐ¿Ð¸ÑÐºÐµ</string>
+    <string name="player_view_model_could_not_locate_song">ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð½Ð°Ð¹Ñ‚Ð¸ Ñ‚Ñ€ÐµÐº</string>
+    <string name="player_view_model_no_songs_in_library_toast">Ð’ Ð¼ÐµÐ´Ð¸Ð°Ñ‚ÐµÐºÐµ Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½Ð¾ Ñ‚Ñ€ÐµÐºÐ¾Ð²</string>
+    <string name="player_view_model_playback_stopped_eot">Ð’Ð¾ÑÐ¿Ñ€Ð¾Ð¸Ð·Ð²ÐµÐ´ÐµÐ½Ð¸Ðµ Ð¾ÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½Ð¾: %1$s Ð·Ð°Ð²ÐµÑ€ÑˆÑ‘Ð½ (ÐºÐ¾Ð½ÐµÑ† Ñ‚Ñ€ÐµÐºÐ°).</string>
+    <string name="player_view_model_default_track_title">Ð¢Ñ€ÐµÐº</string>
+    <string name="player_view_model_no_songs_to_shuffle">ÐÐµÑ‚ Ñ‚Ñ€ÐµÐºÐ¾Ð² Ð´Ð»Ñ Ð¿ÐµÑ€ÐµÐ¼ÐµÑˆÐ¸Ð²Ð°Ð½Ð¸Ñ.</string>
+    <string name="player_view_model_queue_name_selected_albums">Ð’Ñ‹Ð±Ñ€Ð°Ð½Ð½Ñ‹Ðµ Ð°Ð»ÑŒÐ±Ð¾Ð¼Ñ‹</string>
+    <string name="player_view_model_no_playable_songs_in_albums">Ð’ Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½Ñ‹Ñ… Ð°Ð»ÑŒÐ±Ð¾Ð¼Ð°Ñ… Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½Ð¾ Ð²Ð¾ÑÐ¿Ñ€Ð¾Ð¸Ð·Ð²Ð¾Ð´Ð¸Ð¼Ñ‹Ñ… Ñ‚Ñ€ÐµÐºÐ¾Ð²</string>
+    <string name="player_view_model_no_playable_songs_in_genres">Ð’ Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½Ñ‹Ñ… Ð¶Ð°Ð½Ñ€Ð°Ñ… Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½Ð¾ Ð²Ð¾ÑÐ¿Ñ€Ð¾Ð¸Ð·Ð²Ð¾Ð´Ð¸Ð¼Ñ‹Ñ… Ñ‚Ñ€ÐµÐºÐ¾Ð²</string>
+    <string name="player_view_model_only_first_n_albums_queued">Ð’ Ð¾Ñ‡ÐµÑ€ÐµÐ´ÑŒ Ð´Ð¾Ð±Ð°Ð²Ð»ÐµÐ½Ñ‹ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð¿ÐµÑ€Ð²Ñ‹Ðµ %1$d Ð°Ð»ÑŒÐ±Ð¾Ð¼Ð¾Ð²</string>
+    <string name="player_view_model_albums_queued_format">Ð”Ð¾Ð±Ð°Ð²Ð»ÐµÐ½Ð¾ Ð² Ð¾Ñ‡ÐµÑ€ÐµÐ´ÑŒ: %1$d Ð°Ð»ÑŒÐ±Ð¾Ð¼Ð¾Ð² (%2$d Ñ‚Ñ€ÐµÐºÐ¾Ð²)</string>
+    <string name="player_view_model_could_not_queue_albums">ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð´Ð¾Ð±Ð°Ð²Ð¸Ñ‚ÑŒ Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½Ñ‹Ðµ Ð°Ð»ÑŒÐ±Ð¾Ð¼Ñ‹ Ð² Ð¾Ñ‡ÐµÑ€ÐµÐ´ÑŒ</string>
+    <string name="player_view_model_all_songs_already_in_favorites">Ð’ÑÐµ Ñ‚Ñ€ÐµÐºÐ¸ ÑƒÐ¶Ðµ Ð½Ð°Ñ…Ð¾Ð´ÑÑ‚ÑÑ Ð² Ð¸Ð·Ð±Ñ€Ð°Ð½Ð½Ð¾Ð¼</string>
+    <string name="player_view_model_no_songs_were_in_favorites">ÐÐ¸ Ð¾Ð´Ð¸Ð½ Ñ‚Ñ€ÐµÐº Ð½Ðµ Ð±Ñ‹Ð» Ð² Ð¸Ð·Ð±Ñ€Ð°Ð½Ð½Ð¾Ð¼</string>
+    <string name="player_view_model_creating_zip">Ð¡Ð¾Ð·Ð´Ð°Ð½Ð¸Ðµ ZIP-Ñ„Ð°Ð¹Ð»Ð°â€¦</string>
+    <string name="player_view_model_share_zip_failed_format">ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð¿Ð¾Ð´ÐµÐ»Ð¸Ñ‚ÑŒÑÑ: %1$s</string>
+    <plurals name="player_view_model_n_songs_added_to_queue">
+        <item quantity="one">%d Ñ‚Ñ€ÐµÐº Ð´Ð¾Ð±Ð°Ð²Ð»ÐµÐ½ Ð² Ð¾Ñ‡ÐµÑ€ÐµÐ´ÑŒ</item>
+        <item quantity="other">%d Ñ‚Ñ€ÐµÐºÐ¾Ð² Ð´Ð¾Ð±Ð°Ð²Ð»ÐµÐ½Ð¾ Ð² Ð¾Ñ‡ÐµÑ€ÐµÐ´ÑŒ</item>
+    </plurals>
+    <plurals name="player_view_model_n_songs_will_play_next">
+        <item quantity="one">%d Ñ‚Ñ€ÐµÐº Ð±ÑƒÐ´ÐµÑ‚ Ð²Ð¾ÑÐ¿Ñ€Ð¾Ð¸Ð·Ð²ÐµÐ´Ñ‘Ð½ ÑÐ»ÐµÐ´ÑƒÑŽÑ‰Ð¸Ð¼</item>
+        <item quantity="other">%d Ñ‚Ñ€ÐµÐºÐ¾Ð² Ð±ÑƒÐ´ÑƒÑ‚ Ð²Ð¾ÑÐ¿Ñ€Ð¾Ð¸Ð·Ð²ÐµÐ´ÐµÐ½Ñ‹ ÑÐ»ÐµÐ´ÑƒÑŽÑ‰Ð¸Ð¼Ð¸</item>
+    </plurals>
+    <plurals name="player_view_model_n_songs_added_to_favorites">
+        <item quantity="one">%d Ñ‚Ñ€ÐµÐº Ð´Ð¾Ð±Ð°Ð²Ð»ÐµÐ½ Ð² Ð¸Ð·Ð±Ñ€Ð°Ð½Ð½Ð¾Ðµ</item>
+        <item quantity="other">%d Ñ‚Ñ€ÐµÐºÐ¾Ð² Ð´Ð¾Ð±Ð°Ð²Ð»ÐµÐ½Ð¾ Ð² Ð¸Ð·Ð±Ñ€Ð°Ð½Ð½Ð¾Ðµ</item>
+    </plurals>
+    <plurals name="player_view_model_n_songs_removed_from_favorites">
+        <item quantity="one">%d Ñ‚Ñ€ÐµÐº ÑƒÐ´Ð°Ð»Ñ‘Ð½ Ð¸Ð· Ð¸Ð·Ð±Ñ€Ð°Ð½Ð½Ð¾Ð³Ð¾</item>
+        <item quantity="other">%d Ñ‚Ñ€ÐµÐºÐ¾Ð² ÑƒÐ´Ð°Ð»ÐµÐ½Ð¾ Ð¸Ð· Ð¸Ð·Ð±Ñ€Ð°Ð½Ð½Ð¾Ð³Ð¾</item>
+    </plurals>
+    <!-- PlaylistViewModel -->
+    <string name="playlist_view_model_none_to_share">ÐÐµÑ‚ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Ð¾Ð² Ð´Ð»Ñ Ð¾Ñ‚Ð¿Ñ€Ð°Ð²ÐºÐ¸</string>
+    <string name="playlist_view_model_share_chooser_title">ÐŸÐ¾Ð´ÐµÐ»Ð¸Ñ‚ÑŒÑÑ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Ð°Ð¼Ð¸</string>
+    <string name="playlist_view_model_share_failed">ÐžÑˆÐ¸Ð±ÐºÐ° Ð¾Ñ‚Ð¿Ñ€Ð°Ð²ÐºÐ¸: %1$s</string>
+    <string name="playlist_view_model_none_to_export">ÐÐµÑ‚ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Ð¾Ð² Ð´Ð»Ñ ÑÐºÑÐ¿Ð¾Ñ€Ñ‚Ð°</string>
+    <string name="playlist_view_model_export_failed">ÐžÑˆÐ¸Ð±ÐºÐ° ÑÐºÑÐ¿Ð¾Ñ€Ñ‚Ð°: %1$s</string>
+    <string name="playlist_view_model_export_folder_display">Music/PixelPlayer Exports</string>
+    <string name="playlist_view_model_ai_gemini_key_required">ÐŸÐ¾Ð¶Ð°Ð»ÑƒÐ¹ÑÑ‚Ð°, Ð½Ð°ÑÑ‚Ñ€Ð¾Ð¹Ñ‚Ðµ ÐºÐ»ÑŽÑ‡ API Gemini Ð² Ð½Ð°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ°Ñ….</string>
+    <string name="playlist_view_model_restored_toast">ÐŸÐ»ÐµÐ¹Ð»Ð¸ÑÑ‚ Ð²Ð¾ÑÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½</string>
+    <plurals name="playlist_view_model_sharing_message">
+        <item quantity="one">ÐžÑ‚Ð¿Ñ€Ð°Ð²ÐºÐ° %d Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Ð°</item>
+        <item quantity="other">ÐžÑ‚Ð¿Ñ€Ð°Ð²ÐºÐ° %d Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Ð¾Ð²</item>
+    </plurals>
+    <plurals name="playlist_view_model_exported_message">
+        <item quantity="one">Ð­ÐºÑÐ¿Ð¾Ñ€Ñ‚Ð¸Ñ€Ð¾Ð²Ð°Ð½ %1$d Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚ Ð² %2$s</item>
+        <item quantity="other">Ð­ÐºÑÐ¿Ð¾Ñ€Ñ‚Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¾ %1$d Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Ð¾Ð² Ð² %2$s</item>
+    </plurals>
+    <!-- AlbumDetailViewModel -->
+    <string name="album_detail_invalid_id">ÐÐµÐ´Ð¾Ð¿ÑƒÑÑ‚Ð¸Ð¼Ñ‹Ð¹ ID Ð°Ð»ÑŒÐ±Ð¾Ð¼Ð°</string>
+    <string name="album_detail_id_not_found">ID Ð°Ð»ÑŒÐ±Ð¾Ð¼Ð° Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½</string>
+    <string name="album_detail_error_loading_album">ÐžÑˆÐ¸Ð±ÐºÐ° Ð·Ð°Ð³Ñ€ÑƒÐ·ÐºÐ¸ Ð´Ð°Ð½Ð½Ñ‹Ñ… Ð°Ð»ÑŒÐ±Ð¾Ð¼Ð°: %s</string>
+    <string name="album_detail_not_found">ÐÐ»ÑŒÐ±Ð¾Ð¼ Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½</string>
+    <!-- ArtistDetailViewModel -->
+    <string name="artist_detail_invalid_id">ÐÐµÐ´Ð¾Ð¿ÑƒÑÑ‚Ð¸Ð¼Ñ‹Ð¹ ID Ð¸ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»Ñ</string>
+    <string name="artist_detail_id_not_found">ID Ð¸ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»Ñ Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½</string>
+    <string name="artist_error_loading_artist">ÐžÑˆÐ¸Ð±ÐºÐ° Ð·Ð°Ð³Ñ€ÑƒÐ·ÐºÐ¸ Ð´Ð°Ð½Ð½Ñ‹Ñ… Ð¸ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»Ñ: %s</string>
+    <string name="artist_detail_not_found">ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð½Ð°Ð¹Ñ‚Ð¸ Ð¸ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»Ñ</string>
+    <!-- SongRemovalStateHolder -->
+    <string name="song_removal_cannot_delete_currently_playing">ÐÐµÐ»ÑŒÐ·Ñ ÑƒÐ´Ð°Ð»Ð¸Ñ‚ÑŒ Ð²Ð¾ÑÐ¿Ñ€Ð¾Ð¸Ð·Ð²Ð¾Ð´Ð¸Ð¼Ñ‹Ð¹ Ð² Ð´Ð°Ð½Ð½Ñ‹Ð¹ Ð¼Ð¾Ð¼ÐµÐ½Ñ‚ Ñ‚Ñ€ÐµÐº</string>
+    <string name="song_removal_batch_delete_files_deleted_skipped_format">%1$d Ñ„Ð°Ð¹Ð»Ð¾Ð² ÑƒÐ´Ð°Ð»ÐµÐ½Ð¾ (%2$d Ð¿Ñ€Ð¾Ð¿ÑƒÑ‰ÐµÐ½Ð¾ â€” Ð²Ð¾ÑÐ¿Ñ€Ð¾Ð¸Ð·Ð²Ð¾Ð´ÑÑ‚ÑÑ)</string>
+    <string name="song_removal_batch_delete_partial_format">Ð£Ð´Ð°Ð»ÐµÐ½Ð¾ %1$d Ð¸Ð· %2$d Ñ„Ð°Ð¹Ð»Ð¾Ð²</string>
+    <string name="song_removal_delete_files_failed">ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ ÑƒÐ´Ð°Ð»Ð¸Ñ‚ÑŒ Ñ„Ð°Ð¹Ð»Ñ‹</string>
+    <string name="song_removal_file_deleted">Ð¤Ð°Ð¹Ð» ÑƒÐ´Ð°Ð»Ñ‘Ð½</string>
+    <string name="song_removal_delete_file_not_found">ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ ÑƒÐ´Ð°Ð»Ð¸Ñ‚ÑŒ Ñ„Ð°Ð¹Ð» Ð¸Ð»Ð¸ Ñ„Ð°Ð¹Ð» Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½</string>
+    <string name="song_removal_deletion_cancelled">Ð£Ð´Ð°Ð»ÐµÐ½Ð¸Ðµ Ð¾Ñ‚Ð¼ÐµÐ½ÐµÐ½Ð¾</string>
+    <string name="song_removal_dialog_delete_song_title">Ð£Ð´Ð°Ð»Ð¸Ñ‚ÑŒ Ñ‚Ñ€ÐµÐº?</string>
+    <string name="song_removal_dialog_delete_song_message">Â«%1$sÂ» â€” %2$s\n\nÐ­Ñ‚Ð¾Ñ‚ Ñ‚Ñ€ÐµÐº Ð±ÑƒÐ´ÐµÑ‚ Ð±ÐµÐ·Ð²Ð¾Ð·Ð²Ñ€Ð°Ñ‚Ð½Ð¾ ÑƒÐ´Ð°Ð»Ñ‘Ð½ Ñ ÑƒÑÑ‚Ñ€Ð¾Ð¹ÑÑ‚Ð²Ð° Ð¸ Ð½Ðµ Ð¼Ð¾Ð¶ÐµÑ‚ Ð±Ñ‹Ñ‚ÑŒ Ð²Ð¾ÑÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½.</string>
+    <string name="song_removal_delete_songs_permanent_message">Ð­Ñ‚Ð¸ Ñ‚Ñ€ÐµÐºÐ¸ Ð±ÑƒÐ´ÑƒÑ‚ Ð±ÐµÐ·Ð²Ð¾Ð·Ð²Ñ€Ð°Ñ‚Ð½Ð¾ ÑƒÐ´Ð°Ð»ÐµÐ½Ñ‹ Ñ ÑƒÑÑ‚Ñ€Ð¾Ð¹ÑÑ‚Ð²Ð° Ð¸ Ð½Ðµ Ð¼Ð¾Ð³ÑƒÑ‚ Ð±Ñ‹Ñ‚ÑŒ Ð²Ð¾ÑÑÑ‚Ð°Ð½Ð¾Ð²Ð»ÐµÐ½Ñ‹.</string>
+    <plurals name="song_removal_n_files_deleted">
+        <item quantity="one">%d Ñ„Ð°Ð¹Ð» ÑƒÐ´Ð°Ð»Ñ‘Ð½</item>
+        <item quantity="other">%d Ñ„Ð°Ð¹Ð»Ð¾Ð² ÑƒÐ´Ð°Ð»ÐµÐ½Ð¾</item>
+    </plurals>
+    <plurals name="song_removal_delete_songs_confirmation_title">
+        <item quantity="one">Ð£Ð´Ð°Ð»Ð¸Ñ‚ÑŒ %d Ñ‚Ñ€ÐµÐº?</item>
+        <item quantity="other">Ð£Ð´Ð°Ð»Ð¸Ñ‚ÑŒ %d Ñ‚Ñ€ÐµÐºÐ¾Ð²?</item>
+    </plurals>
+    <!-- MetadataEditStateHolder -->
+    <string name="metadata_edit_updated_successfully">ÐœÐµÑ‚Ð°Ð´Ð°Ð½Ð½Ñ‹Ðµ ÑƒÑÐ¿ÐµÑˆÐ½Ð¾ Ð¾Ð±Ð½Ð¾Ð²Ð»ÐµÐ½Ñ‹</string>
+    <string name="metadata_edit_updating_n_songs">ÐžÐ±Ð½Ð¾Ð²Ð»ÐµÐ½Ð¸Ðµ %1$d Ñ‚Ñ€ÐµÐºÐ¾Ð²â€¦</string>
+    <string name="metadata_edit_batch_genre_updated_all">Ð£ÑÐ¿ÐµÑˆÐ½Ð¾ Ð¾Ð±Ð½Ð¾Ð²Ð»ÐµÐ½Ð¾ %1$d Ñ‚Ñ€ÐµÐºÐ¾Ð²!</string>
+    <string name="metadata_edit_batch_genre_updated_partial">ÐžÐ±Ð½Ð¾Ð²Ð»ÐµÐ½Ð¾: %1$d. ÐžÑˆÐ¸Ð±Ð¾Ðº: %2$d</string>
+    <string name="metadata_edit_lyrics_saved_successfully">Ð¢ÐµÐºÑÑ‚ Ð¿ÐµÑÐ½Ð¸ ÑƒÑÐ¿ÐµÑˆÐ½Ð¾ ÑÐ¾Ñ…Ñ€Ð°Ð½Ñ‘Ð½</string>
+    <string name="metadata_edit_lyrics_save_failed">ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ ÑÐ¾Ñ…Ñ€Ð°Ð½Ð¸Ñ‚ÑŒ Ñ‚ÐµÐºÑÑ‚ Ð¿ÐµÑÐ½Ð¸</string>
+    <string name="metadata_edit_lyrics_none_to_save">ÐÐµÑ‚ Ñ‚ÐµÐºÑÑ‚Ð° Ð¿ÐµÑÐ½Ð¸ Ð´Ð»Ñ ÑÐ¾Ñ…Ñ€Ð°Ð½ÐµÐ½Ð¸Ñ</string>
+    <string name="metadata_edit_permission_denied_edit_files">Ð”Ð¾ÑÑ‚ÑƒÐ¿ Ð·Ð°Ð¿Ñ€ÐµÑ‰Ñ‘Ð½ â€” Ð½ÐµÐ²Ð¾Ð·Ð¼Ð¾Ð¶Ð½Ð¾ Ñ€ÐµÐ´Ð°ÐºÑ‚Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ñ„Ð°Ð¹Ð»Ñ‹</string>
+    <string name="metadata_edit_permission_denied_save_lyrics">Ð”Ð¾ÑÑ‚ÑƒÐ¿ Ð·Ð°Ð¿Ñ€ÐµÑ‰Ñ‘Ð½ â€” Ð½ÐµÐ²Ð¾Ð·Ð¼Ð¾Ð¶Ð½Ð¾ ÑÐ¾Ñ…Ñ€Ð°Ð½Ð¸Ñ‚ÑŒ Ñ‚ÐµÐºÑÑ‚ Ð¿ÐµÑÐ½Ð¸</string>
+    <string name="metadata_edit_permission_denied_edit_this_file">Ð”Ð¾ÑÑ‚ÑƒÐ¿ Ð·Ð°Ð¿Ñ€ÐµÑ‰Ñ‘Ð½ â€” Ð½ÐµÐ²Ð¾Ð·Ð¼Ð¾Ð¶Ð½Ð¾ Ñ€ÐµÐ´Ð°ÐºÑ‚Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ ÑÑ‚Ð¾Ñ‚ Ñ„Ð°Ð¹Ð»</string>
+    <!-- AiStateHolder -->
+    <string name="ai_state_error_api_key">ÐŸÐ¾Ð¶Ð°Ð»ÑƒÐ¹ÑÑ‚Ð°, Ð½Ð°ÑÑ‚Ñ€Ð¾Ð¹Ñ‚Ðµ Ð´ÐµÐ¹ÑÑ‚Ð²Ð¸Ñ‚ÐµÐ»ÑŒÐ½Ñ‹Ð¹ API-ÐºÐ»ÑŽÑ‡ Ð´Ð»Ñ Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½Ð¾Ð³Ð¾ AI-Ð¿Ñ€Ð¾Ð²Ð°Ð¹Ð´ÐµÑ€Ð° Ð² Ð½Ð°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ°Ñ….</string>
+    <string name="ai_state_error_generic">ÐžÑˆÐ¸Ð±ÐºÐ° AI: %s</string>
+    <string name="ai_state_error_quota">Ð’Ñ‹Ð±Ñ€Ð°Ð½Ð½Ñ‹Ð¹ AI-Ð¿Ñ€Ð¾Ð²Ð°Ð¹Ð´ÐµÑ€ Ð¾Ñ‚ÐºÐ»Ð¾Ð½Ð¸Ð» Ð·Ð°Ð¿Ñ€Ð¾Ñ, Ð¿Ð¾ÑÐºÐ¾Ð»ÑŒÐºÑƒ Ð½Ð° Ð°ÐºÐºÐ°ÑƒÐ½Ñ‚Ðµ Ð¾Ñ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÑŽÑ‚ ÐºÑ€ÐµÐ´Ð¸Ñ‚Ñ‹ Ð¸Ð»Ð¸ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð½Ð°Ñ ÐºÐ²Ð¾Ñ‚Ð°.</string>
+    <string name="ai_state_error_model_unavailable">Ð’Ñ‹Ð±Ñ€Ð°Ð½Ð½Ð°Ñ AI-Ð¼Ð¾Ð´ÐµÐ»ÑŒ Ð±Ð¾Ð»ÑŒÑˆÐµ Ð½ÐµÐ´Ð¾ÑÑ‚ÑƒÐ¿Ð½Ð°. PixelPlayer Ð°Ð²Ñ‚Ð¾Ð¼Ð°Ñ‚Ð¸Ñ‡ÐµÑÐºÐ¸ Ð¿Ð¾Ð¿Ñ‹Ñ‚Ð°Ð»ÑÑ Ð¿ÐµÑ€ÐµÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒÑÑ Ð½Ð° Ð¿Ð¾Ð´Ð´ÐµÑ€Ð¶Ð¸Ð²Ð°ÐµÐ¼ÑƒÑŽ Ð¼Ð¾Ð´ÐµÐ»ÑŒ.</string>
+    <string name="ai_state_no_songs_found">AI Ð½Ðµ ÑÐ¼Ð¾Ð³ Ð¿Ð¾Ð´Ð¾Ð±Ñ€Ð°Ñ‚ÑŒ Ñ‚Ñ€ÐµÐºÐ¸ Ð¿Ð¾ Ð²Ð°ÑˆÐµÐ¼Ñƒ Ð·Ð°Ð¿Ñ€Ð¾ÑÑƒ.</string>
+    <string name="ai_state_prompt_empty">ÐžÐ¿Ð¸ÑˆÐ¸Ñ‚Ðµ Ð¸Ð´ÐµÑŽ Ð´Ð»Ñ Ð²Ð°ÑˆÐµÐ³Ð¾ Daily Mix</string>
+    <string name="ai_state_daily_mix_updated">Daily Mix Ð¾Ð±Ð½Ð¾Ð²Ð»Ñ‘Ð½ Ñ Ð¿Ð¾Ð¼Ð¾Ñ‰ÑŒÑŽ AI</string>
+    <string name="ai_state_could_not_update">ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð¾Ð±Ð½Ð¾Ð²Ð¸Ñ‚ÑŒ: %s</string>
+    <string name="ai_state_no_songs_for_mix">AI Ð½Ðµ ÑÐ¼Ð¾Ð³ Ð¿Ð¾Ð´Ð¾Ð±Ñ€Ð°Ñ‚ÑŒ Ñ‚Ñ€ÐµÐºÐ¸ Ð´Ð»Ñ ÑÑ‚Ð¾Ð³Ð¾ Ð¼Ð¸ÐºÑÐ°</string>
+</resources>

@@ -1,0 +1,45 @@
+package com.theveloper.pixelplay.utils
+
+import com.theveloper.pixelplay.data.model.Curve
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.sqrt
+
+/**
+ * Calculates a volume multiplier based on the progress of a transition and a given curve.
+ *
+ * This function maps a linear progress value (0.0 to 1.0) to a non-linear value
+ * according to the selected curve, which can be used to shape volume fades.
+ *
+ * @param progress A Float from 0.0 (start) to 1.0 (end) representing the transition's progress.
+ * @param curve The volume curve to apply.
+ * @return A Float from 0.0 to 1.0 representing the calculated volume multiplier.
+ */
+fun envelope(progress: Float, curve: Curve): Float {
+    val clampedProgress = progress.coerceIn(0f, 1f)
+
+    return when (curve) {
+        Curve.LINEAR -> clampedProgress
+        Curve.S_CURVE -> ((1 - cos(PI * clampedProgress)) / 2f).toFloat()
+        Curve.LOG -> sqrt(clampedProgress)
+        Curve.EXP -> clampedProgress * clampedProgress
+        Curve.EQUAL_POWER -> sin(PI / 2.0 * clampedProgress).toFloat()
+    }
+}
+
+/**
+ * Gain of the *outgoing* track at [progress] (1.0 at the start of the transition,
+ * 0.0 at the end).
+ *
+ * For the equal-gain curves this is `1 - envelope(progress, curve)`, which keeps the
+ * two gains summing to 1 (the historical behaviour). For [Curve.EQUAL_POWER] it is the
+ * cosine complement, so `in² + out² = 1` and the overlap keeps constant energy.
+ */
+fun fadeOutGain(progress: Float, curve: Curve): Float {
+    val clampedProgress = progress.coerceIn(0f, 1f)
+    return when (curve) {
+        Curve.EQUAL_POWER -> cos(PI / 2.0 * clampedProgress).toFloat()
+        else -> 1f - envelope(clampedProgress, curve)
+    }
+}

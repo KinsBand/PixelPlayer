@@ -1,0 +1,31 @@
+// Workaround for AGP 9.2.1 strict PathLocator conflict.
+//
+// Android Studio's Gradle launcher injects BOTH ANDROID_PREFS_ROOT and
+// ANDROID_USER_HOME (pointing to the same path, e.g. C:\Users\<user>\.android).
+// AGP 9.2.1's com.android.prefs.PathLocator treats having both variables set
+// simultaneously as a conflict and throws AndroidLocationsException, which
+// surfaces as a failed sync / "Failed to create service AndroidLocationsBuildService".
+//
+// This init script removes ANDROID_PREFS_ROOT from the Gradle process
+// environment before AGP reads it, leaving only ANDROID_USER_HOME (the
+// variable AGP recommends). Because it runs inside Gradle, it takes effect
+// regardless of how the IDE injects the variable.
+//
+// NOTE: System.getenv() returns an unmodifiable view, so we reach into the
+// internal ProcessEnvironment map via reflection to actually clear the key.
+gradle.rootProject { root ->
+    try {
+        def env = System.getenv()
+        def theUnmodifiable = env.getClass()
+        def field = theUnmodifiable.getDeclaredField("m")
+        field.setAccessible(true)
+        def map = field.get(env)
+        def removed = map.remove("ANDROID_PREFS_ROOT")
+        if (removed != null) {
+            root.logger.lifecycle("[init-android-prefs] Removed conflicting ANDROID_PREFS_ROOT=" +
+                    removed + " to avoid AGP PathLocator conflict with ANDROID_USER_HOME.")
+        }
+    } catch (Exception e) {
+        root.logger.warn("[init-android-prefs] Could not clear ANDROID_PREFS_ROOT: " + e)
+    }
+}

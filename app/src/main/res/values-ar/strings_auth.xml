@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Shared login / streaming auth -->
+    <string name="auth_cd_back">رجوع</string>
+    <string name="auth_show_password">إظهار كلمة المرور</string>
+    <string name="auth_hide_password">إخفاء كلمة المرور</string>
+    <string name="auth_connecting">جاري الاتصال…</string>
+    <string name="auth_connect">اتصال</string>
+    <string name="auth_connection_details">تفاصيل الاتصال</string>
+    <string name="auth_connection_details_subtitle">أدخل رابط الخادم (URL) وبيانات اعتماد الحساب.</string>
+    <string name="auth_server_url">رابط الخادم (URL)</string>
+    <string name="auth_username">اسم المستخدم</string>
+    <string name="auth_password">كلمة المرور</string>
+    <string name="auth_password_placeholder">أدخل كلمة المرور</string>
+    <string name="auth_username_placeholder_admin">admin</string>
+    <string name="toast_welcome_user">مرحباً، %1$s!</string>
+
+    <!-- Google Drive -->
+    <string name="auth_gdrive_toast_connected">تم توصيل Google Drive بنجاح!</string>
+    <string name="auth_gdrive_title">Google Drive</string>
+
+    <!-- Web login - shared -->
+    <string name="auth_web_exit_confirm_body">يمكنك العودة لاحقاً. سيتم تجاهل حالة الصفحة الحالية عند الإغلاق.</string>
+    <string name="auth_exit">خروج</string>
+    <string name="auth_stay">بقاء</string>
+    <string name="auth_web_cd_web_back">رجوع للخلف في الويب</string>
+    <string name="auth_web_cd_web_forward">تقدم للأمام في الويب</string>
+    <string name="auth_web_cd_refresh">تحديث</string>
+    <string name="auth_web_cd_open_home">فتح الصفحة الرئيسية</string>
+    <string name="auth_saving">جاري الحفظ…</string>
+    <string name="auth_done">تم</string>
+    <string name="auth_web_retry">إعادة المحاولة</string>
+    <string name="auth_dial_plus">+</string>
+    <string name="auth_snackbar_page_timeout">انتهت مهلة تحميل الصفحة. يمكنك إعادة المحاولة دون فقدان تقدمك.</string>
+    <string name="auth_error_cookies_unreadable">تعذر قراءة ملفات تعريف الارتباط (Cookies) الخاصة بالجلسة.</string>
+    <string name="auth_page_slow">تستغرق الصفحة وقتاً طويلاً للتحميل. استخدم التحديث أو جرب شبكة أخرى.</string>
+    <string name="auth_webview_load_failed">فشل تحميل WebView.</string>
+    <string name="auth_error_no_cookies">لم يتم العثور على ملفات تعريف الارتباط. سجل الدخول أولاً.</string>
+</resources>

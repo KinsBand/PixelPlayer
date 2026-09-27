@@ -1,0 +1,4 @@
+<!-- Generic "music service" mark for Apple Music sources: a double note in a rounded square (not Apple's logo). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#000000" android:fillType="evenOdd" android:pathData="M6,1h12a5,5 0,0 1,5 5v12a5,5 0,0 1,-5 5H6a5,5 0,0 1,-5 -5V6a5,5 0,0 1,5 -5zM16.5,5.2l-7,1.5c-0.3,0.1 -0.5,0.3 -0.5,0.6v7.9a2.3,2.3 0,1 0,1.5 2.1V10.1l5.5,-1.2v4.7a2.3,2.3 0,1 0,1.5 2.1V5.9c0,-0.4 -0.4,-0.8 -1,-0.7z"/>
+</vector>

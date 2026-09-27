@@ -1,0 +1,61 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Google Drive dashboard -->
+    <string name="gdrive_dashboard_music_folders">Musikordner</string>
+    <string name="gdrive_dashboard_add_folder_hint">Auf + tippen, um einen Drive-Ordner hinzuzufÃ¼gen</string>
+    <string name="gdrive_dashboard_no_folders_yet">Noch keine Ordner hinzugefÃ¼gt</string>
+    <string name="gdrive_dashboard_folders_synced_count">%1$d Ordner synchronisiert</string>
+    <string name="gdrive_cd_add_folder">Ordner hinzufÃ¼gen</string>
+    <!-- Cloud dashboard generic -->
+    <string name="cloud_dashboard_playlists_synced_count">%1$d Playlists synchronisiert</string>
+    <string name="cloud_dashboard_title_playlists">Playlists</string>
+    <string name="cloud_dashboard_action_sync">Synchronisieren</string>
+    <string name="cloud_dashboard_playlists_empty_title">Noch keine Playlists synchronisiert</string>
+    <string name="cloud_dashboard_playlists_empty_hint">Auf Synchronisieren tippen, um Playlists abzurufen</string>
+    <string name="cloud_dashboard_quick_actions">Schnellaktionen</string>
+    <string name="cloud_dashboard_action_sync_library">Bibliothek synchronisieren</string>
+    <string name="cloud_dashboard_action_disconnect">Trennen</string>
+    <string name="cloud_dashboard_song_count">%1$d Songs</string>
+    <!-- Cloud sync status -->
+    <string name="cloud_sync_status_syncing">Synchronisieren</string>
+    <string name="cloud_sync_status_syncing_library">Bibliothek synchronisierenâ€¦</string>
+    <string name="cloud_sync_status_fetching_playlists">Playlists abrufenâ€¦</string>
+    <string name="cloud_sync_status_syncing_playlist_format">Playlist synchronisieren: %1$s</string>
+    <string name="cloud_sync_status_updating_local">Lokale Bibliothek aktualisierenâ€¦</string>
+    <string name="cloud_sync_status_sync_complete">Synchronisierung abgeschlossen</string>
+    <string name="cloud_sync_status_fetching_albums">Albumliste abrufenâ€¦</string>
+    <string name="cloud_sync_status_fetching_songs_from_format">Songs von %1$s abrufenâ€¦</string>
+    <string name="cloud_sync_status_saving_songs_format">Saving %1$d songs to databaseâ€¦</string>
+    <string name="cloud_sync_status_no_songs_found">Keine Bibliothekssongs gefunden</string>
+    <string name="cloud_sync_status_library_sync_complete">Bibliotheks-Synchronisierung abgeschlossen</string>
+    <string name="cloud_sync_status_syncing_ellipsis">Synchronisierungâ€¦</string>
+    <string name="cloud_sync_error_with_message_format">Fehler: %1$s</string>
+    <!-- Cloud content descriptions -->
+    <string name="cloud_cd_sync">Synchronisieren</string>
+    <string name="cloud_cd_sync_all">Alle synchronisieren</string>
+    <string name="cloud_cd_logout">Abmelden</string>
+    <string name="cloud_cd_sync_all_playlists">Alle Playlists synchronisieren</string>
+    <string name="cloud_cd_user_avatar">Benutzer-Avatar</string>
+    <!-- No internet -->
+    <string name="no_internet_dialog_title">Keine Internetverbindung</string>
+    <string name="no_internet_dialog_message">Dieser Inhalt erfordert eine Internetverbindung. Bitte Ã¼berprÃ¼fe deine Netzwerkeinstellungen und versuche es erneut.</string>
+    <string name="offline_screen_title">Du bist offline</string>
+    <string name="offline_screen_message">Bitte Ã¼berprÃ¼fe deine Internetverbindung und versuche es erneut, um auf diesen Inhalt zuzugreifen.</string>
+    <!-- Cloud Authentication & Login Shared Strings -->
+    <!-- Google Drive Auth -->
+    <string name="auth_gdrive_connect_subtitle">Musikdateien direkt aus deinem Google Drive streamen</string>
+    <string name="auth_gdrive_connect_title">Google Drive verbinden</string>
+    <string name="auth_gdrive_connected_toast">Google Drive connected!</string>
+    <string name="auth_gdrive_create_action">\"PixelPlayer Music\" erstellen</string>
+    <string name="auth_gdrive_create_subtitle">Neuen Ordner fÃ¼r Musik hier erstellen</string>
+    <string name="auth_gdrive_empty_msg">Keine Ordner hier</string>
+    <string name="auth_gdrive_open_cd">Ordner Ã¶ffnen</string>
+    <string name="auth_gdrive_select_subtitle">Ordner wÃ¤hlen oder erstellen, der als Musikquelle dient</string>
+    <string name="auth_gdrive_select_title">Musikordner auswÃ¤hlen</string>
+    <string name="auth_gdrive_setup_msg">Google Drive wird eingerichtetâ€¦</string>
+    <string name="auth_gdrive_signin_action">Mit Google anmelden</string>
+    <string name="auth_gdrive_title">Google Drive</string>
+    <string name="auth_gdrive_use_action">Verwenden</string>
+    <!-- Web Login Shared/Generic -->
+    <string name="auth_web_retry_action">Wiederholen</string>
+</resources>

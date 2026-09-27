@@ -1,0 +1,3 @@
+- [x] Update JitPack repository filtering in `settings.gradle.kts`
+- [x] Perform Gradle sync to verify dependency resolution
+- [x] Create walkthrough artifact

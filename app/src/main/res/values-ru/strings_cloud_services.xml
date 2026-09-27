@@ -1,0 +1,61 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Google Drive dashboard -->
+    <string name="gdrive_dashboard_music_folders">ÐœÑƒÐ·Ñ‹ÐºÐ°Ð»ÑŒÐ½Ñ‹Ðµ Ð¿Ð°Ð¿ÐºÐ¸</string>
+    <string name="gdrive_dashboard_add_folder_hint">ÐÐ°Ð¶Ð¼Ð¸Ñ‚Ðµ +, Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð´Ð¾Ð±Ð°Ð²Ð¸Ñ‚ÑŒ Ð¿Ð°Ð¿ÐºÑƒ Drive</string>
+    <string name="gdrive_dashboard_no_folders_yet">ÐŸÐ°Ð¿ÐºÐ¸ ÐµÑ‰Ñ‘ Ð½Ðµ Ð´Ð¾Ð±Ð°Ð²Ð»ÐµÐ½Ñ‹</string>
+    <string name="gdrive_dashboard_folders_synced_count">%1$d Ð¿Ð°Ð¿Ð¾Ðº ÑÐ¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¾</string>
+    <string name="gdrive_cd_add_folder">Ð”Ð¾Ð±Ð°Ð²Ð¸Ñ‚ÑŒ Ð¿Ð°Ð¿ÐºÑƒ</string>
+    <!-- Cloud dashboard generic -->
+    <string name="cloud_dashboard_playlists_synced_count">%1$d Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Ð¾Ð² ÑÐ¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¾</string>
+    <string name="cloud_dashboard_title_playlists">ÐŸÐ»ÐµÐ¹Ð»Ð¸ÑÑ‚Ñ‹</string>
+    <string name="cloud_dashboard_action_sync">Ð¡Ð¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ</string>
+    <string name="cloud_dashboard_playlists_empty_title">ÐŸÐ»ÐµÐ¹Ð»Ð¸ÑÑ‚Ñ‹ ÐµÑ‰Ñ‘ Ð½Ðµ ÑÐ¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ð½Ñ‹</string>
+    <string name="cloud_dashboard_playlists_empty_hint">ÐÐ°Ð¶Ð¼Ð¸Ñ‚Ðµ Â«Ð¡Ð¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒÂ», Ñ‡Ñ‚Ð¾Ð±Ñ‹ Ð·Ð°Ð³Ñ€ÑƒÐ·Ð¸Ñ‚ÑŒ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Ñ‹</string>
+    <string name="cloud_dashboard_quick_actions">Ð‘Ñ‹ÑÑ‚Ñ€Ñ‹Ðµ Ð´ÐµÐ¹ÑÑ‚Ð²Ð¸Ñ</string>
+    <string name="cloud_dashboard_action_sync_library">Ð¡Ð¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ð¼ÐµÐ´Ð¸Ð°Ñ‚ÐµÐºÑƒ</string>
+    <string name="cloud_dashboard_action_disconnect">ÐžÑ‚ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ</string>
+    <string name="cloud_dashboard_song_count">%1$d Ð¿ÐµÑÐµÐ½</string>
+    <!-- Cloud sync status -->
+    <string name="cloud_sync_status_syncing">Ð¡Ð¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñ</string>
+    <string name="cloud_sync_status_syncing_library">Ð¡Ð¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñ Ð¼ÐµÐ´Ð¸Ð°Ñ‚ÐµÐºÐ¸â€¦</string>
+    <string name="cloud_sync_status_fetching_playlists">ÐŸÐ¾Ð»ÑƒÑ‡ÐµÐ½Ð¸Ðµ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Ð¾Ð²â€¦</string>
+    <string name="cloud_sync_status_syncing_playlist_format">Ð¡Ð¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Ð°: %1$s</string>
+    <string name="cloud_sync_status_updating_local">ÐžÐ±Ð½Ð¾Ð²Ð»ÐµÐ½Ð¸Ðµ Ð»Ð¾ÐºÐ°Ð»ÑŒÐ½Ð¾Ð¹ Ð¼ÐµÐ´Ð¸Ð°Ñ‚ÐµÐºÐ¸â€¦</string>
+    <string name="cloud_sync_status_sync_complete">Ð¡Ð¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñ Ð·Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð°</string>
+    <string name="cloud_sync_status_fetching_albums">ÐŸÐ¾Ð»ÑƒÑ‡ÐµÐ½Ð¸Ðµ ÑÐ¿Ð¸ÑÐºÐ° Ð°Ð»ÑŒÐ±Ð¾Ð¼Ð¾Ð²â€¦</string>
+    <string name="cloud_sync_status_fetching_songs_from_format">ÐŸÐ¾Ð»ÑƒÑ‡ÐµÐ½Ð¸Ðµ Ð¿ÐµÑÐµÐ½ Ð¸Ð· %1$sâ€¦</string>
+    <string name="cloud_sync_status_saving_songs_format">Ð¡Ð¾Ñ…Ñ€Ð°Ð½ÐµÐ½Ð¸Ðµ %1$d Ð¿ÐµÑÐµÐ½ Ð² Ð±Ð°Ð·Ñƒ Ð´Ð°Ð½Ð½Ñ‹Ñ…â€¦</string>
+    <string name="cloud_sync_status_no_songs_found">ÐŸÐµÑÐ½Ð¸ Ð² Ð¼ÐµÐ´Ð¸Ð°Ñ‚ÐµÐºÐµ Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½Ñ‹</string>
+    <string name="cloud_sync_status_library_sync_complete">Ð¡Ð¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñ Ð¼ÐµÐ´Ð¸Ð°Ñ‚ÐµÐºÐ¸ Ð·Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð°</string>
+    <string name="cloud_sync_status_syncing_ellipsis">Ð¡Ð¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñâ€¦</string>
+    <string name="cloud_sync_error_with_message_format">ÐžÑˆÐ¸Ð±ÐºÐ°: %1$s</string>
+    <!-- Cloud content descriptions -->
+    <string name="cloud_cd_sync">Ð¡Ð¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ</string>
+    <string name="cloud_cd_sync_all">Ð¡Ð¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ð²ÑÑ‘</string>
+    <string name="cloud_cd_logout">Ð’Ñ‹Ð¹Ñ‚Ð¸</string>
+    <string name="cloud_cd_sync_all_playlists">Ð¡Ð¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ð²ÑÐµ Ð¿Ð»ÐµÐ¹Ð»Ð¸ÑÑ‚Ñ‹</string>
+    <string name="cloud_cd_user_avatar">ÐÐ²Ð°Ñ‚Ð°Ñ€ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»Ñ</string>
+    <!-- No internet -->
+    <string name="no_internet_dialog_title">ÐÐµÑ‚ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¸Ñ Ðº Ð¸Ð½Ñ‚ÐµÑ€Ð½ÐµÑ‚Ñƒ</string>
+    <string name="no_internet_dialog_message">Ð”Ð»Ñ ÑÑ‚Ð¾Ð³Ð¾ ÐºÐ¾Ð½Ñ‚ÐµÐ½Ñ‚Ð° Ñ‚Ñ€ÐµÐ±ÑƒÐµÑ‚ÑÑ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¸Ðµ Ðº Ð¸Ð½Ñ‚ÐµÑ€Ð½ÐµÑ‚Ñƒ. ÐŸÑ€Ð¾Ð²ÐµÑ€ÑŒÑ‚Ðµ Ð½Ð°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ¸ ÑÐµÑ‚Ð¸ Ð¸ Ð¿Ð¾Ð¿Ñ€Ð¾Ð±ÑƒÐ¹Ñ‚Ðµ ÑÐ½Ð¾Ð²Ð°.</string>
+    <string name="offline_screen_title">Ð’Ñ‹ Ð½Ðµ Ð² ÑÐµÑ‚Ð¸</string>
+    <string name="offline_screen_message">ÐŸÑ€Ð¾Ð²ÐµÑ€ÑŒÑ‚Ðµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¸Ðµ Ðº Ð¸Ð½Ñ‚ÐµÑ€Ð½ÐµÑ‚Ñƒ Ð¸ Ð¿Ð¾Ð¿Ñ€Ð¾Ð±ÑƒÐ¹Ñ‚Ðµ ÑÐ½Ð¾Ð²Ð° Ð¿Ð¾Ð»ÑƒÑ‡Ð¸Ñ‚ÑŒ Ð´Ð¾ÑÑ‚ÑƒÐ¿ Ðº ÑÑ‚Ð¾Ð¼Ñƒ ÐºÐ¾Ð½Ñ‚ÐµÐ½Ñ‚Ñƒ.</string>
+    <!-- Cloud Authentication & Login Shared Strings -->
+    <!-- Google Drive Auth -->
+    <string name="auth_gdrive_connect_subtitle">Ð¡Ð»ÑƒÑˆÐ°Ð¹Ñ‚Ðµ Ð¼ÑƒÐ·Ñ‹ÐºÑƒ Ð½Ð°Ð¿Ñ€ÑÐ¼ÑƒÑŽ Ð¸Ð· Google Drive</string>
+    <string name="auth_gdrive_connect_title">ÐŸÐ¾Ð´ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Google Drive</string>
+    <string name="auth_gdrive_connected_toast">Google Drive Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡Ñ‘Ð½!</string>
+    <string name="auth_gdrive_create_action">Ð¡Ð¾Ð·Ð´Ð°Ñ‚ÑŒ Â«PixelPlayer MusicÂ»</string>
+    <string name="auth_gdrive_create_subtitle">Ð¡Ð¾Ð·Ð´Ð°Ñ‚ÑŒ Ð·Ð´ÐµÑÑŒ Ð½Ð¾Ð²ÑƒÑŽ Ð¿Ð°Ð¿ÐºÑƒ Ð´Ð»Ñ Ð¼ÑƒÐ·Ñ‹ÐºÐ¸</string>
+    <string name="auth_gdrive_empty_msg">Ð—Ð´ÐµÑÑŒ Ð½ÐµÑ‚ Ð¿Ð°Ð¿Ð¾Ðº</string>
+    <string name="auth_gdrive_open_cd">ÐžÑ‚ÐºÑ€Ñ‹Ñ‚ÑŒ Ð¿Ð°Ð¿ÐºÑƒ</string>
+    <string name="auth_gdrive_select_subtitle">Ð’Ñ‹Ð±ÐµÑ€Ð¸Ñ‚Ðµ Ð¸Ð»Ð¸ ÑÐ¾Ð·Ð´Ð°Ð¹Ñ‚Ðµ Ð¿Ð°Ð¿ÐºÑƒ Ð´Ð»Ñ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ð½Ð¸Ñ Ð² ÐºÐ°Ñ‡ÐµÑÑ‚Ð²Ðµ Ð¸ÑÑ‚Ð¾Ñ‡Ð½Ð¸ÐºÐ° Ð¼ÑƒÐ·Ñ‹ÐºÐ¸</string>
+    <string name="auth_gdrive_select_title">Ð’Ñ‹Ð±ÐµÑ€Ð¸Ñ‚Ðµ Ð¼ÑƒÐ·Ñ‹ÐºÐ°Ð»ÑŒÐ½ÑƒÑŽ Ð¿Ð°Ð¿ÐºÑƒ</string>
+    <string name="auth_gdrive_setup_msg">ÐÐ°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ° Google Driveâ€¦</string>
+    <string name="auth_gdrive_signin_action">Ð’Ð¾Ð¹Ñ‚Ð¸ Ñ‡ÐµÑ€ÐµÐ· Google</string>
+    <string name="auth_gdrive_title">Google Drive</string>
+    <string name="auth_gdrive_use_action">Ð˜ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÑŒ</string>
+    <!-- Web Login Shared/Generic -->
+    <string name="auth_web_retry_action">ÐŸÐ¾Ð²Ñ‚Ð¾Ñ€Ð¸Ñ‚ÑŒ</string>
+</resources>

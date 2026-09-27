@@ -1,0 +1,968 @@
+diff -ruN orig/data/spotify/SpotifyToYouTubeResolver.kt new/data/spotify/SpotifyToYouTubeResolver.kt
+--- orig/data/spotify/SpotifyToYouTubeResolver.kt	2026-09-21 13:50:17.926114265 +1000
++++ new/data/spotify/SpotifyToYouTubeResolver.kt	2026-09-21 13:53:42.671165308 +1000
+@@ -34,17 +34,37 @@
+             }
+         }
+ 
+-        // 2. Reject mismatched version variants (e.g. live version vs studio version)
+-        val isSpotifyLive = spotifyTitle.lowercase().contains("live")
+-        val isYtLive = ytTitle.lowercase().contains("live")
+-        if (isSpotifyLive != isYtLive) {
+-            Timber.tag(TAG).d("Rejected match due to live variant mismatch: %s vs %s", spotifyTitle, ytTitle)
++        // 2. Reject version variants the source track does not have (live, remix, karaoke...).
++        //    Whole-word match so "Alive"/"Oliver" do not count as "live".
++        val sourceMods = TrackMatching.modifiers(spotifyTitle)
++        val extraMods = TrackMatching.modifiers(ytTitle) - sourceMods
++        if (extraMods.isNotEmpty() || (sourceMods.contains("live") && !TrackMatching.modifiers(ytTitle).contains("live"))) {
++            Timber.tag(TAG).d("Rejected match due to variant mismatch %s: %s vs %s", extraMods, spotifyTitle, ytTitle)
+             return false
+         }
+ 
+-        return true
++        // 3. Titles must overlap once decorations like "(feat. X)" or "- Remastered" are removed.
++        return TrackMatching.titlesMatch(spotifyTitle, ytTitle)
+     }
+ 
++    /** Best candidate instead of the first one: title/artist agreement plus duration closeness. */
++    private fun pickBest(
++        candidates: List<com.theveloper.pixelplay.data.model.Song>,
++        title: String,
++        artistName: String,
++        durationMs: Int
++    ): com.theveloper.pixelplay.data.model.Song? = candidates
++        .filter { isValidMatch(title, it.title, durationMs, it.duration.coerceIn(0, Int.MAX_VALUE.toLong()).toInt()) }
++        .maxByOrNull { candidate ->
++            var score = 0.0
++            if (TrackMatching.artistsOverlap(artistName, candidate.artist)) score += 2.0
++            if (TrackMatching.normalize(candidate.title) == TrackMatching.normalize(title)) score += 1.0
++            if (durationMs > 0 && candidate.duration > 0) {
++                score += 1.0 - (abs(durationMs - candidate.duration) / 15_000.0).coerceIn(0.0, 1.0)
++            }
++            score
++        }
++
+     suspend fun resolveSpotifyTrackToVideoId(
+         spotifyId: String,
+         title: String,
+@@ -67,14 +87,11 @@
+         if (!isrc.isNullOrBlank()) {
+             try {
+                 val isrcSearchResults = youTubeRepository.searchSongs(query = isrc)
+-                val isrcCandidate = isrcSearchResults.firstOrNull { candidate ->
+-                    isValidMatch(
+-                        spotifyTitle = title,
+-                        ytTitle = candidate.title,
+-                        spotifyDurationMs = durationMs,
+-                        ytDurationMs = candidate.duration.toInt()
+-                    )
+-                }
++                // An ISRC hit is already the exact recording; only guard against obvious junk.
++                val isrcCandidate = pickBest(isrcSearchResults, title, artistName, durationMs)
++                    ?: isrcSearchResults.firstOrNull { candidate ->
++                        durationMs <= 0 || candidate.duration <= 0 || abs(durationMs - candidate.duration) <= 15_000
++                    }
+                 if (isrcCandidate != null) {
+                     winningVideoId = (isrcCandidate.youtubeId ?: isrcCandidate.id).removePrefix("yt_")
+                 }
+@@ -90,14 +107,7 @@
+             try {
+                 val query = "$title $artistName".trim()
+                 val searchResults = youTubeRepository.searchSongs(query = query)
+-                val bestCandidate = searchResults.firstOrNull { candidate ->
+-                    isValidMatch(
+-                        spotifyTitle = title,
+-                        ytTitle = candidate.title,
+-                        spotifyDurationMs = durationMs,
+-                        ytDurationMs = candidate.duration.toInt()
+-                    )
+-                }
++                val bestCandidate = pickBest(searchResults, title, artistName, durationMs)
+                 winningVideoId = bestCandidate?.let { (it.youtubeId ?: it.id).removePrefix("yt_") }
+             } catch (e: kotlinx.coroutines.CancellationException) {
+                 throw e
+diff -ruN orig/data/spotify/TrackMatching.kt new/data/spotify/TrackMatching.kt
+--- orig/data/spotify/TrackMatching.kt	1970-01-01 10:00:00.000000000 +1000
++++ new/data/spotify/TrackMatching.kt	2026-09-21 13:53:42.674898773 +1000
+@@ -0,0 +1,56 @@
++package com.theveloper.pixelplay.data.spotify
++
++import java.text.Normalizer
++import java.util.Locale
++
++/**
++ * Title/artist normalisation used to map a metadata track (Spotify, MusicBrainz...) onto an
++ * audio source result. Same rules as Spotube audio-source plugins: strip accents and
++ * decorations, compare the core title, and refuse variants (live/remix/karaoke...) the source
++ * track does not have.
++ */
++object TrackMatching {
++    private val MODIFIERS = listOf(
++        "karaoke", "remix", "live", "instrumental", "acoustic", "reprise", "demo",
++        "cover", "tribute", "orchestral", "piano", "sped up", "slowed", "nightcore", "8d"
++    )
++    private val modifierRegex = MODIFIERS.associateWith { Regex("\\b${Regex.escape(it)}\\b") }
++
++    fun stripAccents(value: String): String =
++        Normalizer.normalize(value, Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
++
++    /** Lower-case core title without "(...)", "[...]", " - suffix", "feat." parts. */
++    fun normalize(title: String): String {
++        var t = stripAccents(title).lowercase(Locale.ROOT).trim()
++        t = t.replace(Regex("\\(.*?\\)|\\[.*?]"), " ")
++        t = t.substringBefore(" - ")
++        t = t.replace(Regex("\\b(feat\\.?|ft\\.?|featuring)\\b.*"), " ")
++        t = t.replace(Regex("[^\\p{L}\\p{N} ]"), " ")
++        return t.replace(Regex("\\s+"), " ").trim()
++    }
++
++    fun modifiers(title: String): Set<String> {
++        val lower = stripAccents(title).lowercase(Locale.ROOT)
++        return modifierRegex.filterValues { it.containsMatchIn(lower) }.keys
++    }
++
++    fun titlesMatch(source: String, candidate: String): Boolean {
++        val a = normalize(source)
++        val b = normalize(candidate)
++        if (a.isEmpty() || b.isEmpty()) return true
++        return a == b || b.contains(a) || a.contains(b)
++    }
++
++    fun artistsOverlap(source: String, candidate: String): Boolean {
++        val tokens = { v: String ->
++            stripAccents(v).lowercase(Locale.ROOT).removeSuffix(" - topic")
++                .split(Regex("[,&/]|\\bx\\b|\\band\\b|\\bfeat\\.?\\b"))
++                .map { it.replace(Regex("[^\\p{L}\\p{N} ]"), "").trim() }
++                .filter { it.isNotEmpty() }
++                .toSet()
++        }
++        val a = tokens(source)
++        val b = tokens(candidate)
++        return a.any { x -> b.any { y -> x == y || x.contains(y) || y.contains(x) } }
++    }
++}
+diff -ruN orig/data/stream/CloudStreamProxy.kt new/data/stream/CloudStreamProxy.kt
+--- orig/data/stream/CloudStreamProxy.kt	2026-09-21 13:50:17.926231315 +1000
++++ new/data/stream/CloudStreamProxy.kt	2026-09-21 13:52:33.332329324 +1000
+@@ -2,6 +2,7 @@
+ 
+ import android.net.Uri
+ import io.ktor.http.ContentType
++import io.ktor.server.application.ApplicationCall
+ import io.ktor.http.HttpStatusCode
+ import io.ktor.server.application.call
+ import io.ktor.server.cio.CIO
+@@ -70,6 +71,29 @@
+     /** Resolve the actual streaming URL for the given song ID */
+     protected abstract suspend fun resolveStreamUrl(id: K): String?
+ 
++    /**
++     * Builds the upstream request for [url]. [range] is a normalized "bytes=a-b" header or null.
++     * Override when the origin needs special headers/methods (e.g. googlevideo).
++     */
++    protected open fun buildUpstreamRequest(url: String, range: String?): Request =
++        Request.Builder().url(url).apply {
++            header("Accept-Encoding", "identity")
++            range?.let { header("Range", it) }
++        }.build()
++
++    /**
++     * Exact size of the resource behind [url] when it is known without a request (e.g. the
++     * `clen` parameter of googlevideo URLs). A non-null value switches the proxy to chunked
++     * mode: the proxy answers the player's range itself and fetches it upstream in
++     * [upstreamChunkBytes]-sized requests, transparently resuming a failed chunk.
++     */
++    protected open fun knownContentLength(url: String): Long? = null
++
++    /** Content type to report in chunked mode when upstream does not send a usable one. */
++    protected open fun knownContentType(url: String): String? = null
++
++    protected open val upstreamChunkBytes: Long = 10L * 1024L * 1024L
++
+     // ─── Server State ──────────────────────────────────────────────────
+ 
+     private var server: EmbeddedServer<CIOApplicationEngine, CIOApplicationEngine.Configuration>? = null
+@@ -177,21 +201,20 @@
+         }
+     }
+ 
++    private class Upstream(val url: String, val response: okhttp3.Response)
++
+     // Retry only before downstream headers/bytes are sent. Media3 reopens its original
+     // DataSpec after a socket failure, preserving the byte offset; never splice renditions.
+-    private suspend fun openUpstream(id: K, range: String?): okhttp3.Response {
++    private suspend fun openUpstream(id: K, range: String?): Upstream {
+         for (attempt in 0..2) {
+             try {
+                 val url = getOrFetchStreamUrl(id) ?: throw java.io.IOException("Stream unavailable")
+                 if (!CloudStreamSecurity.isSafeRemoteStreamUrl(url, allowedHostSuffixes, true)) {
+                     throw java.io.IOException("Rejected upstream URL")
+                 }
+-                val request = Request.Builder().url(url).apply {
+-                    header("Accept-Encoding", "identity")
+-                    range?.let { header("Range", it) }
+-                }.build()
+-                val response = streamingClient.newCall(request).awaitResponse()
+-                if (attempt == 2 || !StreamRetryPolicy.retryStatus(response.code)) return response
++                val response = streamingClient.newCall(buildUpstreamRequest(url, range)).awaitResponse()
++                if (attempt == 2 || !StreamRetryPolicy.retryStatus(response.code)) return Upstream(url, response)
++                Timber.tag(proxyTag).w("Upstream HTTP %d (attempt %d), re-resolving", response.code, attempt + 1)
+                 response.close()
+             } catch (cancelled: CancellationException) {
+                 throw cancelled
+@@ -204,6 +227,114 @@
+         error("Unreachable retry state")
+     }
+ 
++    /** Thrown for upstream read failures so they can be retried; downstream errors are not. */
++    private class UpstreamReadException(cause: java.io.IOException) : java.io.IOException(cause)
++
++    private suspend fun openChunk(id: K, start: Long, endInclusive: Long, total: Long): Upstream {
++        val upstream = openUpstream(id, "bytes=$start-$endInclusive")
++        val code = upstream.response.code
++        val sameResource = knownContentLength(upstream.url) == total
++        if (!sameResource || (code != 206 && !(code == 200 && start == 0L))) {
++            upstream.response.close()
++            throw java.io.IOException("Upstream chunk rejected: HTTP $code sameResource=$sameResource")
++        }
++        return upstream
++    }
++
++    /**
++     * Serves [validation]'s range of a resource of known [total] size, fetching it upstream in
++     * bounded chunks. Only the first chunk is opened before headers are committed so failures
++     * still map to a proper status code for the player.
++     */
++    private suspend fun serveChunked(
++        call: ApplicationCall,
++        id: K,
++        total: Long,
++        validation: CloudStreamSecurity.RangeHeaderValidation
++    ) {
++        val from: Long
++        val to: Long
++        when {
++            validation.normalizedHeader == null -> { from = 0L; to = total - 1 }
++            validation.isSuffixRange -> {
++                from = (total - (validation.endInclusive ?: 0L)).coerceAtLeast(0L); to = total - 1
++            }
++            else -> {
++                from = validation.startInclusive ?: 0L
++                to = minOf(validation.endInclusive ?: (total - 1), total - 1)
++            }
++        }
++        if (from >= total || from > to) {
++            call.response.header("Content-Range", "bytes */$total")
++            call.respond(HttpStatusCode(416, "Range Not Satisfiable"), "Range not satisfiable")
++            return
++        }
++
++        val chunk = upstreamChunkBytes.coerceAtLeast(64L * 1024L)
++        var position = from
++        val first = openChunk(id, position, minOf(position + chunk - 1, to), total)
++        var pending: Upstream? = first
++        val contentTypeHeader = first.response.header("Content-Type")
++            ?.takeIf { it.substringBefore(';').trim().startsWith("audio/") }
++            ?: knownContentType(first.url)
++        if (!CloudStreamSecurity.isSupportedAudioContentType(contentTypeHeader)) {
++            first.response.close()
++            call.respond(HttpStatusCode.BadGateway, "Unsupported stream content type")
++            return
++        }
++        val contentType = contentTypeHeader?.substringBefore(';')?.trim()
++            ?.let { runCatching { ContentType.parse(it) }.getOrNull() } ?: ContentType.Audio.Any
++
++        val partial = validation.normalizedHeader != null
++        call.response.header("Accept-Ranges", "bytes")
++        if (partial) call.response.header("Content-Range", "bytes $from-$to/$total")
++
++        try {
++            call.respondBytesWriter(
++                contentType = contentType,
++                status = if (partial) HttpStatusCode.PartialContent else HttpStatusCode.OK,
++                contentLength = to - from + 1
++            ) {
++                withContext(Dispatchers.IO) {
++                    val buffer = ByteArray(64 * 1024)
++                    var failures = 0
++                    while (position <= to) {
++                        val chunkEnd = minOf(position + chunk - 1, to)
++                        try {
++                            val upstream = pending ?: openChunk(id, position, chunkEnd, total)
++                            pending = null
++                            upstream.response.use { response ->
++                                val input = response.body.byteStream()
++                                var remaining = chunkEnd - position + 1
++                                while (remaining > 0) {
++                                    val read = try {
++                                        input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
++                                    } catch (e: java.io.IOException) {
++                                        throw UpstreamReadException(e)
++                                    }
++                                    if (read < 0) throw UpstreamReadException(java.io.IOException("Upstream chunk ended early"))
++                                    writeFully(buffer, 0, read)
++                                    position += read
++                                    remaining -= read
++                                }
++                            }
++                            failures = 0
++                        } catch (e: CancellationException) {
++                            throw e
++                        } catch (e: UpstreamReadException) {
++                            if (++failures > 3) throw e
++                            Timber.tag(proxyTag).w(e, "Chunk failed at %d/%d, resuming", position, total)
++                            invalidateStream(id)
++                            delay(StreamRetryPolicy.delayMs(failures - 1))
++                        }
++                    }
++                }
++            }
++        } finally {
++            pending?.response?.close()
++        }
++    }
++
+     private fun createServer(port: Int): EmbeddedServer<CIOApplicationEngine, CIOApplicationEngine.Configuration> {
+         return embeddedServer(CIO, port = port, host = "127.0.0.1") {
+             routing {
+@@ -227,7 +358,13 @@
+                             return@get
+                         }
+ 
+-                        val response = openUpstream(id, rangeValidation.normalizedHeader)
++                        val total = getOrFetchStreamUrl(id)?.let { knownContentLength(it) }
++                        if (total != null) {
++                            serveChunked(call, id, total, rangeValidation)
++                            return@get
++                        }
++
++                        val response = openUpstream(id, rangeValidation.normalizedHeader).response
+ 
+                         response.use { upstream ->
+                             if (upstream.code != 200 && upstream.code != 206) {
+@@ -274,10 +411,14 @@
+                                 call.response.status(HttpStatusCode.OK)
+                             }
+                             call.response.header("Accept-Ranges", acceptRanges ?: "bytes")
+-                            contentLength?.let { call.response.header("Content-Length", it) }
+                             contentRange?.let { call.response.header("Content-Range", it) }
+ 
+-                            call.respondBytesWriter(contentType = responseContentType) {
++                            // Pass the length to the content object: setting the header manually
++                            // made Ktor add "Transfer-Encoding: chunked" next to Content-Length.
++                            call.respondBytesWriter(
++                                contentType = responseContentType,
++                                contentLength = contentLength?.toLongOrNull()
++                            ) {
+                                 withContext(Dispatchers.IO) {
+                                     body.byteStream().use { input ->
+                                         val buffer = ByteArray(64 * 1024)
+diff -ruN orig/data/stream/YouTubeStreamProxy.kt new/data/stream/YouTubeStreamProxy.kt
+--- orig/data/stream/YouTubeStreamProxy.kt	2026-09-21 13:50:17.926322071 +1000
++++ new/data/stream/YouTubeStreamProxy.kt	2026-09-21 13:52:49.003240478 +1000
+@@ -1,8 +1,11 @@
+ package com.theveloper.pixelplay.data.stream
+ 
+ import android.net.Uri
++import com.theveloper.pixelplay.data.youtube.YouTubeHttp
+ import com.theveloper.pixelplay.data.youtube.YouTubeStreamExtractor
++import com.theveloper.pixelplay.di.YouTubeOkHttpClient
+ import okhttp3.OkHttpClient
++import okhttp3.Request
+ import com.theveloper.pixelplay.data.youtube.renditionKey
+ import com.theveloper.pixelplay.data.youtube.selectRendition
+ import javax.inject.Inject
+@@ -10,7 +13,7 @@
+ 
+ @Singleton
+ class YouTubeStreamProxy @Inject constructor(
+-    okHttpClient: OkHttpClient,
++    @YouTubeOkHttpClient okHttpClient: OkHttpClient,
+     private val youTubeStreamExtractor: YouTubeStreamExtractor
+ ) : CloudStreamProxy<String>(okHttpClient) {
+ 
+@@ -77,6 +80,25 @@
+         }
+     }
+ 
++    // googlevideo needs NewPipe's request shape (UA per client, POST "x\0", rn, Range).
++    override fun buildUpstreamRequest(url: String, range: String?): Request {
++        if (!YouTubeHttp.isVideoPlaybackUrl(url)) return super.buildUpstreamRequest(url, range)
++        val spec = range?.removePrefix("bytes=")
++        if (range != null && spec!!.startsWith("-")) {
++            // Suffix range with unknown length: forward it verbatim.
++            return YouTubeHttp.playbackRequest(url, 0L, null).newBuilder().header("Range", range).build()
++        }
++        val start = spec?.substringBefore('-')?.toLongOrNull() ?: 0L
++        val end = spec?.substringAfter('-', "")?.toLongOrNull()
++        return YouTubeHttp.playbackRequest(url, start, end)
++    }
++
++    override fun knownContentLength(url: String): Long? = YouTubeHttp.contentLengthOf(url)
++
++    override fun knownContentType(url: String): String? = YouTubeHttp.mimeTypeOf(url)
++
++    override val upstreamChunkBytes: Long = YouTubeHttp.CHUNK_BYTES
++
+     override fun extractIdFromUri(uri: Uri): String? {
+         val raw = uri.host?.takeIf { it.isNotEmpty() }
+             ?: uri.schemeSpecificPart?.removePrefix("//")?.substringBefore('/')?.takeIf { it.isNotEmpty() }
+diff -ruN orig/data/youtube/NewPipeDownloader.kt new/data/youtube/NewPipeDownloader.kt
+--- orig/data/youtube/NewPipeDownloader.kt	2026-09-21 13:50:17.926452912 +1000
++++ new/data/youtube/NewPipeDownloader.kt	2026-09-21 13:50:59.027385733 +1000
+@@ -1,5 +1,6 @@
+ package com.theveloper.pixelplay.data.youtube
+ 
++import com.theveloper.pixelplay.di.YouTubeOkHttpClient
+ import okhttp3.OkHttpClient
+ import okhttp3.Request
+ import okhttp3.RequestBody.Companion.toRequestBody
+@@ -11,52 +12,49 @@
+ import javax.inject.Inject
+ import javax.inject.Singleton
+ 
++/**
++ * NewPipe transport. Uses the dedicated YouTube client so the headers NewPipe sets per
++ * InnerTube client (User-Agent, X-Youtube-Client-*, cookies) reach YouTube unchanged.
++ */
+ @Singleton
+ class NewPipeDownloader @Inject constructor(
+-    private val client: OkHttpClient
++    @YouTubeOkHttpClient private val client: OkHttpClient
+ ) : Downloader() {
+ 
+     @Throws(IOException::class, ReCaptchaException::class)
+     override fun execute(request: NewPipeRequest): NewPipeResponse {
+-        val httpMethod = request.httpMethod()
+         val url = request.url()
+-        val headers = request.headers()
+-        val dataToSend = request.dataToSend()
++        val builder = Request.Builder().url(url)
+ 
+-        val builder = Request.Builder()
+-            .url(url)
+-
+-        for ((headerName, headerValues) in headers) {
+-            if (headerValues.isNotEmpty()) {
+-                builder.removeHeader(headerName)
+-                for (value in headerValues) {
+-                    builder.addHeader(headerName, value)
+-                }
+-            }
++        var hasUserAgent = false
++        for ((headerName, headerValues) in request.headers()) {
++            if (headerValues.isEmpty()) continue
++            builder.removeHeader(headerName)
++            headerValues.forEach { builder.addHeader(headerName, it) }
++            if (headerName.equals("User-Agent", ignoreCase = true)) hasUserAgent = true
+         }
++        if (!hasUserAgent) builder.header("User-Agent", YouTubeHttp.DESKTOP_USER_AGENT)
+ 
+-        val requestBody = dataToSend?.toRequestBody(null)
+-        builder.method(httpMethod, requestBody)
+-
+-        val okHttpResponse = client.newCall(builder.build()).execute()
+-
+-        val responseCode = okHttpResponse.code
+-        val responseMessage = okHttpResponse.message
+-        val responseHeaders = okHttpResponse.headers.toMultimap()
+-        val responseBody = okHttpResponse.body.string()
+-        val latestUrl = okHttpResponse.request.url.toString()
+-
+-        if (responseCode == 429) {
+-            okHttpResponse.close()
+-            throw ReCaptchaException("ReCaptcha required", url)
++        val method = request.httpMethod()
++        val body = request.dataToSend()?.toRequestBody(null)
++            ?: if (method in BODY_METHODS) ByteArray(0).toRequestBody(null) else null
++        builder.method(method, body)
++
++        client.newCall(builder.build()).execute().use { response ->
++            if (response.code == 429) {
++                throw ReCaptchaException("reCaptcha challenge requested", url)
++            }
++            return NewPipeResponse(
++                response.code,
++                response.message,
++                response.headers.toMultimap(),
++                response.body.string(),
++                response.request.url.toString()
++            )
+         }
++    }
+ 
+-        return NewPipeResponse(
+-            responseCode,
+-            responseMessage,
+-            responseHeaders,
+-            responseBody,
+-            latestUrl
+-        )
++    private companion object {
++        val BODY_METHODS = setOf("POST", "PUT", "PATCH")
+     }
+ }
+diff -ruN orig/data/youtube/SongDownloadManager.kt new/data/youtube/SongDownloadManager.kt
+--- orig/data/youtube/SongDownloadManager.kt	2026-09-21 13:50:17.926430422 +1000
++++ new/data/youtube/SongDownloadManager.kt	2026-09-21 13:53:13.070631847 +1000
+@@ -25,6 +25,7 @@
+ import kotlinx.coroutines.sync.Mutex
+ import kotlinx.coroutines.sync.withLock
+ import com.theveloper.pixelplay.data.stream.awaitResponse
++import com.theveloper.pixelplay.di.YouTubeOkHttpClient
+ import okhttp3.OkHttpClient
+ import okhttp3.Request
+ import org.jaudiotagger.audio.AudioFileIO
+@@ -53,7 +54,8 @@
+     private val spotifyResolver: com.theveloper.pixelplay.data.spotify.SpotifyToYouTubeResolver,
+     private val cloudSongDao: CloudSongDao,
+     private val musicDao: com.theveloper.pixelplay.data.database.MusicDao,
+-    private val okHttpClient: OkHttpClient
++    private val okHttpClient: OkHttpClient,
++    @YouTubeOkHttpClient private val youTubeHttpClient: OkHttpClient
+ ) {
+     private val downloadLocks = Array(32) { Mutex() }
+     private val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+@@ -112,17 +114,18 @@
+             } else song.id.removePrefix("yt_"))?.removePrefix("yt_")
+                 ?: throw java.io.IOException("No matching audio source")
+ 
+-            // jaudiotagger cannot write WebM tags. Request the actual MP4 rendition
+-            // for tagged downloads; playback continues to support MP4 and WebM.
+-            val stream = YouTubeAudioStream.select(
+-                youTubeStreamExtractor.streamManifest(videoId).filter { it.container == "mp4" },
+-                AudioQualityPreset.AUTO
+-            )
++            // Prefer the MP4/AAC rendition because jaudiotagger can tag it; fall back to the
++            // WebM/Opus rendition (untagged; metadata still lives in the library DB) instead of
++            // failing, since some videos only expose Opus.
++            val manifest = youTubeStreamExtractor.streamManifest(videoId)
++            val stream = YouTubeAudioStream.select(manifest.filter { it.container == "mp4" }, AudioQualityPreset.AUTO)
++                ?: YouTubeAudioStream.select(manifest, AudioQualityPreset.AUTO)
+             if (stream == null) {
+-                val error = "No taggable MP4 audio rendition is available"
++                val error = "No downloadable audio stream is available"
+                 updateProgress(songId, DownloadProgress.Failed(songId, error))
+                 return@withContext Result.failure(Exception(error))
+             }
++            val renditionKey = stream.renditionKey()
+ 
+             // Step 2: Download audio file
+             updateProgress(songId, DownloadProgress.Downloading(songId, 0))
+@@ -134,47 +137,49 @@
+             val partial = File.createTempFile(".download-", ".${stream.fileExtension}", downloadDir)
+             stagingFile = partial
+ 
+-            var success = false
++            // Resumable: a failed attempt keeps the bytes already written and continues from
++            // there with a re-extracted URL for the *same* rendition (same itag => same bytes).
++            var currentStream = stream
+             var attempt = 0
+-            val maxAttempts = 3
+-            var currentDelay = 1000L
+-            var currentStreamUrl: String = stream.url
+-
+-            while (attempt < maxAttempts && !success) {
++            val maxAttempts = 4
++            while (true) {
+                 try {
+-                    downloadFile(currentStreamUrl, partial, songId)
+-                    success = true
++                    downloadFile(currentStream, partial, songId)
++                    break
+                 } catch (e: CancellationException) {
+-                    partial.delete()
+                     throw e
+                 } catch (e: Exception) {
+                     attempt++
+-                    Timber.tag(TAG).w(e, "Download attempt $attempt failed for song: $songId")
+-                    if (partial.exists()) {
+-                        partial.delete()
+-                    }
+-                    if (attempt < maxAttempts) {
+-                        delay(currentDelay)
+-                        currentDelay *= 3
+-                        val refreshed = youTubeStreamExtractor.streamManifest(videoId, forceRefresh = true)
+-                            .filter { it.container == stream.container }
+-                        val newStream = YouTubeAudioStream.select(refreshed, AudioQualityPreset.AUTO)
+-                        if (newStream != null) {
+-                            currentStreamUrl = newStream.url
+-                        } else {
+-                            throw Exception("Could not re-resolve audio stream")
+-                        }
++                    Timber.tag(TAG).w(e, "Download attempt $attempt failed for song: $songId (have ${partial.length()} bytes)")
++                    if (attempt >= maxAttempts) throw e
++                    delay(1000L * attempt)
++                    val refreshed = youTubeStreamExtractor.streamManifest(videoId, forceRefresh = true)
++                    val same = selectRendition(refreshed, renditionKey)
++                    currentStream = if (same != null && same.sameBytesAs(currentStream)) {
++                        same
+                     } else {
+-                        throw e
++                        // Different file on the server side: restart from zero.
++                        java.io.FileOutputStream(partial).use { }
++                        same ?: selectRendition(refreshed.filter { it.container == stream.container }, null)
++                            ?: throw java.io.IOException("Could not re-resolve audio stream")
+                     }
+                 }
+             }
+ 
+-            // Step 3: Tag metadata
++            // Step 3: Tag metadata (best effort: YouTube serves DASH-style MP4 files that some
++            // tag writers reject; an untagged file still plays and is indexed via the DB).
+             updateProgress(songId, DownloadProgress.Tagging(songId))
+-            tagMetadata(partial, song)
++            if (stream.container == "mp4") {
++                try {
++                    tagMetadata(partial, song)
++                } catch (e: CancellationException) {
++                    throw e
++                } catch (e: Exception) {
++                    Timber.tag(TAG).w(e, "Tagging failed for %s; keeping untagged audio", songId)
++                }
++            }
+             currentCoroutineContext().ensureActive()
+-            // Atomic rename happens only after transfer, tag commit and readback succeed.
++            // Atomic rename happens only after transfer (and tagging, when possible) succeeded.
+             java.nio.file.Files.move(partial.toPath(), outputFile.toPath(),
+                 java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                 java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+@@ -259,45 +264,57 @@
+         }
+     }
+ 
+-    private suspend fun downloadFile(url: String, outputFile: File, songId: String) {
+-        val requestBuilder = Request.Builder()
+-            .url(url)
+-            .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+-            .addHeader("Accept", "*/*")
+-            .addHeader("Accept-Encoding", "identity")
+-
+-        val clientToUse = okHttpClient.newBuilder()
+-            .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+-            .callTimeout(0, java.util.concurrent.TimeUnit.SECONDS)
+-            .followRedirects(true)
+-            .followSslRedirects(true)
+-            .build()
+-
+-        clientToUse.newCall(requestBuilder.build()).awaitResponse().use { response ->
+-            if (response.code != 200) throw java.io.IOException("Download failed: HTTP ${response.code}")
+-            val type = response.body.contentType()?.toString()?.substringBefore(';')
+-            if (type != null && !type.startsWith("audio/") && type !in setOf("video/mp4", "application/octet-stream")) {
+-                throw java.io.IOException("Response is not audio")
+-            }
+-            val contentLength = response.body.contentLength()
+-            var totalBytesRead = 0L
+-            response.body.byteStream().use { input ->
+-                FileOutputStream(outputFile).use { output ->
+-                    val buffer = ByteArray(64 * 1024)
+-                    while (true) {
+-                        currentCoroutineContext().ensureActive()
+-                        val read = input.read(buffer)
+-                        if (read < 0) break
+-                        output.write(buffer, 0, read)
+-                        totalBytesRead += read
+-                        val percent = if (contentLength > 0) (totalBytesRead * 100 / contentLength).toInt().coerceIn(0, 99) else 0
+-                        updateProgress(songId, DownloadProgress.Downloading(songId, percent))
++    private fun YouTubeAudioStream.sameBytesAs(other: YouTubeAudioStream): Boolean =
++        contentLength > 0 && contentLength == other.contentLength && renditionKey() == other.renditionKey()
++
++    /**
++     * Downloads [stream] into [outputFile], appending to whatever is already there.
++     * Uses NewPipe's googlevideo request shape and 10 MiB range chunks (like yt-dlp), so long
++     * tracks are not throttled or cut off mid-transfer.
++     */
++    private suspend fun downloadFile(stream: YouTubeAudioStream, outputFile: File, songId: String) {
++        val total = stream.contentLength.takeIf { it > 0 }
++        var position = outputFile.length()
++        if (total != null && position > total) {
++            java.io.FileOutputStream(outputFile).use { }
++            position = 0L
++        }
++        FileOutputStream(outputFile, true).use { output ->
++            val buffer = ByteArray(64 * 1024)
++            while (total == null || position < total) {
++                currentCoroutineContext().ensureActive()
++                val chunkEnd = total?.let { YouTubeHttp.chunkEnd(position, it - 1) }
++                val request = YouTubeHttp.playbackRequest(stream.url, position, chunkEnd)
++                val finished = youTubeHttpClient.newCall(request).awaitResponse().use { response ->
++                    val ok = response.code == 206 || (response.code == 200 && position == 0L)
++                    if (!ok) throw java.io.IOException("Download failed: HTTP ${response.code}")
++                    val type = response.body.contentType()?.toString()?.substringBefore(';')
++                    if (type != null && !type.startsWith("audio/") && type !in setOf("video/mp4", "application/octet-stream")) {
++                        throw java.io.IOException("Response is not audio")
++                    }
++                    val expected = chunkEnd?.let { it - position + 1 } ?: response.body.contentLength()
++                    var readInChunk = 0L
++                    response.body.byteStream().use { input ->
++                        while (expected < 0 || readInChunk < expected) {
++                            currentCoroutineContext().ensureActive()
++                            val max = if (expected < 0) buffer.size.toLong() else minOf(buffer.size.toLong(), expected - readInChunk)
++                            val read = input.read(buffer, 0, max.toInt())
++                            if (read < 0) break
++                            output.write(buffer, 0, read)
++                            readInChunk += read
++                            position += read
++                            val percent = if (total != null) (position * 100 / total).toInt().coerceIn(0, 99) else 0
++                            updateProgress(songId, DownloadProgress.Downloading(songId, percent))
++                        }
+                     }
+-                    DownloadIntegrity.requireComplete(totalBytesRead, contentLength)
+-                    output.fd.sync()
++                    if (expected >= 0) DownloadIntegrity.requireComplete(readInChunk, expected)
++                    total == null // unknown size: a single open-ended request is the whole file
+                 }
++                if (finished) break
+             }
++            output.fd.sync()
+         }
++        if (total != null) DownloadIntegrity.requireComplete(outputFile.length(), total)
+     }
+ 
+     private suspend fun readArtwork(input: java.io.InputStream): ByteArray {
+diff -ruN orig/data/youtube/YouTubeAudioStream.kt new/data/youtube/YouTubeAudioStream.kt
+--- orig/data/youtube/YouTubeAudioStream.kt	2026-09-21 13:50:17.926523042 +1000
++++ new/data/youtube/YouTubeAudioStream.kt	2026-09-21 13:51:09.591960652 +1000
+@@ -8,6 +8,8 @@
+     val mimeType: String,
+     val bitrate: Int, // bits/second, not NewPipe's kbit/second
+     val expiresAt: Long,
++    /** Exact byte size (googlevideo `clen`), or -1 when unknown. */
++    val contentLength: Long = -1L,
+ ) {
+     val container: String get() = if (mimeType.contains("webm")) "webm" else "mp4"
+     val fileExtension: String get() = if (container == "webm") "webm" else "m4a"
+diff -ruN orig/data/youtube/YouTubeHttp.kt new/data/youtube/YouTubeHttp.kt
+--- orig/data/youtube/YouTubeHttp.kt	1970-01-01 10:00:00.000000000 +1000
++++ new/data/youtube/YouTubeHttp.kt	2026-09-21 13:50:45.921033823 +1000
+@@ -0,0 +1,84 @@
++package com.theveloper.pixelplay.data.youtube
++
++import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
++import okhttp3.Request
++import okhttp3.RequestBody.Companion.toRequestBody
++import org.schabi.newpipe.extractor.services.youtube.YoutubeParsingHelper
++import java.util.concurrent.atomic.AtomicInteger
++
++/**
++ * Request rules for `googlevideo.com/videoplayback` URLs produced by NewPipeExtractor.
++ *
++ * Mirrors what NewPipe's own player (YoutubeHttpDataSource) does for the same extractor
++ * version, which is also what Spotube's YouTube audio plugin relies on through its host
++ * YouTubeEngine:
++ *  - visionOS client URLs must be fetched with the visionOS user agent, everything else with
++ *    a desktop browser user agent. A foreign UA (e.g. "PixelPlayer/1.0") gets HTTP 403.
++ *  - requests are POSTs with the 2-byte body `x\0`, an incrementing `rn` query parameter and a
++ *    normal Range header.
++ *  - web client URLs additionally need Origin/Referer/Sec-Fetch headers.
++ *  - large ranges are split into [CHUNK_BYTES] requests (yt-dlp uses the same 10 MiB chunk
++ *    size) because googlevideo throttles or cuts long open-ended responses.
++ */
++object YouTubeHttp {
++    /** Same value as NewPipe's DownloaderImpl.USER_AGENT. */
++    const val DESKTOP_USER_AGENT =
++        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0"
++    const val CHUNK_BYTES: Long = 10L * 1024L * 1024L
++
++    private const val YOUTUBE_BASE_URL = "https://www.youtube.com"
++    private val POST_BODY = byteArrayOf(0x78, 0x00)
++    private val requestNumber = AtomicInteger(0)
++
++    fun isVideoPlaybackUrl(url: String): Boolean {
++        val parsed = url.toHttpUrlOrNull() ?: return false
++        return parsed.host.endsWith("googlevideo.com") && parsed.encodedPath.startsWith("/videoplayback")
++    }
++
++    fun userAgentFor(url: String): String =
++        if (runCatching { YoutubeParsingHelper.isVisionOsStreamingUrl(url) }.getOrDefault(false)) {
++            YoutubeParsingHelper.getVisionOsUserAgent(null)
++        } else {
++            DESKTOP_USER_AGENT
++        }
++
++    /** Total byte size advertised by googlevideo in the `clen` parameter, if present. */
++    fun contentLengthOf(url: String): Long? =
++        url.toHttpUrlOrNull()?.queryParameter("clen")?.toLongOrNull()?.takeIf { it > 0 }
++
++    /** MIME type advertised by googlevideo in the `mime` parameter, if present. */
++    fun mimeTypeOf(url: String): String? =
++        url.toHttpUrlOrNull()?.queryParameter("mime")?.takeIf { it.startsWith("audio/") }
++
++    /**
++     * Builds a request for one byte range of a videoplayback URL.
++     * [endInclusive] null means open-ended (only used when the total length is unknown).
++     */
++    fun playbackRequest(url: String, startInclusive: Long, endInclusive: Long?): Request {
++        val requestUrl = if (isVideoPlaybackUrl(url) && !url.contains("&rn=")) {
++            "$url&rn=${requestNumber.incrementAndGet()}"
++        } else url
++        val builder = Request.Builder()
++            .url(requestUrl)
++            .header("User-Agent", userAgentFor(url))
++            .header("Accept", "*/*")
++            .header("Accept-Encoding", "identity")
++            .header("Range", "bytes=$startInclusive-${endInclusive ?: ""}")
++        if (runCatching { YoutubeParsingHelper.isWebStreamingUrl(url) }.getOrDefault(false)) {
++            builder.header("Origin", YOUTUBE_BASE_URL)
++                .header("Referer", YOUTUBE_BASE_URL)
++                .header("Sec-Fetch-Dest", "empty")
++                .header("Sec-Fetch-Mode", "cors")
++                .header("Sec-Fetch-Site", "cross-site")
++        }
++        return if (isVideoPlaybackUrl(url)) {
++            builder.post(POST_BODY.toRequestBody(null)).build()
++        } else {
++            builder.get().build()
++        }
++    }
++
++    /** Next chunk end (inclusive) for a transfer from [position] up to [lastByteInclusive]. */
++    fun chunkEnd(position: Long, lastByteInclusive: Long): Long =
++        minOf(position + CHUNK_BYTES - 1, lastByteInclusive)
++}
+diff -ruN orig/data/youtube/YouTubeStreamExtractor.kt new/data/youtube/YouTubeStreamExtractor.kt
+--- orig/data/youtube/YouTubeStreamExtractor.kt	2026-09-21 13:50:17.926685702 +1000
++++ new/data/youtube/YouTubeStreamExtractor.kt	2026-09-21 13:51:09.592159097 +1000
+@@ -7,6 +7,7 @@
+ import kotlinx.coroutines.sync.withLock
+ import kotlinx.coroutines.withContext
+ import org.schabi.newpipe.extractor.ServiceList
++import org.schabi.newpipe.extractor.stream.DeliveryMethod
+ import timber.log.Timber
+ import javax.inject.Inject
+ import javax.inject.Singleton
+@@ -59,9 +60,20 @@
+                 val streams = extractor.audioStreams.orEmpty().mapNotNull { stream ->
+                     val mimeType = stream.format?.mimeType ?: return@mapNotNull null
+                     if (!stream.isUrl || mimeType !in setOf("audio/mp4", "audio/webm")) return@mapNotNull null
++                    // Only plain progressive files can be proxied/downloaded byte-for-byte.
++                    // DASH/HLS (OTF, live) renditions need a manifest-aware player.
++                    if (stream.deliveryMethod != DeliveryMethod.PROGRESSIVE_HTTP) return@mapNotNull null
+                     val expiry = YouTubeAudioStream.expiry(stream.content, now)
+                     if (expiry <= now) return@mapNotNull null
+-                    YouTubeAudioStream(stream.content, mimeType, stream.averageBitrate * 1000, expiry)
++                    val bitrateBps = when {
++                        stream.averageBitrate > 0 -> stream.averageBitrate * 1000
++                        (stream.itagItem?.bitrate ?: 0) > 0 -> stream.itagItem!!.bitrate
++                        else -> stream.bitrate.coerceAtLeast(0)
++                    }
++                    val contentLength = YouTubeHttp.contentLengthOf(stream.content)
++                        ?: stream.itagItem?.contentLength?.takeIf { it > 0 }
++                        ?: -1L
++                    YouTubeAudioStream(stream.content, mimeType, bitrateBps, expiry, contentLength)
+                 }.distinctBy { it.url }.sortedByDescending { it.bitrate }
+                 ensureActive()
+                 Timber.tag("StreamingLatency").d("manifest_network_ms=%d streams=%d", (System.nanoTime() - started) / 1_000_000, streams.size)
+@@ -88,4 +100,4 @@
+     fun invalidate(videoId: String) {
+         synchronized(manifests) { manifests.remove(videoId.removePrefix("yt_")) }
+     }
+-}
++}
+diff -ruN orig/di/Qualifiers.kt new/di/Qualifiers.kt
+--- orig/di/Qualifiers.kt	2026-09-21 13:50:17.927713142 +1000
++++ new/di/Qualifiers.kt	2026-09-21 13:50:45.921033823 +1000
+@@ -57,3 +57,11 @@
+ @Qualifier
+ @Retention(AnnotationRetention.BINARY)
+ annotation class ITunesRetrofit
++
++/**
++ * Qualifier for the OkHttpClient used for NewPipe extraction and googlevideo audio transfers.
++ * It must NOT carry the app-wide User-Agent interceptor: YouTube rejects foreign user agents.
++ */
++@Qualifier
++@Retention(AnnotationRetention.BINARY)
++annotation class YouTubeOkHttpClient
+diff -ruN orig/di/YouTubeNetworkModule.kt new/di/YouTubeNetworkModule.kt
+--- orig/di/YouTubeNetworkModule.kt	1970-01-01 10:00:00.000000000 +1000
++++ new/di/YouTubeNetworkModule.kt	2026-09-21 13:50:45.922961254 +1000
+@@ -0,0 +1,62 @@
++package com.theveloper.pixelplay.di
++
++import com.theveloper.pixelplay.data.network.NetworkAccessPolicy
++import com.theveloper.pixelplay.data.network.NetworkDecision
++import com.theveloper.pixelplay.data.network.NetworkPurpose
++import com.theveloper.pixelplay.data.youtube.YouTubeHttp
++import dagger.Module
++import dagger.Provides
++import dagger.hilt.InstallIn
++import dagger.hilt.components.SingletonComponent
++import okhttp3.OkHttpClient
++import java.io.IOException
++import java.util.concurrent.TimeUnit
++import javax.inject.Singleton
++
++@Module
++@InstallIn(SingletonComponent::class)
++object YouTubeNetworkModule {
++
++    /**
++     * Shares the app client's connection pool and dispatcher but drops its interceptors.
++     * The app-wide interceptor rewrites every User-Agent to "PixelPlayer/1.0 ...", which breaks
++     * both NewPipe's InnerTube requests (they set client-specific UAs) and googlevideo audio
++     * downloads (403). Offline mode is still honoured.
++     */
++    @Provides
++    @Singleton
++    @YouTubeOkHttpClient
++    fun provideYouTubeOkHttpClient(
++        base: OkHttpClient,
++        networkAccessPolicy: NetworkAccessPolicy
++    ): OkHttpClient = base.newBuilder()
++        .apply {
++            interceptors().clear()
++            networkInterceptors().clear()
++        }
++        .connectTimeout(10, TimeUnit.SECONDS)
++        .readTimeout(20, TimeUnit.SECONDS)
++        .writeTimeout(20, TimeUnit.SECONDS)
++        .callTimeout(0, TimeUnit.SECONDS)
++        .followRedirects(true)
++        .followSslRedirects(true)
++        .retryOnConnectionFailure(true)
++        .addInterceptor { chain ->
++            val decision = kotlinx.coroutines.runBlocking {
++                networkAccessPolicy.getDecision(NetworkPurpose.Update)
++            }
++            if (decision != NetworkDecision.Allowed) {
++                throw IOException("Network request blocked by policy: $decision")
++            }
++            val request = chain.request()
++            // NewPipe sets its own UA for InnerTube calls; only fill it in when absent.
++            if (request.header("User-Agent").isNullOrBlank()) {
++                chain.proceed(
++                    request.newBuilder().header("User-Agent", YouTubeHttp.DESKTOP_USER_AGENT).build()
++                )
++            } else {
++                chain.proceed(request)
++            }
++        }
++        .build()
++}
+--- /mnt/user-data/uploads/PixelPlayer-Clean-/app/proguard-rules.pro	2026-09-21 13:47:27.354949451 +1000
++++ root/proguard-rules.pro	2026-09-21 13:53:57.224282145 +1000
+@@ -208,3 +208,23 @@
+     public static int d(...);
+     public static int i(...);
+ }
++
++# ── NewPipeExtractor (YouTube search / stream extraction) ──────────────────────
++# Same rules the NewPipe app ships for the extractor. Without them R8 strips the
++# reflectively-loaded time-ago patterns, Rhino (used to decipher stream signatures and the
++# "n" throttling parameter) and protobuf fields used for player requests, so release builds
++# find no audio streams while debug builds work.
++-keep class org.schabi.newpipe.extractor.timeago.patterns.** { *; }
++-keep class org.mozilla.javascript.* { *; }
++-keep class org.mozilla.javascript.** { *; }
++-keep class org.mozilla.javascript.engine.** { *; }
++-keep class org.mozilla.classfile.ClassFileWriter
++-dontwarn org.mozilla.javascript.JavaToJSONConverters
++-dontwarn org.mozilla.javascript.tools.**
++-keep class javax.script.** { *; }
++-dontwarn javax.script.**
++-keep class jdk.dynalink.** { *; }
++-dontwarn jdk.dynalink.**
++-keepclassmembers class * extends com.google.protobuf.GeneratedMessageLite {
++    <fields>;
++}

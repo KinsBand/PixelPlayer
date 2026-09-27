@@ -1,0 +1,493 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Library Screen -->
+    <string name="library_screen_title">KitaplÄ±k</string>
+    <string name="library_tabs_sheet_title">KitaplÄ±k sekmeleri</string>
+    <string name="library_tabs_sheet_subtitle">DoÄŸrudan herhangi bir sekmeye atlayÄ±n veya onlarÄ± yeniden sÄ±ralayÄ±n.</string>
+    <string name="library_reorder_tabs_label">Sekmeleri yeniden sÄ±rala</string>
+    <!-- Library Tab Names -->
+    <string name="library_tab_songs">ÅžarkÄ±lar</string>
+    <string name="library_tab_albums">AlbÃ¼mler</string>
+    <string name="library_tab_artists">SanatÃ§Ä±lar</string>
+    <string name="library_tab_playlists">Ã‡alma Listeleri</string>
+    <string name="library_tab_folders">KlasÃ¶rler</string>
+    <string name="library_tab_liked">BeÄŸenilenler</string>
+    <!-- Library Toasts -->
+    <string name="library_toast_playlist_created">Ã‡alma listesi baÅŸarÄ±yla oluÅŸturuldu</string>
+    <string name="library_toast_set_ai_provider_api_key_first">Ã–nce yapay zeka saÄŸlayÄ±cÄ±nÄ±zÄ±n API anahtarÄ±nÄ± ayarlayÄ±n</string>
+    <string name="library_toast_set_gemini_api_key_first">Ã–nce Gemini API anahtarÄ±nÄ±zÄ± ayarlayÄ±n</string>
+    <string name="library_toast_added_to_queue">SÄ±raya eklendi</string>
+    <string name="library_toast_playing_next">SÄ±rada oynatÄ±lacak</string>
+    <!-- Library Toolbar & Navigation -->
+    <string name="library_cd_open_settings">Ayarlar</string>
+    <string name="library_tab_edit">DÃ¼zenle</string>
+    <string name="library_cd_reorder_tabs">Sekmeleri yeniden sÄ±rala</string>
+    <string name="library_cd_expand_tab_menu">MenÃ¼yÃ¼ geniÅŸlet</string>
+    <!-- Library Multi-Selection & Folders -->
+    <string name="library_toast_max_albums_selection">En fazla %1$d albÃ¼m seÃ§ebilirsiniz</string>
+    <string name="library_folder_name_fallback">KlasÃ¶r</string>
+    <string name="library_cd_folder">KlasÃ¶r</string>
+    <!-- Library Sort & View Bottom Sheet -->
+    <string name="library_sort_by_title">SÄ±ralama Ã¶lÃ§Ã¼tÃ¼</string>
+    <string name="library_sort_section_view">GÃ¶rÃ¼nÃ¼m</string>
+    <string name="library_sort_toggle_playlist_view">Ã‡alma Listesi GÃ¶rÃ¼nÃ¼mÃ¼</string>
+    <string name="library_view_mode_grid">Izgara</string>
+    <string name="library_view_mode_list">Liste</string>
+    <string name="library_storage_internal">Dahili</string>
+    <string name="library_storage_sd_card">SD Kart</string>
+    <string name="library_storage_sd_card_unavailable">SD kart ÅŸu anda kullanÄ±lamÄ±yor.</string>
+    <string name="library_sort_section_cloud">Bulut</string>
+    <string name="library_cloud_sources_heading">Bulut</string>
+    <string name="library_cloud_only_label">Sadece Bulut</string>
+    <!-- Library AI Metadata Processing -->
+    <string name="library_generating_ai_metadata">Yapay zeka ile meta veriler oluÅŸturuluyorâ€¦</string>
+    <!-- Library list errors -->
+    <string name="library_error_loading_songs">ÅžarkÄ±lar yÃ¼klenirken hata oluÅŸtu</string>
+    <string name="library_album_detail_error_loading_albums">AlbÃ¼mler yÃ¼klenirken hata oluÅŸtu</string>
+    <string name="library_artist_error_loading_artists">SanatÃ§Ä±lar yÃ¼klenirken hata oluÅŸtu</string>
+    <string name="library_action_retry">Yeniden Dene</string>
+    <!-- Library empty (paginated) -->
+    <string name="library_no_songs_in_library_message">KitaplÄ±ÄŸÄ±nÄ±zda ÅŸarkÄ± bulunamadÄ±.</string>
+    <string name="library_no_songs_rescan_hint">CihazÄ±nÄ±zda mÃ¼zik varsa, ayarlardan kitaplÄ±ÄŸÄ±nÄ±zÄ± yeniden taramayÄ± deneyin.</string>
+    <string name="library_cd_no_songs_in_library">ÅžarkÄ± bulunamadÄ±</string>
+    <!-- Library action row -->
+    <string name="library_action_new">Yeni</string>
+    <string name="library_cd_create_new_playlist">Yeni Ã§alma listesi oluÅŸtur</string>
+    <string name="library_cd_import_m3u_playlist">M3U Ã§alma listesi iÃ§e aktar</string>
+    <string name="library_cd_locate_current_song">Mevcut ÅŸarkÄ±yÄ± bul</string>
+    <string name="library_storage_filter_all_songs">TÃ¼m ÅŸarkÄ±lar</string>
+    <string name="library_storage_filter_online">BULUT</string>
+    <string name="library_storage_filter_offline">YEREL</string>
+    <string name="library_cd_sort_options">SÄ±ralama seÃ§enekleri</string>
+    <!-- Library selection action row -->
+    <string name="library_selection_all">TÃ¼mÃ¼</string>
+    <string name="library_selection_deselect">SeÃ§imi kaldÄ±r</string>
+    <string name="library_selection_more_options">Daha fazla seÃ§enek</string>
+    <!-- Library Syncing -->
+    <string name="library_sync_scanning">MÃ¼zik dosyalarÄ± taranÄ±yorâ€¦</string>
+    <string name="library_sync_processing">Dosyalar iÅŸleniyorâ€¦</string>
+    <string name="library_sync_files_progress">%1$d / %2$d dosya</string>
+    <string name="library_sync_in_progress">KitaplÄ±k senkronize ediliyorâ€¦</string>
+    <string name="library_sync_complete">Senkronizasyon tamamlandÄ±</string>
+    <string name="library_sync_pending">Bekleniyorâ€¦</string>
+    <string name="library_syncing">KitaplÄ±k senkronize ediliyorâ€¦</string>
+    <string name="library_sync_cache">AlbÃ¼m kapaÄŸÄ± Ã¶nbelleÄŸi temizleniyorâ€¦</string>
+    <string name="library_sync_cloud">Bulut kaynaklarÄ± senkronize ediliyorâ€¦</string>
+    <string name="library_sync_lyrics">ÅžarkÄ± sÃ¶zleri taranÄ±yorâ€¦</string>
+    <!-- Library Empty State -->
+    <string name="library_empty_songs_all_title">HenÃ¼z ÅŸarkÄ± yok</string>
+    <string name="library_empty_songs_all_subtitle">Dinlemeye baÅŸlamak iÃ§in cihazÄ±nÄ±za mÃ¼zik ekleyin veya bir bulut kaynaÄŸÄ±nÄ± senkronize edin.</string>
+    <string name="library_empty_songs_offline_title">Yerel ÅŸarkÄ± bulunamadÄ±</string>
+    <string name="library_empty_songs_offline_subtitle">BaÅŸka bir kaynak filtresi deneyin veya cihaz kitaplÄ±ÄŸÄ±nÄ± yeniden tarayÄ±n.</string>
+    <string name="library_empty_songs_online_title">Bulut ÅŸarkÄ±sÄ± bulunamadÄ±</string>
+    <string name="library_empty_songs_online_subtitle">Sync cloud songs, or switch to local source.</string>
+    <string name="library_empty_albums_all_title">KullanÄ±labilir albÃ¼m yok</string>
+    <string name="library_empty_albums_all_subtitle">KitaplÄ±ÄŸÄ±nÄ±zdaki parÃ§alar gruplandÄ±ÄŸÄ±nda albÃ¼mler burada gÃ¶rÃ¼necektir.</string>
+    <string name="library_empty_albums_offline_title">Yerel albÃ¼m bulunamadÄ±</string>
+    <string name="library_empty_albums_offline_subtitle">Yerel albÃ¼m gruplarÄ± oluÅŸturmak iÃ§in yerel ÅŸarkÄ±lar gereklidir.</string>
+    <string name="library_empty_albums_online_title">Bulut albÃ¼mÃ¼ bulunamadÄ±</string>
+    <string name="library_empty_albums_online_subtitle">AlbÃ¼m verisi iÃ§eren bulut ÅŸarkÄ±larÄ± senkronizasyondan sonra burada gÃ¶rÃ¼necektir.</string>
+    <string name="library_empty_artists_all_title">KullanÄ±labilir sanatÃ§Ä± yok</string>
+    <string name="library_empty_artists_all_subtitle">Herhangi bir kaynaktan ÅŸarkÄ±lar dizine eklendikten sonra sanatÃ§Ä±lar gÃ¶sterilir.</string>
+    <string name="library_empty_artists_offline_title">Yerel sanatÃ§Ä± bulunamadÄ±</string>
+    <string name="library_empty_artists_offline_subtitle">Åžu anda yerel ÅŸarkÄ±lar iÃ§in kullanÄ±labilir sanatÃ§Ä± meta verisi yok.</string>
+    <string name="library_empty_artists_online_title">Bulut sanatÃ§Ä±sÄ± bulunamadÄ±</string>
+    <string name="library_empty_artists_online_subtitle">Uzak ÅŸarkÄ±lar senkronize edildiÄŸinde bulut sanatÃ§Ä± giriÅŸleri gÃ¶rÃ¼nÃ¼r.</string>
+    <string name="library_empty_liked_all_title">HenÃ¼z beÄŸenilen ÅŸarkÄ± yok</string>
+    <string name="library_empty_liked_all_subtitle">Bir ÅŸarkÄ±yÄ± buraya kaydetmek iÃ§in oynatÄ±lÄ±rken kalp simgesine dokunun.</string>
+    <string name="library_empty_liked_offline_title">BeÄŸenilen yerel ÅŸarkÄ± yok</string>
+    <string name="library_empty_liked_offline_subtitle">Kaynak filtresini deÄŸiÅŸtirin veya cihazÄ±nÄ±zdaki ÅŸarkÄ±larÄ± beÄŸenin.</string>
+    <string name="library_empty_liked_online_title">BeÄŸenilen bulut ÅŸarkÄ±sÄ± yok</string>
+    <string name="library_empty_liked_online_subtitle">Like cloud tracks to see them in this view.</string>
+    <string name="library_empty_folders_title">KlasÃ¶r bulunamadÄ±</string>
+    <string name="library_empty_folders_subtitle">MÃ¼zik iÃ§eren dahili depolama klasÃ¶rleri burada gÃ¶rÃ¼necektir.</string>
+    <string name="library_empty_playlists_title">HenÃ¼z Ã§alma listesi yok</string>
+    <string name="library_empty_playlists_subtitle">KitaplÄ±ÄŸÄ±nÄ±zÄ± dÃ¼zenlemek iÃ§in ilk Ã§alma listenizi oluÅŸturun.</string>
+    <!-- SongInfoBottomSheet, MultiSelectionBottomSheet, PlaylistMultiSelectionBottomSheet -->
+    <string name="song_info_cd_edit_metadata">ÅžarkÄ± meta verisini dÃ¼zenle</string>
+    <string name="song_info_action_play">Oynat</string>
+    <string name="song_info_cd_play">ÅžarkÄ±yÄ± oynat</string>
+    <string name="song_info_action_play_all">TÃ¼mÃ¼nÃ¼ oynat</string>
+    <string name="song_info_cd_play_all">TÃ¼mÃ¼nÃ¼ oynat</string>
+    <string name="song_info_cd_add_to_favorites">Favorilere ekle</string>
+    <string name="song_info_cd_add_to_favorites_all">TÃ¼mÃ¼nÃ¼ favorilere ekle</string>
+    <string name="song_info_cd_remove_from_favorites">Favorilerden kaldÄ±r</string>
+    <string name="song_info_cd_remove_from_favorites_all">TÃ¼mÃ¼nÃ¼ favorilerden kaldÄ±r</string>
+    <string name="song_info_share_chooser_title">ÅžarkÄ± dosyasÄ±nÄ± ÅŸununla paylaÅŸ:</string>
+    <string name="song_info_cd_share_song_file">ÅžarkÄ± dosyasÄ±nÄ± paylaÅŸ</string>
+    <string name="song_info_cd_share_all_as_zip">TÃ¼mÃ¼nÃ¼ ZIP olarak paylaÅŸ</string>
+    <string name="song_info_error_share_song">ÅžarkÄ± paylaÅŸÄ±lamadÄ±: %1$s</string>
+    <string name="song_info_action_add_to_queue">KuyruÄŸa ekle</string>
+    <string name="song_info_cd_add_to_queue">KuyruÄŸa ekle</string>
+    <string name="song_info_action_queue_next">SÄ±radaki</string>
+    <string name="song_info_cd_queue_next">Kuyrukta sÄ±radaki olarak oynat</string>
+    <string name="song_info_cd_add_to_playlist">Ã‡alma listesine ekle</string>
+    <string name="song_info_action_delete">Sil</string>
+    <string name="song_info_action_delete_all">TÃ¼mÃ¼nÃ¼ sil</string>
+    <string name="song_info_set_sound_as_short">Åžu ÅŸekilde ayarla:</string>
+    <string name="song_info_set_sound_as_long">Ses olarak ayarla</string>
+    <string name="song_info_cd_set_sound_as">Bu ÅŸarkÄ±yÄ± sistem sesi olarak nasÄ±l kullanacaÄŸÄ±nÄ±zÄ± seÃ§in</string>
+    <string name="song_info_tone_picker_title">Bu ÅŸarkÄ±yÄ± ÅŸu amaÃ§la kullan:</string>
+    <string name="song_info_tone_picker_body">PixelPlayer\'Ä±n bu sesi nereye yÃ¼kleyeceÄŸini seÃ§in.</string>
+    <string name="song_info_tone_ringtone_title">Telefon zil sesi</string>
+    <string name="song_info_tone_ringtone_subtitle">Gelen aramalar</string>
+    <string name="song_info_tone_notification_title">Bildirim sesi</string>
+    <string name="song_info_tone_notification_subtitle">Mesajlar ve uygulama bildirimleri</string>
+    <string name="song_info_tone_alarm_title">Alarm sesi</string>
+    <string name="song_info_tone_alarm_subtitle">Saat alarmlari</string>
+    <string name="song_info_tone_confirm_title">Ses deÄŸiÅŸikliÄŸini onayla</string>
+    <string name="song_info_tone_confirm_body">\"%1$s\" %2$s olarak ayarlansÄ±n mÄ±?</string>
+    <string name="song_info_tone_confirm_action">Sesi ayarla</string>
+    <string name="song_info_tone_success">\"%1$s\" %2$s olarak ayarlandÄ±</string>
+    <string name="song_info_tone_ringtone_label">zil sesi</string>
+    <string name="song_info_tone_notification_label">bildirim sesi</string>
+    <string name="song_info_tone_alarm_label">alarm sesi</string>
+    <string name="song_info_ringtone_permission_prompt">Sistem ayarlarÄ±nÄ± deÄŸiÅŸtirmeyi etkinleÅŸtirin, ardÄ±ndan otomatik olarak tamamlamak iÃ§in PixelPlayer\'a geri dÃ¶nÃ¼n.</string>
+    <string name="song_info_ringtone_permission_missing">Sistem ayarlarÄ±nÄ± deÄŸiÅŸtirme etkinleÅŸtirilmedi.</string>
+    <string name="song_info_ringtone_success">\"%1$s\" zil sesi olarak ayarlandÄ±</string>
+    <string name="song_info_ringtone_local_only">YalnÄ±zca yerel ÅŸarkÄ±lar zil sesi olarak kullanÄ±labilir.</string>
+    <string name="song_info_ringtone_missing_file">Bu ses dosyasÄ± zil sesi iÃ§in hazÄ±rlanamadÄ±.</string>
+    <string name="song_info_ringtone_failed">Zil sesi ayarlanamadÄ±: %1$s</string>
+    <string name="song_info_tab_options">SeÃ§enekler</string>
+    <string name="song_info_tab_options_badge">SEÃ‡ENEKLER</string>
+    <string name="song_info_tab_info">Bilgi</string>
+    <string name="song_info_tab_info_badge">BÄ°LGÄ°</string>
+    <string name="song_info_duration_label">SÃ¼re</string>
+    <string name="song_info_genre_label">TÃ¼r</string>
+    <string name="song_info_album_label">AlbÃ¼m</string>
+    <string name="song_info_artist_label">SanatÃ§Ä±</string>
+    <string name="song_info_audio_format_label">ÅžarkÄ± bilgisi</string>
+    <string name="song_info_cd_provider">SaÄŸlayÄ±cÄ±</string>
+    <string name="song_info_cd_file">Dosya</string>
+    <string name="multi_selection_songs_count_upper">%1$d ÅžARKI</string>
+    <string name="multi_selection_songs_selected">seÃ§ildi</string>
+    <string name="multi_selection_playlists_count_upper">%1$d Ã‡ALMA LÄ°STESÄ°</string>
+    <string name="multi_selection_albums_count_upper">%1$d ALBÃœM</string>
+    <string name="multi_selection_albums_selected">seÃ§ildi</string>
+    <string name="multi_selection_albums_selected_limit">SÄ±nÄ±r: seÃ§im baÅŸÄ±na %1$d albÃ¼m.</string>
+    <string name="multi_selection_albums_queue_hint">KuyruÄŸa ekle ve oynat, seÃ§im sÄ±ranÄ±za gÃ¶re davranÄ±r.</string>
+    <string name="multi_selection_genres_count_upper">%1$d TÃœR</string>
+    <string name="multi_selection_genres_selected">seÃ§ildi</string>
+    <string name="multi_selection_genres_queue_hint">Bu tÃ¼rlerdeki tÃ¼m ÅŸarkÄ±larda toplu iÅŸlemler gerÃ§ekleÅŸtirin.</string>
+    <!-- Sort Option Display Names -->
+    <string name="sort_display_default_order">VarsayÄ±lan SÄ±ralama</string>
+    <string name="sort_display_title_az">BaÅŸlÄ±k (A-Z)</string>
+    <string name="sort_display_title_za">BaÅŸlÄ±k (Z-A)</string>
+    <string name="sort_display_artist">SanatÃ§Ä±</string>
+    <string name="sort_display_artist_za">SanatÃ§Ä± (Z-A)</string>
+    <string name="sort_display_album">AlbÃ¼m</string>
+    <string name="sort_display_album_za">AlbÃ¼m (Z-A)</string>
+    <string name="sort_display_date_added">Ekleme Tarihi</string>
+    <string name="sort_display_date_added_oldest">Ekleme Tarihi (Ã–nce en eski)</string>
+    <string name="sort_display_duration">SÃ¼re</string>
+    <string name="sort_display_duration_shortest">SÃ¼re (Ã–nce en kÄ±sa)</string>
+    <string name="sort_display_release_year">YayÄ±n YÄ±lÄ±</string>
+    <string name="sort_display_release_year_oldest">YayÄ±n YÄ±lÄ± (Ã–nce en eski)</string>
+    <string name="sort_display_fewest_songs">En Az ÅžarkÄ±</string>
+    <string name="sort_display_most_songs">En Ã‡ok ÅžarkÄ±</string>
+    <string name="sort_display_name_az">Ad (A-Z)</string>
+    <string name="sort_display_name_za">Ad (Z-A)</string>
+    <string name="sort_display_num_songs_most">ÅžarkÄ± SayÄ±sÄ± (En Ã§ok)</string>
+    <string name="sort_display_num_songs_fewest">ÅžarkÄ± SayÄ±sÄ± (En az)</string>
+    <string name="sort_display_date_created">OluÅŸturulma Tarihi</string>
+    <string name="sort_display_date_created_oldest">OluÅŸturulma Tarihi (Ã–nce en eski)</string>
+    <string name="sort_display_date_liked">BeÄŸenilme Tarihi</string>
+    <string name="sort_display_date_liked_oldest">BeÄŸenilme Tarihi (Ã–nce en eski)</string>
+    <string name="sort_display_fewest_subfolders">En Az Alt KlasÃ¶r</string>
+    <string name="sort_display_most_subfolders">En Ã‡ok Alt KlasÃ¶r</string>
+    <!-- Sort Option Method Labels -->
+    <string name="sort_method_title">BaÅŸlÄ±k</string>
+    <string name="sort_method_artist">SanatÃ§Ä±</string>
+    <string name="sort_method_album">AlbÃ¼m</string>
+    <string name="sort_method_date_added">Ekleme Tarihi</string>
+    <string name="sort_method_duration">SÃ¼re</string>
+    <string name="sort_method_release_year">YayÄ±n YÄ±lÄ±</string>
+    <string name="sort_method_song_count">ÅžarkÄ± SayÄ±sÄ±</string>
+    <string name="sort_method_name">Ad</string>
+    <string name="sort_method_num_songs">ÅžarkÄ± SayÄ±sÄ±</string>
+    <string name="sort_method_date_created">OluÅŸturulma Tarihi</string>
+    <string name="sort_method_date_liked">BeÄŸenilme Tarihi</string>
+    <string name="sort_method_subfolder_count">Alt KlasÃ¶r SayÄ±sÄ±</string>
+    <!-- LibrarySortBottomSheet-->
+    <string name="library_sort_source">Kaynak</string>
+    <string name="library_sort_order">SÄ±ralama</string>
+    <string name="library_sort_descending">Azalan</string>
+    <string name="library_sort_ascending">Artan</string>
+    <string name="library_sort_original_order">Orijinal SÄ±ra</string>
+    <string name="library_sort_tap_ascending">Artana geÃ§mek iÃ§in dokun</string>
+    <string name="library_sort_tap_descending">Azalana geÃ§mek iÃ§in dokun</string>
+    <string name="library_sort_keeps_order">Bu sÄ±ralama orijinal sÄ±rayÄ± korur</string>
+    <string name="library_sort_cd_switch_on">Anahtar aÃ§Ä±k</string>
+    <!-- ReorderTabsSheet-->
+    <string name="reorder_tabs_sheet_title">KitaplÄ±k sekmelerini yeniden sÄ±rala</string>
+    <string name="reorder_tabs_reset_dialog_title">SÄ±rayÄ± sÄ±fÄ±rla</string>
+    <string name="reorder_tabs_reset_dialog_body">Sekme sÄ±rasÄ± varsayÄ±lana sÄ±fÄ±rlansÄ±n mÄ±?</string>
+    <string name="reorder_tabs_reordering">Sekmeler yeniden sÄ±ralanÄ±yorâ€¦</string>
+    <string name="reorder_tabs_cd_drag_handle">SÃ¼rÃ¼kleme tutamacÄ±</string>
+    <!-- PlayerArtistPickerBottomSheet -->
+    <string name="artist_picker_title">Bir SanatÃ§Ä± SeÃ§in</string>
+    <string name="artist_picker_count_single">1 sanatÃ§Ä±</string>
+    <string name="artist_picker_count_multiple">%1$d sanatÃ§Ä±</string>
+    <string name="artist_picker_primary_label">Ana sanatÃ§Ä±</string>
+    <string name="artist_picker_shortcut_label">SanatÃ§Ä± sayfasÄ±</string>
+    <!-- EditSongSheet -->
+    <string name="edit_song_toolbar_title">ÅžarkÄ±yÄ± dÃ¼zenle</string>
+    <string name="edit_song_cd_show_metadata_info">Bilgiyi gÃ¶ster</string>
+    <string name="edit_song_dialog_title">ÅžarkÄ± meta verisi dÃ¼zenleniyor</string>
+    <string name="edit_song_dialog_body">Bir ÅŸarkÄ±nÄ±n meta verisini dÃ¼zenlemek, kitaplÄ±ÄŸÄ±nÄ±zda nasÄ±l gÃ¶rÃ¼ntÃ¼lendiÄŸini ve dÃ¼zenlendiÄŸini etkileyebilir. DeÄŸiÅŸiklikler kalÄ±cÄ±dÄ±r ve geri alÄ±namayabilir.</string>
+    <string name="edit_song_dialog_got_it">AnladÄ±m</string>
+    <string name="edit_song_cd_info_icon">Bilgi</string>
+    <string name="edit_song_cover_art_heading">Kapak resmi</string>
+    <string name="edit_song_cover_art_hint">Kare bir gÃ¶rsel seÃ§in ve ince ayar yaparak kapak resminizin uygulamada harika gÃ¶rÃ¼nmesini saÄŸlayÄ±n.</string>
+    <string name="edit_song_action_change_cover">Kapak resmini deÄŸiÅŸtir</string>
+    <string name="edit_song_action_delete_cover">Kapak resmini sil</string>
+    <string name="edit_song_field_title">BaÅŸlÄ±k</string>
+    <string name="edit_song_field_artist">SanatÃ§Ä±</string>
+    <string name="edit_song_field_album">AlbÃ¼m</string>
+    <string name="edit_song_field_album_artist">AlbÃ¼m sanatÃ§Ä±sÄ±</string>
+    <string name="edit_song_field_genre">TÃ¼r</string>
+    <string name="edit_song_field_composer">Besteci</string>
+    <string name="edit_song_field_track_number">ParÃ§a numarasÄ±</string>
+    <string name="edit_song_field_disc_number">Disk numarasÄ±</string>
+    <string name="edit_song_field_replaygain_track">ReplayGain parÃ§a (dB)</string>
+    <string name="edit_song_field_replaygain_album">ReplayGain albÃ¼m (dB)</string>
+    <string name="edit_song_replaygain_track_placeholder">-6.50</string>
+    <string name="edit_song_replaygain_album_placeholder">-8.20</string>
+    <string name="edit_song_cd_cover_preview">Yeni kapak resminin Ã¶nizlemesi</string>
+    <string name="edit_song_cd_current_cover">Mevcut ÅŸarkÄ± kapak resmi</string>
+    <string name="edit_song_crop_dialog_title">Kapak resminizi ayarlayÄ±n</string>
+    <string name="edit_song_crop_dialog_hint">MÃ¼kemmel Ã§erÃ§evelemeyi bulmak iÃ§in sÄ±kÄ±ÅŸtÄ±rma ve sÃ¼rÃ¼kleme hareketlerini kullanÄ±n.</string>
+    <string name="edit_song_action_apply_cover">Kapak resmini uygula</string>
+    <string name="edit_song_unable_to_load_image">SeÃ§ilen gÃ¶rsel yÃ¼klenemedi</string>
+    <string name="edit_song_cd_search_lyrics_lrclib">lrclib.net\'te sÃ¶zleri ara</string>
+    <!-- EditMultipleSongsSheet -->
+    <string name="batch_edit_toolbar_title">%d Å arkÄ±yÄ± DÃ¼zenle</string>
+    <string name="batch_edit_info_message">YalnÄ±zca deÄŸiÅŸtirilen alanlar gÃ¼ncellenecektir. Mevcut deÄŸerleri korumak iÃ§in alanlarÄ± boÅŸ bÄ±rakÄ±n.</string>
+    <string name="batch_edit_mixed_values">(Karma deÄŸerler)</string>
+    <string name="batch_edit_optional">(Ä°steÄŸe baÄŸlÄ± - atlamak iÃ§in boÅŸ bÄ±rakÄ±n)</string>
+    <string name="batch_edit_success">%d ÅŸarkÄ± baÅŸarÄ±yla gÃ¼ncellendi</string>
+    <string name="batch_edit_partial_success">%2$d ÅŸarkÄ±dan %1$d tanesi gÃ¼ncellendi. BazÄ± dosyalar dÃ¼zenlenemedi.</string>
+    <string name="batch_edit_failed">ÅžarkÄ±lar gÃ¼ncellenemedi</string>
+    <string name="batch_edit_cover_art_heading">Toplu Kapak Resmi</string>
+    <string name="batch_edit_cover_art_hint">Bu iÅŸlem seÃ§ilen tÃ¼m %d ÅŸarkÄ±nÄ±n kapak resmini deÄŸiÅŸtirecektir</string>
+    <string name="batch_edit_set_cover_art">TÃ¼mÃ¼ iÃ§in Kapak Resmi Ayarla</string>
+    <string name="batch_edit_remove_all_art">TÃ¼m Kapak Resimlerini KaldÄ±r</string>
+    <string name="batch_edit_multiple_covers">(Birden Ã§ok farklÄ± kapak)</string>
+    <!-- Playlist dismissed message -->
+    <string name="playlist_dismissed_message">Ã‡alma listesi kapatÄ±ldÄ±</string>
+    <!-- PlaylistCreationDialogs -->
+    <string name="playlist_creation_create_playlist_title">Ã‡alma listesi oluÅŸtur</string>
+    <string name="playlist_creation_create_playlist_subtitle">OluÅŸturma yÃ¶ntemini seÃ§in.</string>
+    <string name="playlist_creation_mode_manual_title">Manuel</string>
+    <string name="playlist_creation_mode_manual_subtitle">Kapak gÃ¶rselini, simgeyi, ÅŸekli tasarlayÄ±n ve ÅŸarkÄ±larÄ± kendiniz seÃ§in.</string>
+    <string name="playlist_creation_mode_ai_title">Yapay Zeka ile</string>
+    <string name="playlist_creation_mode_ai_subtitle_enabled">GeliÅŸmiÅŸ kontrollerle Ã¶zel bir Ã§alma listesi oluÅŸturun.</string>
+    <string name="playlist_creation_mode_ai_subtitle_disabled">Ayarlarda yapÄ±landÄ±rÄ±lmÄ±ÅŸ bir Gemini API anahtarÄ± gerektirir.</string>
+    <string name="playlist_creation_setup_api_key">API anahtarÄ±nÄ± ayarla</string>
+    <!-- AI playlist lab -->
+    <string name="playlist_creation_ai_lab_title">Yapay Zeka Ã‡alma Listesi LaboratuvarÄ±</string>
+    <string name="playlist_creation_ai_reset">SÄ±fÄ±rla</string>
+    <string name="playlist_creation_ai_generating">OluÅŸturuluyorâ€¦</string>
+    <string name="playlist_creation_ai_generate">OluÅŸtur</string>
+    <string name="playlist_creation_ai_section_intent">AmaÃ§</string>
+    <string name="playlist_creation_ai_name_optional">Ã‡alma listesi adÄ± (isteÄŸe baÄŸlÄ±)</string>
+    <string name="playlist_creation_ai_feel_label">Bu Ã§alma listesi nasÄ±l bir his uyandÄ±rmalÄ±?</string>
+    <string name="playlist_creation_ai_feel_placeholder">Ã–rnek: sÄ±cak synthâ€™ler eÅŸliÄŸinde gÃ¼n batÄ±mÄ± sÃ¼rÃ¼ÅŸÃ¼</string>
+    <string name="playlist_creation_ai_section_direction">YÃ¶nelim</string>
+    <string name="playlist_creation_ai_mood_label">Ruh Hali</string>
+    <string name="playlist_creation_ai_activity_label">Aktivite</string>
+    <string name="playlist_creation_ai_era_label">DÃ¶nem</string>
+    <string name="playlist_creation_ai_section_curation">Derleme motoru</string>
+    <string name="playlist_creation_ai_energy_label">Enerji</string>
+    <string name="playlist_creation_ai_energy_desc">ÅžarkÄ±larÄ±n yoÄŸunluÄŸunu ve temposunu kontrol eder. 1 = sakin/yavaÅŸ, 5 = yÃ¼ksek enerjili/hÄ±zlÄ±.</string>
+    <string name="playlist_creation_ai_discovery_label">KeÅŸif</string>
+    <string name="playlist_creation_ai_discovery_desc">SeÃ§imlerin ne kadar tanÄ±dÄ±k olduÄŸunu kontrol eder. 1 = en Ã§ok Ã§alÄ±nan favorileriniz, 5 = nadiren Ã§alÄ±nan gizli kalmÄ±ÅŸ parÃ§alar.</string>
+    <string name="playlist_creation_ai_min_songs">Min. ÅŸarkÄ±</string>
+    <string name="playlist_creation_ai_max_songs">Maks. ÅŸarkÄ±</string>
+    <string name="playlist_creation_ai_section_filters">Filtreler</string>
+    <string name="playlist_creation_ai_prioritize_genres">TÃ¼rlere Ã¶ncelik ver (isteÄŸe baÄŸlÄ±)</string>
+    <string name="playlist_creation_ai_prioritize_genres_placeholder">Ã¶rn. synthwave, indie pop</string>
+    <string name="playlist_creation_ai_avoid_genres">TÃ¼rlerden kaÃ§Ä±n (isteÄŸe baÄŸlÄ±)</string>
+    <string name="playlist_creation_ai_avoid_genres_placeholder">Ã¶rn. metal, hard trap</string>
+    <string name="playlist_creation_ai_preferred_language">Tercih edilen dil (isteÄŸe baÄŸlÄ±)</string>
+    <string name="playlist_creation_ai_preferred_language_placeholder">Ã¶rn. Ä°ngilizce, Ä°spanyolca, enstrÃ¼mantal</string>
+    <string name="playlist_creation_ai_prioritize_favorites">Favorilere Ã¶ncelik ver</string>
+    <string name="playlist_creation_ai_avoid_explicit">MÃ¼stehcen sÃ¶zlerden kaÃ§Ä±n</string>
+    <string name="playlist_creation_ai_section_prompt_preview">Komut Ã¶nizlemesi</string>
+    <string name="playlist_creation_ai_prompt_preview_empty">Tercihlerinizi eklediÄŸinizde nihai komutunuz burada gÃ¶rÃ¼necektir.</string>
+    <string name="playlist_creation_ai_hero_title">Hassasiyetle derleyin</string>
+    <string name="playlist_creation_ai_hero_subtitle">Ruh halini, aktiviteyi, kÄ±sÄ±tlamalarÄ± ve derinliÄŸi belirleyin.</string>
+    <string name="playlist_creation_ai_hero_library_note">Yapay zeka yalnÄ±zca yerel kitaplÄ±ÄŸÄ±nÄ±zdaki ÅŸarkÄ±larÄ± kullanacaktÄ±r.</string>
+    <string name="playlist_creation_ai_error_add_instruction">Yapay zeka iÃ§in en az bir talimat ekleyin.</string>
+    <string name="playlist_creation_ai_error_song_range">GeÃ§erli bir ÅŸarkÄ± aralÄ±ÄŸÄ± belirleyin.</string>
+    <string name="playlist_creation_ai_level_out_of_five">%1$d/5</string>
+    <string name="playlist_creation_ai_custom_chip">Ã–zelâ€¦</string>
+    <string name="playlist_creation_ai_enter_custom_title">Ã–zel deÄŸer girin</string>
+    <string name="playlist_creation_ai_enter_custom_label">Ã–zel deÄŸerinizi girin</string>
+    <!-- AI prompt -->
+    <string name="playlist_creation_ai_era_any">Herhangi bir dÃ¶nem</string>
+    <string name="playlist_creation_ai_prompt_core_request">Ana istek: %1$s.</string>
+    <string name="playlist_creation_ai_prompt_mood">Hedef ruh hali: %1$s.</string>
+    <string name="playlist_creation_ai_prompt_activity">Aktivite baÄŸlamÄ±: %1$s.</string>
+    <string name="playlist_creation_ai_prompt_era">DÃ¶nem odaÄŸÄ±: %1$s.</string>
+    <string name="playlist_creation_ai_prompt_prioritize_genres">Ã–ncelikli tÃ¼rler: %1$s.</string>
+    <string name="playlist_creation_ai_prompt_avoid_genres">KaÃ§Ä±nÄ±lacak tÃ¼rler: %1$s.</string>
+    <string name="playlist_creation_ai_prompt_preferred_language">Tercih edilen dil: %1$s.</string>
+    <string name="playlist_creation_ai_prompt_energy">Hedef enerji seviyesi: %1$d/5.</string>
+    <string name="playlist_creation_ai_prompt_discovery">Hedef keÅŸif seviyesi: %1$d/5 (1: tanÄ±dÄ±k parÃ§alar, 5: gizli kalmÄ±ÅŸ parÃ§alar).</string>
+    <string name="playlist_creation_ai_prompt_prioritize_favorites">MÃ¼mkÃ¼n olduÄŸunda dinleyicinin favorilerine daha yakÄ±n olan ÅŸarkÄ±lara Ã¶ncelik ver.</string>
+    <string name="playlist_creation_ai_prompt_avoid_explicit">Alternatifleri mevcut olduÄŸunda mÃ¼stehcen sÃ¶zler iÃ§eren ÅŸarkÄ±lardan kaÃ§Ä±n.</string>
+    <string name="playlist_creation_ai_prompt_smooth_transitions">GeÃ§iÅŸleri akÄ±cÄ± tut ve tekrarlayan sanatÃ§Ä± kÃ¼melenmelerinden kaÃ§Ä±n.</string>
+    <string-array name="playlist_creation_ai_mood_options">
+        <item>Sakin</item>
+        <item>Enerjik</item>
+        <item>Mutlu</item>
+        <item>KaranlÄ±k</item>
+        <item>Romantik</item>
+        <item>Melankolik</item>
+    </string-array>
+    <string-array name="playlist_creation_ai_activity_options">
+        <item>Antrenman</item>
+        <item>Odaklanma</item>
+        <item>Yolculuk</item>
+        <item>Parti</item>
+        <item>Ders Ã‡alÄ±ÅŸma</item>
+        <item>Gece YarÄ±sÄ±</item>
+    </string-array>
+    <string-array name="playlist_creation_ai_era_options">
+        <item>@string/playlist_creation_ai_era_any</item>
+        <item>70â€™ler</item>
+        <item>80â€™ler</item>
+        <item>90â€™lar</item>
+        <item>2000â€™ler</item>
+        <item>2010â€™lar</item>
+        <item>2020â€™ler</item>
+    </string-array>
+    <!-- PlaylistContainer -->
+    <string name="playlist_container_no_playlist_created">HiÃ§bir Ã§alma listesi oluÅŸturulmadÄ±.</string>
+    <string name="playlist_container_new_playlist_hint">BaÅŸlamak iÃ§in \'Yeni Ã‡alma Listesi\' dÃ¼ÄŸmesine dokunun.</string>
+    <string name="playlist_container_create_playlist_title">Yeni Ã§alma listesi</string>
+    <string name="playlist_container_create_playlist_name_label">Ã‡alma listesi adÄ±</string>
+    <string name="playlist_container_create_playlist_name_placeholder">Ã‡alma listem</string>
+    <!-- PlaylistBottomSheet -->
+    <string name="playlist_sheet_add_songs_title">%1$d ÅŸarkÄ±yÄ± ÅŸuraya ekleâ€¦</string>
+    <string name="playlist_sheet_select_playlists">Ã‡alma listelerini seÃ§</string>
+    <string name="playlist_sheet_search_playlists_hint">Ã‡alma listelerini araâ€¦</string>
+    <string name="playlist_sheet_song_added_to_playlists">ÅžarkÄ±lar Ã§alma listelerine eklendi</string>
+    <string name="playlist_sheet_created_and_songs_added">Ã‡alma listesi oluÅŸturuldu ve ÅŸarkÄ±lar eklendi</string>
+    <string name="playlist_sheet_internal_storage">Dahili Depolama</string>
+    <!-- SongPickerBottomSheet -->
+    <string name="song_picker_title">ÅžarkÄ± ekle</string>
+    <string name="song_picker_cd_confirm_add_songs">SeÃ§ilen ÅŸarkÄ±larÄ± ekle</string>
+    <string name="song_picker_action_add">Ekle</string>
+    <string name="song_picker_search_label">ÅžarkÄ± ara veya filtreleâ€¦</string>
+    <string name="song_picker_filter_favorites">BeÄŸenilenler</string>
+    <string name="song_picker_error_load_failed">ÅžarkÄ±lar yÃ¼klenemedi</string>
+    <string name="song_picker_load_more">Daha fazla yÃ¼kle</string>
+    <!-- Merge Playlists Dialog -->
+    <string name="merge_playlists_dialog_title">Ã‡alma Listelerini BirleÅŸtir</string>
+    <string name="merge_playlists_dialog_prompt">BirleÅŸtirilmiÅŸ Ã§alma listesi iÃ§in bir ad girin:</string>
+    <string name="merge_playlists_dialog_placeholder">BirleÅŸtirilmiÅŸ Ã‡alma Listesi</string>
+    <string name="merge_playlists_dialog_body">Bu iÅŸlem seÃ§ilen %1$d Ã§alma listesini tek bir listede birleÅŸtirecektir.</string>
+    <!-- PlayerViewModel -->
+    <string name="player_view_model_no_valid_songs">OynatÄ±lacak geÃ§erli ÅŸarkÄ± bulunamadÄ±</string>
+    <string name="player_view_model_song_not_found_in_list">ÅžarkÄ± mevcut listede bulunamadÄ±</string>
+    <string name="player_view_model_could_not_locate_song">ÅžarkÄ± konumu bulunamadÄ±</string>
+    <string name="player_view_model_no_songs_in_library_toast">KitaplÄ±kta ÅŸarkÄ± bulunamadÄ±</string>
+    <string name="player_view_model_playback_stopped_eot">Oynatma durduruldu: %1$s bitti (ParÃ§a Sonu).</string>
+    <string name="player_view_model_default_track_title">ParÃ§a</string>
+    <string name="player_view_model_no_songs_to_shuffle">KarÄ±ÅŸtÄ±rÄ±lacak ÅŸarkÄ± yok.</string>
+    <string name="player_view_model_queue_name_selected_albums">SeÃ§ilen AlbÃ¼mler</string>
+    <string name="player_view_model_no_playable_songs_in_albums">SeÃ§ilen albÃ¼mlerde oynatÄ±labilir ÅŸarkÄ± bulunamadÄ±</string>
+    <string name="player_view_model_no_playable_songs_in_genres">SeÃ§ilen tÃ¼rlerde oynatÄ±labilir ÅŸarkÄ± bulunamadÄ±</string>
+    <string name="player_view_model_only_first_n_albums_queued">YalnÄ±zca ilk %1$d albÃ¼m kuyruÄŸa alÄ±ndÄ±</string>
+    <string name="player_view_model_albums_queued_format">%1$d albÃ¼m kuyruÄŸa alÄ±ndÄ± (%2$d ÅŸarkÄ±)</string>
+    <string name="player_view_model_could_not_queue_albums">SeÃ§ilen albÃ¼mler kuyruÄŸa alÄ±namadÄ±</string>
+    <string name="player_view_model_all_songs_already_in_favorites">TÃ¼m ÅŸarkÄ±lar zaten favorilerde</string>
+    <string name="player_view_model_no_songs_were_in_favorites">Favorilerde hiÃ§ ÅŸarkÄ± yoktu</string>
+    <string name="player_view_model_creating_zip">ZIP dosyasÄ± oluÅŸturuluyorâ€¦</string>
+    <string name="player_view_model_share_zip_failed_format">PaylaÅŸÄ±lamadÄ±: %1$s</string>
+    <plurals name="player_view_model_n_songs_added_to_queue">
+        <item quantity="one">%d ÅŸarkÄ± sÄ±raya eklendi</item>
+        <item quantity="other">%d ÅŸarkÄ± sÄ±raya eklendi</item>
+    </plurals>
+    <plurals name="player_view_model_n_songs_will_play_next">
+        <item quantity="one">SÄ±rada %d ÅŸarkÄ± oynatÄ±lacak</item>
+        <item quantity="other">SÄ±rada %d ÅŸarkÄ± oynatÄ±lacak</item>
+    </plurals>
+    <plurals name="player_view_model_n_songs_added_to_favorites">
+        <item quantity="one">%d ÅŸarkÄ± favorilere eklendi</item>
+        <item quantity="other">%d ÅŸarkÄ± favorilere eklendi</item>
+    </plurals>
+    <plurals name="player_view_model_n_songs_removed_from_favorites">
+        <item quantity="one">%d ÅŸarkÄ± favorilerden Ã§Ä±karÄ±ldÄ±</item>
+        <item quantity="other">%d ÅŸarkÄ± favorilerden Ã§Ä±karÄ±ldÄ±</item>
+    </plurals>
+    <!-- PlaylistViewModel -->
+    <string name="playlist_view_model_none_to_share">PaylaÅŸÄ±lacak Ã§alma listesi yok</string>
+    <string name="playlist_view_model_share_chooser_title">Ã‡alma listelerini paylaÅŸ</string>
+    <string name="playlist_view_model_share_failed">PaylaÅŸÄ±m baÅŸarÄ±sÄ±z oldu: %1$s</string>
+    <string name="playlist_view_model_none_to_export">DÄ±ÅŸa aktarÄ±lacak Ã§alma listesi yok</string>
+    <string name="playlist_view_model_export_failed">DÄ±ÅŸa aktarma baÅŸarÄ±sÄ±z oldu: %1$s</string>
+    <string name="playlist_view_model_export_folder_display">MÃ¼zik/PixelPlayer AktarÄ±mlarÄ±</string>
+    <string name="playlist_view_model_ai_gemini_key_required">LÃ¼tfen Ayarlar\'da Gemini API anahtarÄ±nÄ±zÄ± yapÄ±landÄ±rÄ±n.</string>
+    <string name="playlist_view_model_restored_toast">Ã‡alma listesi geri yÃ¼klendi</string>
+    <plurals name="playlist_view_model_sharing_message">
+        <item quantity="one">%d Ã§alma listesi paylaÅŸÄ±lÄ±yor</item>
+        <item quantity="other">%d Ã§alma listesi paylaÅŸÄ±lÄ±yor</item>
+    </plurals>
+    <plurals name="playlist_view_model_exported_message">
+        <item quantity="one">%1$d Ã§alma listesi %2$s konumuna dÄ±ÅŸa aktarÄ±ldÄ±</item>
+        <item quantity="other">%1$d Ã§alma listesi %2$s konumuna dÄ±ÅŸa aktarÄ±ldÄ±</item>
+    </plurals>
+    <!-- AlbumDetailViewModel -->
+    <string name="album_detail_invalid_id">GeÃ§ersiz albÃ¼m kimliÄŸi</string>
+    <string name="album_detail_id_not_found">AlbÃ¼m kimliÄŸi bulunamadÄ±</string>
+    <string name="album_detail_error_loading_album">AlbÃ¼m verileri yÃ¼klenirken hata oluÅŸtu: %s</string>
+    <string name="album_detail_not_found">AlbÃ¼m bulunamadÄ±</string>
+    <!-- ArtistDetailViewModel -->
+    <string name="artist_detail_invalid_id">GeÃ§ersiz sanatÃ§Ä± kimliÄŸi</string>
+    <string name="artist_detail_id_not_found">SanatÃ§Ä± kimliÄŸi bulunamadÄ±</string>
+    <string name="artist_error_loading_artist">SanatÃ§Ä± verileri yÃ¼klenirken hata oluÅŸtu: %s</string>
+    <string name="artist_detail_not_found">SanatÃ§Ä± bulunamadÄ±</string>
+    <!-- SongRemovalStateHolder -->
+    <string name="song_removal_cannot_delete_currently_playing">Åžu anda Ã§alÄ±nan ÅŸarkÄ± silinemez</string>
+    <string name="song_removal_batch_delete_files_deleted_skipped_format">%1$d dosya silindi (%2$d atlandÄ± - Ã§alÄ±nÄ±yor)</string>
+    <string name="song_removal_batch_delete_partial_format">%1$d / %2$d dosya silindi</string>
+    <string name="song_removal_delete_files_failed">Dosyalar silinemedi</string>
+    <string name="song_removal_file_deleted">Dosya silindi</string>
+    <string name="song_removal_delete_file_not_found">Dosya silinemiyor veya dosya bulunamadÄ±</string>
+    <string name="song_removal_deletion_cancelled">Silme iÅŸlemi iptal edildi</string>
+    <string name="song_removal_dialog_delete_song_title">ÅžarkÄ± silinsin mi?</string>
+    <string name="song_removal_dialog_delete_song_message">\"%1$s\" - %2$s\n\nBu ÅŸarkÄ± cihazÄ±nÄ±zdan kalÄ±cÄ± olarak silinecektir ve geri kurtarÄ±lamaz.</string>
+    <string name="song_removal_delete_songs_permanent_message">Bu ÅŸarkÄ±lar cihazÄ±nÄ±zdan kalÄ±cÄ± olarak silinecektir ve geri getirilemez.</string>
+    <plurals name="song_removal_n_files_deleted">
+        <item quantity="one">%d dosya silindi</item>
+        <item quantity="other">%d dosya silindi</item>
+    </plurals>
+    <plurals name="song_removal_delete_songs_confirmation_title">
+        <item quantity="one">%d ÅŸarkÄ± silinsin mi?</item>
+        <item quantity="other">%d ÅŸarkÄ± silinsin mi?</item>
+    </plurals>
+    <!-- MetadataEditStateHolder -->
+    <string name="metadata_edit_updated_successfully">Meta veriler baÅŸarÄ±yla gÃ¼ncellendi</string>
+    <string name="metadata_edit_updating_n_songs">%1$d ÅŸarkÄ± gÃ¼ncelleniyorâ€¦</string>
+    <string name="metadata_edit_batch_genre_updated_all">%1$d ÅŸarkÄ± baÅŸarÄ±yla gÃ¼ncellendi!</string>
+    <string name="metadata_edit_batch_genre_updated_partial">%1$d ÅŸarkÄ± gÃ¼ncellendi. BaÅŸarÄ±sÄ±z: %2$d</string>
+    <string name="metadata_edit_lyrics_saved_successfully">ÅžarkÄ± sÃ¶zleri baÅŸarÄ±yla kaydedildi</string>
+    <string name="metadata_edit_lyrics_save_failed">ÅžarkÄ± sÃ¶zleri kaydedilemedi</string>
+    <string name="metadata_edit_lyrics_none_to_save">Kaydedilecek ÅŸarkÄ± sÃ¶zÃ¼ yok</string>
+    <string name="metadata_edit_permission_denied_edit_files">Ä°zin reddedildi â€“ dosyalar dÃ¼zenlenemiyor</string>
+    <string name="metadata_edit_permission_denied_save_lyrics">Ä°zin reddedildi â€“ ÅŸarkÄ± sÃ¶zleri kaydedilemiyor</string>
+    <string name="metadata_edit_permission_denied_edit_this_file">Ä°zin reddedildi â€“ bu dosya dÃ¼zenlenemiyor</string>
+    <!-- AiStateHolder -->
+    <string name="ai_state_error_api_key">LÃ¼tfen seÃ§ilen Yapay Zeka saÄŸlayÄ±cÄ±sÄ± iÃ§in Ayarlar\'da geÃ§erli bir API anahtarÄ± yapÄ±landÄ±rÄ±n.</string>
+    <string name="ai_state_error_generic">YZ HatasÄ±: %s</string>
+    <string name="ai_state_error_quota">SeÃ§ilen YZ saÄŸlayÄ±cÄ±sÄ±, hesapta kredi veya kullanÄ±labilir kota bulunmadÄ±ÄŸÄ± iÃ§in isteÄŸi reddetti.</string>
+    <string name="ai_state_error_model_unavailable">SeÃ§ilen YZ modeli artÄ±k kullanÄ±labilir deÄŸil. PixelPlayer otomatik olarak desteklenen bir modele geÃ§iÅŸ yapmayÄ± denedi.</string>
+    <string name="ai_state_no_songs_found">YZ, komutunuz iÃ§in herhangi bir ÅŸarkÄ± bulamadÄ±.</string>
+    <string name="ai_state_prompt_empty">GÃ¼nlÃ¼k Miksiniz iÃ§in bir fikir yazÄ±n</string>
+    <string name="ai_state_daily_mix_updated">GÃ¼nlÃ¼k Miks YZ ile gÃ¼ncellendi</string>
+    <string name="ai_state_could_not_update">GÃ¼ncellenemedi: %s</string>
+    <string name="ai_state_no_songs_for_mix">YZ bu miks iÃ§in ÅŸarkÄ± bulamadÄ±</string>
+</resources>

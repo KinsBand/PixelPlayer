@@ -1,0 +1,4 @@
+- `[ ]` Step 1: Establish macrobenchmarks and initial baseline measurements in PERF_REPORT.md
+- `[ ]` Step 2: Profile bottlenecks via Perfetto traces, Compose compiler reports, and main-thread / memory checks
+- `[ ]` Step 3: Implement targeted performance fixes (recomposition reduction, state derivation, thread offloading)
+- `[ ]` Step 4: Re-run benchmarks, verify improvements, and update PERF_REPORT.md with final comparison

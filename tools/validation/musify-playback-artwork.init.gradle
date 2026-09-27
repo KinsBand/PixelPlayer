@@ -1,0 +1,16 @@
+// Temporary focused validation while unrelated unit-test sources do not compile.
+// This filters compilation, not just test execution; it is not a full-suite check.
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.project(':app')
+    app.tasks.named('compileDebugUnitTestKotlin').configure {
+        setSource(app.files(
+            'src/test/java/com/theveloper/pixelplay/data/metadata/ArtworkUrlsTest.kt',
+            'src/test/java/com/theveloper/pixelplay/data/service/player/NextStreamPrewarmerTest.kt',
+            'src/test/java/com/theveloper/pixelplay/data/youtube/HedgedStreamResolverTest.kt',
+            'src/test/java/com/theveloper/pixelplay/data/youtube/DirectPlayerRequestTest.kt',
+            'src/test/java/com/theveloper/pixelplay/data/youtube/InnerTubeParserTest.kt',
+            'src/test/java/com/theveloper/pixelplay/data/youtube/NewPipeExecutionTest.kt',
+            'src/test/java/com/theveloper/pixelplay/data/youtube/StreamReliabilityTest.kt'
+        ))
+    }
+}

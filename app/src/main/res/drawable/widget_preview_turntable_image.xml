@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Record -->
+    <path
+        android:fillColor="#1B0A33"
+        android:pathData="M12,54 a42,42 0 1,0 84,0 a42,42 0 1,0 -84,0" />
+
+    <!-- Grooves -->
+    <path
+        android:pathData="M20,54 a34,34 0 1,0 68,0 a34,34 0 1,0 -68,0"
+        android:strokeColor="#3D2A5C"
+        android:strokeWidth="1" />
+    <path
+        android:pathData="M28,54 a26,26 0 1,0 52,0 a26,26 0 1,0 -52,0"
+        android:strokeColor="#3D2A5C"
+        android:strokeWidth="1" />
+
+    <!-- Label -->
+    <path
+        android:fillColor="#B9AEDA"
+        android:pathData="M40,54 a14,14 0 1,0 28,0 a14,14 0 1,0 -28,0" />
+    <path
+        android:pathData="M46,54 a8,8 0 1,0 16,0 a8,8 0 1,0 -16,0"
+        android:strokeColor="#1B0A33"
+        android:strokeWidth="1.6" />
+    <path
+        android:fillColor="#1B0A33"
+        android:pathData="M51.5,50.5 L51.5,57.5 L57.5,54 Z" />
+
+    <!-- Favourite bubble -->
+    <path
+        android:fillColor="#FCDCE6"
+        android:pathData="M72,24 a12,12 0 1,0 24,0 a12,12 0 1,0 -24,0" />
+    <path
+        android:fillColor="#B5297A"
+        android:pathData="M84,30 C78.5,25.5 78,21 81,19.8 C82.6,19.2 83.6,20.1 84,21 C84.4,20.1 85.4,19.2 87,19.8 C90,21 89.5,25.5 84,30 Z" />
+
+    <!-- Play bubble -->
+    <path
+        android:fillColor="#E4E4FB"
+        android:pathData="M20,66 L34,66 A8,8 0 0,1 42,74 L42,88 A8,8 0 0,1 34,96 L20,96 A8,8 0 0,1 12,88 L12,74 A8,8 0 0,1 20,66 Z" />
+    <path
+        android:fillColor="#3B49DF"
+        android:pathData="M23,74 L23,88 L35,81 Z" />
+</vector>

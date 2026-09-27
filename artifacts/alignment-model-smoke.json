@@ -1,0 +1,87 @@
+{
+  "scope": "Desktop synthetic-input smoke test only; NOT song accuracy or Android performance",
+  "platform": "Windows-10-10.0.19045-SP0",
+  "onnxruntime": "1.26.0",
+  "threads": 1,
+  "models": {
+    "wav2vec2-english-int8": {
+      "status": "synthetic_inference_passed",
+      "bytes": 95212816,
+      "sha256": "1d9a366c27b2966625cd5035ac3db8847c53bba617169912bb251b42975a3a22",
+      "load_seconds": 0.6504793000021891,
+      "input_seconds": 5.0,
+      "inference_seconds": [
+        1.4328043000023172,
+        1.6450796000026457,
+        1.7019567000024836
+      ],
+      "inputs": [
+        {
+          "name": "input_values",
+          "shape": [
+            "batch_size",
+            "sequence_length"
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "name": "logits",
+          "shape": [
+            1,
+            249,
+            32
+          ]
+        }
+      ]
+    },
+    "basic-pitch": {
+      "status": "synthetic_inference_passed",
+      "bytes": 230444,
+      "sha256": "2c3c1d144bfa61ad236e92e169c13535c880469a12a047d4e73451f2c059a0ec",
+      "load_seconds": 0.0920942999982799,
+      "input_seconds": 1.988390022675737,
+      "inference_seconds": [
+        0.0794845999989775,
+        0.06780720000097062,
+        0.06466029999864986
+      ],
+      "inputs": [
+        {
+          "name": "serving_default_input_2:0",
+          "shape": [
+            "unk__749",
+            43844,
+            1
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "name": "StatefulPartitionedCall:2",
+          "shape": [
+            1,
+            172,
+            88
+          ]
+        },
+        {
+          "name": "StatefulPartitionedCall:1",
+          "shape": [
+            1,
+            172,
+            88
+          ]
+        },
+        {
+          "name": "StatefulPartitionedCall:0",
+          "shape": [
+            1,
+            172,
+            264
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,61 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Google Drive dashboard -->
+    <string name="gdrive_dashboard_music_folders">éŸ³ä¹æ–‡ä»¶å¤¹</string>
+    <string name="gdrive_dashboard_add_folder_hint">ç‚¹å‡» + æ·»åŠ  Drive æ–‡ä»¶å¤¹</string>
+    <string name="gdrive_dashboard_no_folders_yet">æš‚æœªæ·»åŠ æ–‡ä»¶å¤¹</string>
+    <string name="gdrive_dashboard_folders_synced_count">å·²åŒæ­¥ %1$d ä¸ªæ–‡ä»¶å¤¹</string>
+    <string name="gdrive_cd_add_folder">æ·»åŠ æ–‡ä»¶å¤¹</string>
+    <!-- Cloud dashboard generic -->
+    <string name="cloud_dashboard_playlists_synced_count">å·²åŒæ­¥ %1$d ä¸ªæ’­æ”¾åˆ—è¡¨</string>
+    <string name="cloud_dashboard_title_playlists">æ’­æ”¾åˆ—è¡¨</string>
+    <string name="cloud_dashboard_action_sync">åŒæ­¥</string>
+    <string name="cloud_dashboard_playlists_empty_title">æš‚æœªåŒæ­¥ä»»ä½•æ’­æ”¾åˆ—è¡¨</string>
+    <string name="cloud_dashboard_playlists_empty_hint">ç‚¹å‡»åŒæ­¥ä»¥èŽ·å–æ‚¨çš„æ’­æ”¾åˆ—è¡¨</string>
+    <string name="cloud_dashboard_quick_actions">å¿«æ·æ“ä½œ</string>
+    <string name="cloud_dashboard_action_sync_library">åŒæ­¥åª’ä½“åº“</string>
+    <string name="cloud_dashboard_action_disconnect">æ–­å¼€è¿žæŽ¥</string>
+    <string name="cloud_dashboard_song_count">%1$d é¦–æ­Œæ›²</string>
+    <!-- Cloud sync status -->
+    <string name="cloud_sync_status_syncing">æ­£åœ¨åŒæ­¥</string>
+    <string name="cloud_sync_status_syncing_library">æ­£åœ¨åŒæ­¥åª’ä½“åº“â€¦</string>
+    <string name="cloud_sync_status_fetching_playlists">æ­£åœ¨èŽ·å–æ’­æ”¾åˆ—è¡¨â€¦</string>
+    <string name="cloud_sync_status_syncing_playlist_format">æ­£åœ¨åŒæ­¥æ’­æ”¾åˆ—è¡¨ï¼š%1$s</string>
+    <string name="cloud_sync_status_updating_local">æ­£åœ¨æ›´æ–°æœ¬åœ°åª’ä½“åº“â€¦</string>
+    <string name="cloud_sync_status_sync_complete">åŒæ­¥å®Œæˆ</string>
+    <string name="cloud_sync_status_fetching_albums">æ­£åœ¨èŽ·å–ä¸“è¾‘åˆ—è¡¨â€¦</string>
+    <string name="cloud_sync_status_fetching_songs_from_format">æ­£åœ¨ä»Ž %1$s èŽ·å–æ­Œæ›²â€¦</string>
+    <string name="cloud_sync_status_saving_songs_format">æ­£åœ¨å°† %1$d é¦–æ­Œæ›²ä¿å­˜åˆ°æ•°æ®åº“â€¦</string>
+    <string name="cloud_sync_status_no_songs_found">æœªæ‰¾åˆ°åª’ä½“åº“æ­Œæ›²</string>
+    <string name="cloud_sync_status_library_sync_complete">åª’ä½“åº“åŒæ­¥å®Œæˆ</string>
+    <string name="cloud_sync_status_syncing_ellipsis">æ­£åœ¨åŒæ­¥â€¦</string>
+    <string name="cloud_sync_error_with_message_format">é”™è¯¯ï¼š%1$s</string>
+    <!-- Cloud content descriptions -->
+    <string name="cloud_cd_sync">åŒæ­¥</string>
+    <string name="cloud_cd_sync_all">å…¨éƒ¨åŒæ­¥</string>
+    <string name="cloud_cd_logout">ç™»å‡º</string>
+    <string name="cloud_cd_sync_all_playlists">åŒæ­¥æ‰€æœ‰æ’­æ”¾åˆ—è¡¨</string>
+    <string name="cloud_cd_user_avatar">ç”¨æˆ·å¤´åƒ</string>
+    <!-- No internet -->
+    <string name="no_internet_dialog_title">æ— ç½‘ç»œè¿žæŽ¥</string>
+    <string name="no_internet_dialog_message">æ­¤å†…å®¹éœ€è¦ç½‘ç»œè¿žæŽ¥ã€‚è¯·æ£€æŸ¥æ‚¨çš„ç½‘ç»œè®¾ç½®å¹¶é‡è¯•ã€‚</string>
+    <string name="offline_screen_title">æ‚¨å·²ç¦»çº¿</string>
+    <string name="offline_screen_message">è¯·æ£€æŸ¥æ‚¨çš„ç½‘ç»œè¿žæŽ¥å¹¶é‡è¯•ä»¥è®¿é—®æ­¤å†…å®¹ã€‚</string>
+    <!-- Cloud Authentication & Login Shared Strings -->
+    <!-- Google Drive Auth -->
+    <string name="auth_gdrive_connect_subtitle">ç›´æŽ¥ä»Žæ‚¨çš„ Google Drive ä¸²æµéŸ³ä¹æ–‡ä»¶</string>
+    <string name="auth_gdrive_connect_title">è¿žæŽ¥ Google Drive</string>
+    <string name="auth_gdrive_connected_toast">Google Drive å·²è¿žæŽ¥ï¼</string>
+    <string name="auth_gdrive_create_action">åˆ›å»º \"PixelPlayer Music\"</string>
+    <string name="auth_gdrive_create_subtitle">åœ¨è¿™é‡Œä¸ºæ‚¨çš„éŸ³ä¹åˆ›å»ºä¸€ä¸ªæ–°æ–‡ä»¶å¤¹</string>
+    <string name="auth_gdrive_empty_msg">è¿™é‡Œæ²¡æœ‰æ–‡ä»¶å¤¹</string>
+    <string name="auth_gdrive_open_cd">æ‰“å¼€æ–‡ä»¶å¤¹</string>
+    <string name="auth_gdrive_select_subtitle">é€‰æ‹©æˆ–åˆ›å»ºä¸€ä¸ªæ–‡ä»¶å¤¹ä½œä¸ºæ‚¨çš„éŸ³ä¹æº</string>
+    <string name="auth_gdrive_select_title">é€‰æ‹©ä¸€ä¸ªéŸ³ä¹æ–‡ä»¶å¤¹</string>
+    <string name="auth_gdrive_setup_msg">æ­£åœ¨è®¾ç½® Google Driveâ€¦</string>
+    <string name="auth_gdrive_signin_action">ä½¿ç”¨ Google è´¦å·ç™»å½•</string>
+    <string name="auth_gdrive_title">Google Drive</string>
+    <string name="auth_gdrive_use_action">ä½¿ç”¨</string>
+    <!-- Web Login Shared/Generic -->
+    <string name="auth_web_retry_action">é‡è¯•</string>
+</resources>

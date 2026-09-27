@@ -1,0 +1,128 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="changelog_title">DeÄŸiÅŸiklik GÃ¼nlÃ¼ÄŸÃ¼</string>
+    <string name="changelog_view_github">GitHub\'da GÃ¶rÃ¼ntÃ¼le</string>
+    <string name="changelog_sec_improvements">Ä°yileÅŸtirmeler</string>
+    <string name="changelog_sec_fixes">DÃ¼zeltmeler</string>
+    <string name="changelog_sec_whats_new">Yenilikler</string>
+    <string name="changelog_sec_added">Eklendi</string>
+    <string-array name="changelog_020_added">
+        <item>CihazÄ±nÄ±zdan ses yayÄ±nÄ± iÃ§in Chromecast desteÄŸi.</item>
+        <item>En son Ã¶zellikler hakkÄ±nda sizi bilgilendiren uygulama iÃ§i deÄŸiÅŸiklik gÃ¼nlÃ¼ÄŸÃ¼.</item>
+        <item>Hem gÃ¶mÃ¼lÃ¼ hem harici .LRC dosyalarÄ± desteÄŸi.</item>
+        <item>Ã‡evrimdÄ±ÅŸÄ± sÃ¶zler desteÄŸi.</item>
+        <item>Senkronize sÃ¶zler (ÅŸarkÄ±yla senkronize).</item>
+        <item>Tam kuyruÄŸu gÃ¶rÃ¼ntÃ¼lemek iÃ§in yeni ekran.</item>
+        <item>Kuyruktan ÅŸarkÄ± yeniden sÄ±ralama ve kaldÄ±rma.</item>
+        <item>Mini oynatÄ±cÄ± hareketleri (kapatmak iÃ§in aÅŸaÄŸÄ± kaydÄ±r).</item>
+        <item>Daha fazla material animasyon eklendi.</item>
+        <item>GÃ¶rÃ¼nÃ¼mÃ¼ Ã¶zelleÅŸtirmek iÃ§in yeni ayarlar.</item>
+        <item>Ã–nbelleÄŸi temizlemek iÃ§in yeni ayarlar.</item>
+    </string-array>
+    <string-array name="changelog_020_improvements">
+        <item>KullanÄ±cÄ± arayÃ¼zÃ¼nÃ¼n tam yeniden tasarÄ±mÄ±.</item>
+        <item>OynatÄ±cÄ±nÄ±n tam yeniden tasarÄ±mÄ±.</item>
+        <item>KÃ¼tÃ¼phanede performans iyileÅŸtirmeleri.</item>
+        <item>Uygulama baÅŸlangÄ±Ã§ hÄ±zÄ± iyileÅŸtirildi.</item>
+        <item>Yapay zeka artÄ±k daha iyi sonuÃ§lar veriyor.</item>
+    </string-array>
+    <string-array name="changelog_020_fixes">
+        <item>Etiket dÃ¼zenleyicisindeki Ã§eÅŸitli hatalar dÃ¼zeltildi.</item>
+        <item>Oynatma bildiriminin temizlenmediÄŸi hata dÃ¼zeltildi.</item>
+        <item>UygulamanÄ±n Ã§Ã¶kmesine neden olan Ã§eÅŸitli hatalar dÃ¼zeltildi.</item>
+    </string-array>
+    <string-array name="changelog_030_whats_new">
+        <item>OturumlarÄ±nÄ±za daha derin iÃ§gÃ¶rÃ¼ler sunan zenginleÅŸtirilmiÅŸ dinleme istatistikleri merkezi tanÄ±tÄ±ldÄ±.</item>
+        <item>Yerel dosyalarÄ± anÄ±nda aÃ§Ä±p Ã¶nizlemek iÃ§in kayan hÄ±zlÄ± oynatÄ±cÄ± baÅŸlatÄ±ldÄ±.</item>
+        <item>AÄŸaÃ§ stili gezgin ve Ã§alma listesine hazÄ±r gÃ¶rÃ¼nÃ¼mlÃ¼ klasÃ¶rler sekmesi eklendi.</item>
+    </string-array>
+    <string-array name="changelog_030_improvements">
+        <item>Daha temiz ve tutarlÄ± bir deneyim iÃ§in genel Material 3 arayÃ¼zÃ¼ iyileÅŸtirildi.</item>
+        <item>Meta veri dÃ¼zenleme artÄ±k kapak resmi deÄŸiÅŸikliÄŸini destekliyor.</item>
+        <item>Daha akÄ±cÄ± gezinme iÃ§in uygulama genelinde animasyonlar ve geÃ§iÅŸler dÃ¼zeltildi.</item>
+        <item>SanatÃ§Ä± ekranÄ± dÃ¼zeni daha zengin ayrÄ±ntÄ±lar ve cilalamayla geliÅŸtirildi.</item>
+        <item>DailyMix and YourMix Ã¼retimi daha akÄ±llÄ±, daha Ã§eÅŸitli seÃ§imlerle yÃ¼kseltildi.</item>
+        <item>Yapay zeka Ã§alma listesi oluÅŸturma gÃ¼Ã§lendirildi.</item>
+        <item>Daha hÄ±zlÄ± keÅŸif iÃ§in arama ilgisi ve sunumu iyileÅŸtirildi.</item>
+        <item>Daha geniÅŸ ses dosyasÄ± formatlarÄ± yelpazesi iÃ§in destek geniÅŸletildi.</item>
+    </string-array>
+    <string-array name="changelog_030_fixes">
+        <item>ÅžarkÄ± ayrÄ±ntÄ±larÄ±nÄ±n her yerde doÄŸru kalmasÄ± iÃ§in meta veri tuhaflÄ±klarÄ± giderildi.</item>
+        <item>Bildirim kÄ±sayollarÄ±nÄ±n oynatmaya gÃ¼venilir ÅŸekilde geri dÃ¶nmesi saÄŸlandÄ±.</item>
+    </string-array>
+    <string-array name="changelog_040_improvements">
+        <item>BÃ¼yÃ¼k gezinme yeniden tasarÄ±mÄ±</item>
+        <item>Kaynak dizinleri seÃ§mek iÃ§in yeni dosya gezgini</item>
+        <item>Yeni BaÄŸlantÄ± ve yayÄ±n iÅŸlevleri</item>
+        <item>Uzak cihazlar arasÄ±nda sorunsuz sÃ¼reklilik</item>
+        <item>ÅžarkÄ±lar arasÄ±nda kesintisiz geÃ§iÅŸ</item>
+        <item>Ã‡apraz geÃ§iÅŸ kontrolÃ¼</item>
+        <item>Yeni Ã–zel GeÃ§iÅŸler Ã¶zelliÄŸi (yalnÄ±zca Ã§alma listeleri iÃ§in)</item>
+        <item>Uygulama kapatÄ±ldÄ±ktan sonra Ã§almaya devam et</item>
+        <item>ArayÃ¼z OptimizasyonlarÄ±</item>
+        <item>GeliÅŸmiÅŸ istatistik Ã¶zelliÄŸi</item>
+        <item>Daha fazla Ã¶zellikle yeniden tasarlanan Kuyruk kontrolÃ¼</item>
+        <item>Oynatma ve meta veri dÃ¼zenleme iÃ§in farklÄ± dosya tÃ¼rÃ¼ desteÄŸi iyileÅŸtirildi</item>
+        <item>GeliÅŸmiÅŸ izin denetleyicisi</item>
+        <item>KÃ¼Ã§Ã¼k hata dÃ¼zeltmeleri</item>
+    </string-array>
+    <string-array name="changelog_050_improvements">
+        <item>Material 3 Expressive ArayÃ¼z GÃ¼ncellemesi</item>
+        <item>10 BantlÄ± Ekolayzer &amp; Efektler</item>
+        <item>Yeni KÃ¼tÃ¼phane Senkronizasyon AkÄ±ÅŸÄ±</item>
+        <item>Yapay Zeka Entegrasyonu (Gemini Modelleri)</item>
+        <item>M3U Ã‡alma Listesi Ä°Ã§e/DÄ±ÅŸa Aktarma</item>
+        <item>Deezer SanatÃ§Ä± GÃ¶rseli Entegrasyonu</item>
+        <item>Ã–zel Ã‡alma Listesi KapaklarÄ±</item>
+        <item>Ayarlar Mimarisi Yeniden YapÄ±landÄ±rmasÄ±</item>
+        <item>Kuyruk &amp; OynatÄ±cÄ± AnimasyonlarÄ±</item>
+        <item>Temel Profiller &amp; Performans</item>
+        <item>Senkronizasyon Ofseti ile GeliÅŸmiÅŸ SÃ¶zler Sistemi</item>
+    </string-array>
+    <string-array name="changelog_050_fixes">
+        <item>YayÄ±n KararlÄ±lÄ±ÄŸÄ± Ä°yileÅŸtirmeleri</item>
+        <item>OynatÄ±cÄ± SayfasÄ± KararlÄ±lÄ±ÄŸÄ±</item>
+        <item>Genel Hata DÃ¼zeltmeleri &amp; Temizlik</item>
+    </string-array>
+    <string-array name="changelog_060_whats_new">
+        <item>Android Auto desteÄŸi artÄ±k araÃ§ iÃ§i oynatma iÃ§in mevcut.</item>
+        <item>Cloud integrations expanded with Google Drive improvements.</item>
+        <item>Son Ã‡alÄ±nanlar ve kalÄ±cÄ± kuyruk geri yÃ¼klemesi dinleme oturumunuzu hazÄ±r tutar.</item>
+        <item>Yedekleme ve Geri YÃ¼kleme v3 ile hesap yÃ¶netim araÃ§larÄ± artÄ±k dahil.</item>
+        <item>SÃ¶zler, manuel arama yedeÄŸi ve depolama iyileÅŸtirmeleriyle daha akÄ±llÄ± hale geldi.</item>
+    </string-array>
+    <string-array name="changelog_060_improvements">
+        <item>BaÅŸlangÄ±Ã§, kÃ¼tÃ¼phane, kuyruk ve oynatÄ±cÄ± etkileÅŸimleri genelinde bÃ¼yÃ¼k performans geÃ§iÅŸi.</item>
+        <item>OynatÄ±cÄ±, YayÄ±n, SÃ¶zler, SanatÃ§Ä± ve TÃ¼r yÃ¼zeyleri daha akÄ±cÄ± kullanÄ±m iÃ§in yeniden tasarlandÄ±.</item>
+        <item>Gezinme ve arama akÄ±ÅŸlarÄ± daha gÃ¼venli rota yÃ¶netimiyle daha gÃ¼venilir hale getirildi.</item>
+        <item>Daha fazla cihaz ve format iÃ§in ses oynatma uyumluluÄŸi iyileÅŸtirildi.</item>
+        <item>ÅžarkÄ±lar, albÃ¼mler ve Ã§alma listeleri genelinde Ã§oklu seÃ§im iÅŸ akÄ±ÅŸlarÄ± geniÅŸletildi.</item>
+    </string-array>
+    <string-array name="changelog_060_fixes">
+        <item>Kuyruk ve karÄ±ÅŸtÄ±rma davranÄ±ÅŸÄ± artÄ±k daha kararlÄ± ve Ã¶ngÃ¶rÃ¼lebilir.</item>
+        <item>BirkaÃ§ arka plan oynatma ve yayÄ±n uÃ§ durumu dÃ¼zeltildi.</item>
+        <item>Uyku ZamanlayÄ±cÄ±sÄ±, Dosyalar sekmesi gezinme ve albÃ¼m sanatÃ§Ä±sÄ± Ã§Ã¶kme sorunlarÄ± dÃ¼zeltildi.</item>
+        <item>AÅŸÄ±rÄ± Ä±sÄ±nma/bellek sorunlarÄ±nÄ± azaltmak iÃ§in widget yÃ¼kleme ve servis kararlÄ±lÄ±ÄŸÄ± iyileÅŸtirildi.</item>
+        <item>Uygulama genelinde genel hata dÃ¼zeltmeleri ve arayÃ¼z cilalamalar.</item>
+    </string-array>
+    <string-array name="changelog_070_whats_new">
+        <item>Yapay Zeka: Token optimizasyonuyla Groq AI and OpenRouter (deneysel) entegrasyonu.</item>
+        <item>SÃ¶zler: Ã–zel geÃ§iÅŸ dÃ¼ÄŸmesiyle senkronize Ã§eviri, Kugou LRC format desteÄŸi, metin hizalama Ã¶zelleÅŸtirmesi ve geliÅŸmiÅŸ uzaktan yÃ¼kleme.</item>
+        <item>ArayÃ¼z/KullanÄ±cÄ± Deneyimi: Kompakt gezinme Ã§ubuÄŸu modu, albÃ¼m kapaÄŸÄ± paletinden dinamik temalar, uzun baÅŸlÄ±klar iÃ§in kayan yazÄ± ve yeni sÄ±ralama seÃ§enekleri.</item>
+    </string-array>
+    <string-array name="changelog_070_improvements">
+        <item>Ses Motoru: Daha fazla format desteÄŸiyle (MIDI, ALAC, M4A) ve kod Ã§Ã¶zÃ¼cÃ¼ optimizasyonuyla tam revizyonu.</item>
+        <item>Verimlilik: BÃ¼yÃ¼k enerji tÃ¼ketimi azaltmasÄ±, aÅŸÄ±rÄ± Ä±sÄ±nma dÃ¼zeltmeleri ve arka plan gÃ¶revi optimizasyonu (SyncWorker).</item>
+        <item>VeritabanÄ±: BÃ¼yÃ¼k sorgu optimizasyonlarÄ± ve veri kaybÄ±nÄ± Ã¶nlemek iÃ§in yeniden tasarlanan kapak resmi Ã¶nbelleÄŸi.</item>
+        <item>BaÅŸlangÄ±Ã§: Temel Profil optimizasyonuyla geliÅŸtirilmiÅŸ yÃ¼kleme sÃ¼resi.</item>
+    </string-array>
+    <string-array name="changelog_070_fixes">
+        <item>Oynatma: Opus/MP3\'teki takÄ±lma, Ã§apraz geÃ§iÅŸlerde ReplayGain hatalarÄ± ve Samsung kod Ã§Ã¶zÃ¼cÃ¼lerinde baÅŸlangÄ±Ã§ sorunlarÄ± dÃ¼zeltildi.</item>
+        <item>KararlÄ±lÄ±k: BaÅŸlangÄ±Ã§ta, sanatÃ§Ä± gezinmesinde ve Android 12+ cihazlarda Ã§Ã¶kmeler giderildi.</item>
+        <item>ArayÃ¼z: Kapak resmi titremesi, Latin olmayan yazÄ± tiplerinde metin taÅŸmasÄ± ve gezinme Ã§ubuÄŸu/minioylayÄ±cÄ± davranÄ±ÅŸÄ± dÃ¼zeltildi.</item>
+        <item>GÃ¼venlik: Kimlik bilgisi yÃ¶netimi, depolama izinleri ve medya sunucu iletiÅŸimi gÃ¼Ã§lendirildi.</item>
+    </string-array>
+    <string-array name="changelog_070_added">
+        <item>YerelleÅŸtirme: Ä°spanyolca, FransÄ±zca, RusÃ§a, BasitleÅŸtirilmiÅŸ Ã‡ince, Endonezce, Ä°talyanca</item>
+    </string-array>
+</resources>

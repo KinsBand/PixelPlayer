@@ -1,0 +1,61 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Google Drive dashboard -->
+    <string name="gdrive_dashboard_music_folders">Folder musik</string>
+    <string name="gdrive_dashboard_add_folder_hint">Ketuk + untuk menambahkan folder Drive</string>
+    <string name="gdrive_dashboard_no_folders_yet">Belum ada folder yang ditambahkan</string>
+    <string name="gdrive_dashboard_folders_synced_count">%1$d folder disinkronkan</string>
+    <string name="gdrive_cd_add_folder">Tambah folder</string>
+    <!-- Cloud dashboard generic -->
+    <string name="cloud_dashboard_playlists_synced_count">%1$d playlist disinkronkan</string>
+    <string name="cloud_dashboard_title_playlists">Playlist</string>
+    <string name="cloud_dashboard_action_sync">Sinkronisasi</string>
+    <string name="cloud_dashboard_playlists_empty_title">Belum ada playlist yang disinkronkan</string>
+    <string name="cloud_dashboard_playlists_empty_hint">Ketuk sinkronisasi untuk mengambil playlist Anda</string>
+    <string name="cloud_dashboard_quick_actions">Tindakan cepat</string>
+    <string name="cloud_dashboard_action_sync_library">Sinkronkan pustaka</string>
+    <string name="cloud_dashboard_action_disconnect">Putuskan sambungan</string>
+    <string name="cloud_dashboard_song_count">%1$d lagu</string>
+    <!-- Cloud sync status -->
+    <string name="cloud_sync_status_syncing">Menyinkronkan</string>
+    <string name="cloud_sync_status_syncing_library">Menyinkronkan pustaka...</string>
+    <string name="cloud_sync_status_fetching_playlists">Mengambil playlist...</string>
+    <string name="cloud_sync_status_syncing_playlist_format">Menyinkronkan playlist: %1$s</string>
+    <string name="cloud_sync_status_updating_local">Memperbarui pustaka lokal...</string>
+    <string name="cloud_sync_status_sync_complete">Sinkronisasi selesai</string>
+    <string name="cloud_sync_status_fetching_albums">Mengambil daftar album...</string>
+    <string name="cloud_sync_status_fetching_songs_from_format">Mengambil lagu dari %1$s...</string>
+    <string name="cloud_sync_status_saving_songs_format">Menyimpan %1$d lagu ke database...</string>
+    <string name="cloud_sync_status_no_songs_found">Tidak ada lagu pustaka ditemukan</string>
+    <string name="cloud_sync_status_library_sync_complete">Sinkronisasi pustaka selesai</string>
+    <string name="cloud_sync_status_syncing_ellipsis">Menyinkronkanâ€¦</string>
+    <string name="cloud_sync_error_with_message_format">Kesalahan: %1$s</string>
+    <!-- Cloud content descriptions -->
+    <string name="cloud_cd_sync">Sinkronisasi</string>
+    <string name="cloud_cd_sync_all">Sinkronkan semua</string>
+    <string name="cloud_cd_logout">Keluar</string>
+    <string name="cloud_cd_sync_all_playlists">Sinkronkan semua playlist</string>
+    <string name="cloud_cd_user_avatar">Avatar pengguna</string>
+    <!-- No internet -->
+    <string name="no_internet_dialog_title">Tidak ada koneksi internet</string>
+    <string name="no_internet_dialog_message">Konten ini memerlukan koneksi internet. Silakan periksa pengaturan jaringan Anda dan coba lagi.</string>
+    <string name="offline_screen_title">Anda sedang offline</string>
+    <string name="offline_screen_message">Silakan periksa koneksi internet Anda dan coba lagi untuk mengakses konten ini.</string>
+    <!-- Cloud Authentication & Login Shared Strings -->
+    <!-- Google Drive Auth -->
+    <string name="auth_gdrive_connect_subtitle">Stream file musik langsung dari Google Drive Anda</string>
+    <string name="auth_gdrive_connect_title">Hubungkan Google Drive</string>
+    <string name="auth_gdrive_connected_toast">Google Drive terhubung!</string>
+    <string name="auth_gdrive_create_action">Buat \"PixelPlayer Music\"</string>
+    <string name="auth_gdrive_create_subtitle">Buat folder baru di sini untuk musik Anda</string>
+    <string name="auth_gdrive_empty_msg">Tidak ada folder di sini</string>
+    <string name="auth_gdrive_open_cd">Buka folder</string>
+    <string name="auth_gdrive_select_subtitle">Pilih atau buat folder untuk digunakan sebagai sumber musik Anda</string>
+    <string name="auth_gdrive_select_title">Pilih folder musik</string>
+    <string name="auth_gdrive_setup_msg">Menyiapkan Google Driveâ€¦</string>
+    <string name="auth_gdrive_signin_action">Masuk dengan Google</string>
+    <string name="auth_gdrive_title">Google Drive</string>
+    <string name="auth_gdrive_use_action">Gunakan</string>
+    <!-- Web Login Shared/Generic -->
+    <string name="auth_web_retry_action">Coba lagi</string>
+</resources>

@@ -1,0 +1,144 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="changelog_title">Journal des modifications</string>
+    <string name="changelog_view_github">Voir sur GitHub</string>
+    <string name="changelog_sec_improvements">AmÃ©liorations</string>
+    <string name="changelog_sec_fixes">Corrections</string>
+    <string name="changelog_sec_whats_new">Quoi de neuf</string>
+    <string name="changelog_sec_added">Ajouts</string>
+    <string-array name="changelog_020_added">
+        <item>Prise en charge de Chromecast pour diffuser lâ€™audio depuis votre appareil.</item>
+        <item>Journal des modifications intÃ©grÃ© pour vous tenir informÃ© des derniÃ¨res fonctionnalitÃ©s.</item>
+        <item>Prise en charge des fichiers .LRC, intÃ©grÃ©s et externes.</item>
+        <item>Support des paroles hors ligne.</item>
+        <item>Paroles synchronisÃ©es avec la musique.</item>
+        <item>Nouvel Ã©cran pour afficher la file dâ€™attente complÃ¨te.</item>
+        <item>RÃ©organisation et suppression de morceaux dans la file dâ€™attente.</item>
+        <item>Gestes du mini-lecteur (balayer vers le bas pour fermer).</item>
+        <item>Ajout de nouvelles animations Material.</item>
+        <item>Nouveaux paramÃ¨tres pour personnaliser lâ€™apparence.</item>
+        <item>Nouveau paramÃ¨tre pour vider le cache.</item>
+    </string-array>
+    <string-array name="changelog_020_improvements">
+        <item>Refonte complÃ¨te de lâ€™interface utilisateur.</item>
+        <item>Refonte complÃ¨te du lecteur.</item>
+        <item>AmÃ©lioration des performances de la bibliothÃ¨que.</item>
+        <item>AmÃ©lioration de la vitesse de dÃ©marrage de lâ€™application.</item>
+        <item>Lâ€™IA fournit dÃ©sormais de meilleurs rÃ©sultats.</item>
+    </string-array>
+    <string-array name="changelog_020_fixes">
+        <item>Correction de divers bugs dans lâ€™Ã©diteur de tags.</item>
+        <item>Correction dâ€™un bug oÃ¹ la notification de lecture ne se supprimait pas.</item>
+        <item>Correction de plusieurs bugs provoquant des plantages.</item>
+    </string-array>
+    <string-array name="changelog_030_whats_new">
+        <item>Introduction dâ€™un hub de statistiques dâ€™Ã©coute plus riche avec des analyses dÃ©taillÃ©es.</item>
+        <item>Ajout dâ€™un lecteur flottant rapide pour ouvrir et prÃ©visualiser les fichiers locaux.</item>
+        <item>Ajout dâ€™un onglet dossiers avec navigation en arbre et vue playlist.</item>
+    </string-array>
+    <string-array name="changelog_030_improvements">
+        <item>AmÃ©lioration de lâ€™interface Material 3 pour une expÃ©rience plus cohÃ©rente.</item>
+        <item>Lâ€™Ã©dition des mÃ©tadonnÃ©es prend dÃ©sormais en charge la pochette dâ€™album.</item>
+        <item>Animations et transitions plus fluides dans toute lâ€™application.</item>
+        <item>AmÃ©lioration de la page artiste avec plus de dÃ©tails et de finition.</item>
+        <item>AmÃ©lioration des playlists DailyMix et YourMix avec des sÃ©lections plus variÃ©es.</item>
+        <item>AmÃ©lioration du moteur de gÃ©nÃ©ration de playlists IA.</item>
+        <item>Recherche amÃ©liorÃ©e pour une dÃ©couverte plus rapide.</item>
+        <item>Support Ã©largi pour davantage de formats audio.</item>
+    </string-array>
+    <string-array name="changelog_030_fixes">
+        <item>Correction de problÃ¨mes de mÃ©tadonnÃ©es incohÃ©rentes.</item>
+        <item>Restauration des raccourcis de notification vers la lecture.</item>
+    </string-array>
+    <string-array name="changelog_040_improvements">
+        <item>Refonte majeure de la navigation</item>
+        <item>Nouveau explorateur de fichiers pour choisir les dossiers sources</item>
+        <item>Nouvelles fonctionnalitÃ©s de connectivitÃ© et de casting</item>
+        <item>ContinuitÃ© fluide entre appareils distants</item>
+        <item>Transitions sans coupure entre les morceaux</item>
+        <item>ContrÃ´le du fondu enchaÃ®nÃ©</item>
+        <item>Nouvelle fonctionnalitÃ© de transitions personnalisÃ©es (playlists uniquement)</item>
+        <item>Lecture continue aprÃ¨s fermeture de lâ€™application</item>
+        <item>Optimisations de lâ€™interface</item>
+        <item>AmÃ©lioration des statistiques</item>
+        <item>ContrÃ´le de file dâ€™attente repensÃ© avec plus de fonctionnalitÃ©s</item>
+        <item>Meilleur support des types de fichiers et mÃ©tadonnÃ©es</item>
+        <item>AmÃ©lioration du gestionnaire de permissions</item>
+        <item>Corrections mineures de bugs</item>
+    </string-array>
+    <string-array name="changelog_050_improvements">
+        <item>Mise Ã  jour de lâ€™interface Material 3 Expressive</item>
+        <item>Ã‰galiseur 10 bandes &amp; effets</item>
+        <item>Nouveau flux de synchronisation de la bibliothÃ¨que</item>
+        <item>IntÃ©gration IA (modÃ¨les Gemini)</item>
+        <item>Import/export de playlists M3U</item>
+        <item>IntÃ©gration des images dâ€™artistes Deezer</item>
+        <item>Pochettes de playlists personnalisÃ©es</item>
+        <item>Refonte de lâ€™architecture des paramÃ¨tres</item>
+        <item>Animations du lecteur et de la file dâ€™attente</item>
+        <item>Optimisation des performances (Baseline Profiles)</item>
+        <item>Meilleur systÃ¨me de paroles avec dÃ©calage synchronisÃ©</item>
+    </string-array>
+    <string-array name="changelog_050_fixes">
+        <item>AmÃ©lioration de la stabilitÃ© du casting</item>
+        <item>StabilitÃ© du lecteur amÃ©liorÃ©e</item>
+        <item>Corrections gÃ©nÃ©rales de bugs</item>
+    </string-array>
+    <string-array name="changelog_060_whats_new">
+        <item>Support Android Auto pour la lecture en voiture.</item>
+        <item>Cloud integrations expanded with Google Drive improvements.</item>
+        <item>Historique rÃ©cent et restauration de file dâ€™attente persistante.</item>
+        <item>Outils de sauvegarde &amp; restauration v3 et gestion de compte.</item>
+        <item>Recherche de paroles amÃ©liorÃ©e avec fallback manuel.</item>
+    </string-array>
+    <string-array name="changelog_060_improvements">
+        <item>AmÃ©lioration majeure des performances globales.</item>
+        <item>Refonte des Ã©crans lecteur, casting, paroles, artiste et genres.</item>
+        <item>Navigation et recherche plus fiables.</item>
+        <item>CompatibilitÃ© audio amÃ©liorÃ©e pour plus dâ€™appareils.</item>
+        <item>Meilleure prise en charge de la sÃ©lection multiple.</item>
+    </string-array>
+    <string-array name="changelog_060_fixes">
+        <item>StabilitÃ© amÃ©liorÃ©e de la file dâ€™attente et du mode alÃ©atoire.</item>
+        <item>Correction des problÃ¨mes de lecture en arriÃ¨re-plan et casting.</item>
+        <item>Correction du minuteur de sommeil et des crashs fichiers/artistes.</item>
+        <item>AmÃ©lioration des widgets et stabilitÃ© des services.</item>
+        <item>Corrections gÃ©nÃ©rales et polish UI.</item>
+    </string-array>
+    <string-array name="changelog_070_whats_new">
+        <item>IA : intÃ©gration Groq AI et OpenRouter (expÃ©rimental).</item>
+        <item>Paroles : traduction synchronisÃ©e, support Kugou LRC, alignement et chargement amÃ©liorÃ©.</item>
+        <item>UI/UX : barre compacte, thÃ¨mes dynamiques, titre dÃ©filant, tri amÃ©liorÃ©.</item>
+    </string-array>
+    <string-array name="changelog_070_improvements">
+        <item>Moteur audio entiÃ¨rement refait avec meilleurs formats (MIDI, ALAC, M4A).</item>
+        <item>RÃ©duction drastique de la consommation Ã©nergÃ©tique.</item>
+        <item>Optimisation des bases de donnÃ©es et du cache.</item>
+        <item>AmÃ©lioration du temps de dÃ©marrage via Baseline Profiles.</item>
+    </string-array>
+    <string-array name="changelog_070_fixes">
+        <item>Correction des problÃ¨mes de lecture et de stuttering.</item>
+        <item>Correction des crashs sur Android et Samsung decoders.</item>
+        <item>Correction des problÃ¨mes UI (cover art, texte, navigation).</item>
+        <item>SÃ©curisation du stockage et des communications mÃ©dias.</item>
+    </string-array>
+    <string-array name="changelog_070_added">
+        <item>Localisation : espagnol, franÃ§ais, russe, chinois simplifiÃ©, indonÃ©sien, italien.</item>
+    </string-array>
+    <string-array name="changelog_075_whats_new">
+        <item>IntÃ©gration Google Drive avec gestion de lecture.</item>
+        <item>Ã‰dition en lot des mÃ©tadonnÃ©es.</item>
+        <item>Outil de diagnostic de latence et sÃ©lection multiple dans la recherche.</item>
+        <item>Support arabe et turc avec options rÃ©seau local HTTP.</item>
+    </string-array>
+    <string-array name="changelog_075_improvements">
+        <item>Ã‰conomie de batterie drastique.</item>
+        <item>Optimisation de la gestion de file dâ€™attente.</item>
+        <item>Animations Material 3 Expressive amÃ©liorÃ©es.</item>
+        <item>Synchronisation bibliothÃ¨que optimisÃ©e.</item>
+    </string-array>
+    <string-array name="changelog_075_fixes">
+        <item>Correction des problÃ¨mes de lecture et buffering.</item>
+        <item>Correction de la suppression de chansons externes.</item>
+    </string-array>
+</resources>

@@ -1,0 +1,301 @@
+--- /mnt/user-data/uploads/pixelplay/MainActivity.kt	2026-09-21 14:21:07.450316567 +1000
++++ MainActivity.kt	2026-09-21 14:25:32.353685513 +1000
+@@ -227,6 +227,7 @@
+             window.isNavigationBarContrastEnforced = false
+         }
+         super.onCreate(savedInstanceState)
++        com.theveloper.pixelplay.utils.HighRefreshRate.apply(this)
+ 
+         // MD3 Optimization: Release Splash Screen immediately to render UI skeleton.
+         // Data loading is handled via optimistic UI and smooth transitions.
+@@ -306,20 +307,25 @@
+                 }
+             }
+ 
+-            val downloadProgressMap by songDownloadManager.downloadProgressMap.collectAsStateWithLifecycle()
+-            val downloadingSongIds by remember(downloadProgressMap) {
+-                derivedStateOf {
+-                    downloadProgressMap.filterValues { progress ->
+-                        when (progress) {
+-                            is DownloadProgress.Resolving,
+-                            is DownloadProgress.Downloading,
+-                            is DownloadProgress.Tagging,
+-                            is DownloadProgress.Scanning -> true
+-                            else -> false
+-                        }
+-                    }.keys
+-                }
++            // Only the *set of active IDs* matters here. Collecting the raw progress map made this
++            // root scope (and every SmartImage reading LocalDownloadingSongIds) recompose on every
++            // progress tick while a download was running.
++            val downloadingSongIdsFlow = remember(songDownloadManager) {
++                songDownloadManager.downloadProgressMap
++                    .map { progressMap ->
++                        progressMap.filterValues { progress ->
++                            when (progress) {
++                                is DownloadProgress.Resolving,
++                                is DownloadProgress.Downloading,
++                                is DownloadProgress.Tagging,
++                                is DownloadProgress.Scanning -> true
++                                else -> false
++                            }
++                        }.keys
++                    }
++                    .distinctUntilChanged()
+             }
++            val downloadingSongIds by downloadingSongIdsFlow.collectAsStateWithLifecycle(initialValue = emptySet())
+ 
+             CompositionLocalProvider(
+                 LocalShowScrollbar provides showScrollbar,
+@@ -1266,6 +1272,8 @@
+ 
+     override fun onResume() {
+         super.onResume()
++        // Re-apply after returning: the display (foldables, external screens) may have changed.
++        com.theveloper.pixelplay.utils.HighRefreshRate.apply(this)
+     }
+ 
+ 
+--- /mnt/user-data/uploads/pixelplay/presentation/components/LyricsSheet.kt	2026-09-21 14:20:56.846315936 +1000
++++ LyricsSheet.kt	2026-09-21 14:25:07.858563757 +1000
+@@ -22,6 +22,8 @@
+ import androidx.compose.animation.core.LinearEasing
+ import androidx.compose.ui.graphics.graphicsLayer
+ import androidx.compose.ui.graphics.TransformOrigin
++import androidx.compose.ui.graphics.BlurEffect
++import androidx.compose.ui.graphics.TileMode
+ import androidx.compose.ui.util.lerp
+ import androidx.compose.material3.rememberModalBottomSheetState
+ import androidx.lifecycle.compose.collectAsStateWithLifecycle
+@@ -1761,6 +1763,7 @@
+         (distanceFromCurrent * animatedLyricsBlurStrength).coerceAtMost(10f).dp
+     } else 0.dp
+ 
++    val lineBlurCache = remember { LyricLineBlurCache() }
+     val blurRadius by animateDpAsState(
+         targetValue = targetBlur,
+         animationSpec = if (useAnimatedLyrics) tween(durationMillis = 400) else tween(durationMillis = 200),
+@@ -1791,8 +1794,20 @@
+                     },
+                     pivotFractionY = 0.5f
+                 )
++                // Blur is applied here (draw phase) instead of Modifier.blur(blurRadius):
++                // reading the animated radius in composition recomposed every visible line on
++                // every frame of the 400 ms line-change animation. Same look (clamped, clipped).
++                // Whole-pixel steps + cache: a new RenderEffect is built only when the rounded
++                // radius changes, not on every animation frame.
++                val radiusPx = kotlin.math.round(blurRadius.toPx())
++                if (radiusPx >= 1f) {
++                    renderEffect = lineBlurCache.effectFor(radiusPx)
++                    clip = true
++                } else {
++                    renderEffect = null
++                    clip = false
++                }
+             }
+-            .then(if (blurRadius > 0.dp) Modifier.blur(blurRadius) else Modifier)
+     } else baseModifier
+ 
+     // Roman or Translate Logic
+@@ -2385,5 +2400,17 @@
+     }
+ }
+ 
+-
+-
++/** Reuses the last BlurEffect while the (whole-pixel) radius is unchanged. */
++private class LyricLineBlurCache {
++    private var radiusPx = -1f
++    private var effect: BlurEffect? = null
++
++    fun effectFor(radius: Float): BlurEffect {
++        val cached = effect
++        if (cached != null && radius == radiusPx) return cached
++        return BlurEffect(radius, radius, TileMode.Clamp).also {
++            effect = it
++            radiusPx = radius
++        }
++    }
++}
+--- /mnt/user-data/uploads/pixelplay/presentation/components/ShimmerBox.kt	2026-09-21 14:20:57.874315997 +1000
++++ ShimmerBox.kt	2026-09-21 14:25:32.357772307 +1000
+@@ -4,11 +4,12 @@
+ import androidx.compose.animation.core.infiniteRepeatable
+ import androidx.compose.animation.core.rememberInfiniteTransition
+ import androidx.compose.animation.core.tween
+-import androidx.compose.foundation.background
+ import androidx.compose.foundation.layout.Box
+ import androidx.compose.material3.MaterialTheme
+ import androidx.compose.runtime.Composable
++import androidx.compose.runtime.remember
+ import androidx.compose.ui.Modifier
++import androidx.compose.ui.draw.drawBehind
+ import androidx.compose.ui.geometry.Offset
+ import androidx.compose.ui.graphics.Brush
+ 
+@@ -17,12 +18,10 @@
+     // Use MaterialTheme colors for proper dark/light mode support
+     val baseColor = MaterialTheme.colorScheme.surfaceContainerHigh
+     val highlightColor = MaterialTheme.colorScheme.surfaceContainerHighest
+-    
+-    val shimmerColors = listOf(
+-        baseColor,
+-        highlightColor,
+-        baseColor,
+-    )
++
++    val shimmerColors = remember(baseColor, highlightColor) {
++        listOf(baseColor, highlightColor, baseColor)
++    }
+ 
+     val transition = rememberInfiniteTransition(label = "shimmer")
+     val translateAnim = transition.animateFloat(
+@@ -34,13 +33,18 @@
+         label = "shimmerTranslate"
+     )
+ 
+-    val brush = Brush.linearGradient(
+-        colors = shimmerColors,
+-        start = Offset.Zero,
+-        end = Offset(x = translateAnim.value, y = translateAnim.value)
+-    )
+-
++    // The animated value is read only in the draw phase, so each frame just redraws the box
++    // instead of recomposing every shimmer placeholder on screen (grids show dozens).
+     Box(
+-        modifier = modifier.background(brush = brush)
++        modifier = modifier.drawBehind {
++            val t = translateAnim.value
++            drawRect(
++                brush = Brush.linearGradient(
++                    colors = shimmerColors,
++                    start = Offset.Zero,
++                    end = Offset(x = t, y = t)
++                )
++            )
++        }
+     )
+-}
+\ No newline at end of file
++}
+--- /mnt/user-data/uploads/pixelplay/presentation/components/AmbientDownloadVisual.kt	2026-09-21 14:24:00.686326864 +1000
++++ AmbientDownloadVisual.kt	2026-09-21 14:24:12.438284587 +1000
+@@ -6,7 +6,6 @@
+ import androidx.compose.animation.core.infiniteRepeatable
+ import androidx.compose.animation.core.rememberInfiniteTransition
+ import androidx.compose.animation.core.tween
+-import androidx.compose.foundation.background
+ import androidx.compose.foundation.layout.Box
+ import androidx.compose.foundation.layout.fillMaxSize
+ import androidx.compose.foundation.layout.size
+@@ -21,6 +20,7 @@
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.draw.clip
++import androidx.compose.ui.draw.drawBehind
+ import androidx.compose.ui.graphics.RectangleShape
+ import androidx.compose.ui.graphics.Shape
+ import androidx.compose.ui.graphics.graphicsLayer
+@@ -80,21 +80,25 @@
+         label = "AmbientIconAlpha"
+     )
+ 
++    // All three animated values are read in the draw/layer phase only, so the pulse redraws
++    // the overlay without recomposing it (and its parent cover) on every frame.
++    val pulseColor = MaterialTheme.colorScheme.primary
+     Box(
+         modifier = modifier
+             .fillMaxSize()
+             .clip(shape)
+-            .background(MaterialTheme.colorScheme.primary.copy(alpha = pulseAlpha)),
++            .drawBehind { drawRect(pulseColor.copy(alpha = pulseAlpha)) },
+         contentAlignment = Alignment.Center
+     ) {
+         Icon(
+             imageVector = Icons.Rounded.Download,
+             contentDescription = null,
+-            tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = iconAlpha),
++            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+             modifier = Modifier
+                 .graphicsLayer {
+                     scaleX = iconScale
+                     scaleY = iconScale
++                    alpha = iconAlpha
+                 }
+                 .then(
+                     if (iconSize != null) Modifier.size(iconSize)
+--- /mnt/user-data/uploads/pixelplay/presentation/components/ExpressiveScrollBar.kt	2026-09-21 14:20:59.378316087 +1000
++++ ExpressiveScrollBar.kt	2026-09-21 14:25:32.355840679 +1000
+@@ -493,7 +493,9 @@
+             }
+         }
+ 
+-        val dragLabelTargetIndex = when {
++        // Read the list's first visible index only while a drag label is shown; reading it
++        // unconditionally recomposed the scrollbar every time a row scrolled past the top.
++        val dragLabelTargetIndex = if (!isDragging || dragLabelProvider == null) -1 else when {
+             pendingScrollIndex >= 0 -> pendingScrollIndex
+             listState != null -> listState.firstVisibleItemIndex
+             gridState != null -> gridState.firstVisibleItemIndex
+--- /dev/null	2026-09-19 08:42:52.300035828 +1000
++++ HighRefreshRate.kt	2026-09-21 14:24:53.114329981 +1000
+@@ -0,0 +1,35 @@
++package com.theveloper.pixelplay.utils
++
++import android.app.Activity
++import android.view.Display
++import kotlin.math.abs
++
++/**
++ * Asks the system for the display's fastest refresh rate at the current resolution
++ * (e.g. 120 Hz instead of the 60 Hz many devices fall back to for "idle" apps), so
++ * scrolling, sheet drags and animations render at the panel's full frame rate.
++ *
++ * Only the refresh rate changes — the resolution stays whatever the user picked — and the
++ * system can still override it (battery saver, thermal limits, "Smooth display" turned off).
++ */
++object HighRefreshRate {
++
++    fun apply(activity: Activity) {
++        val display: Display = activity.display ?: return
++        val current = display.mode
++        val best = display.supportedModes
++            .filter { it.physicalWidth == current.physicalWidth && it.physicalHeight == current.physicalHeight }
++            .maxByOrNull { it.refreshRate }
++            ?: return
++
++        val window = activity.window
++        val params = window.attributes
++        val alreadyPreferred = params.preferredDisplayModeId == best.modeId &&
++            abs(params.preferredRefreshRate - best.refreshRate) < 0.5f
++        if (alreadyPreferred) return
++
++        params.preferredDisplayModeId = best.modeId
++        params.preferredRefreshRate = best.refreshRate
++        window.attributes = params
++    }
++}
+--- /mnt/user-data/uploads/pixelplay/data/youtube/SongDownloadManager.kt	2026-09-21 14:06:52.539018713 +1000
++++ /mnt/user-data/outputs/pixelplay-smoothness/SongDownloadManager.kt	2026-09-21 14:25:21.947062624 +1000
+@@ -280,6 +280,7 @@
+             java.io.FileOutputStream(outputFile).use { }
+             position = 0L
+         }
++        var lastEmittedPercent = -1
+         FileOutputStream(outputFile, true).use { output ->
+             val buffer = ByteArray(64 * 1024)
+             while (total == null || position < total) {
+@@ -305,7 +306,12 @@
+                             readInChunk += read
+                             position += read
+                             val percent = if (total != null) (position * 100 / total).toInt().coerceIn(0, 99) else 0
+-                            updateProgress(songId, DownloadProgress.Downloading(songId, percent))
++                            // Emit only when the visible percentage changes: one emission per 64 KiB
++                            // read meant hundreds of StateFlow updates (and UI recompositions) per second.
++                            if (percent != lastEmittedPercent) {
++                                lastEmittedPercent = percent
++                                updateProgress(songId, DownloadProgress.Downloading(songId, percent))
++                            }
+                         }
+                     }
+                     if (expected >= 0) DownloadIntegrity.requireComplete(readInChunk, expected)

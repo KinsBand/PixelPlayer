@@ -1,0 +1,61 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Google Drive dashboard -->
+    <string name="gdrive_dashboard_music_folders">Cartelle musicali</string>
+    <string name="gdrive_dashboard_add_folder_hint">Tocca + per aggiungere una cartella Drive</string>
+    <string name="gdrive_dashboard_no_folders_yet">Ancora nessuna cartella aggiunta</string>
+    <string name="gdrive_dashboard_folders_synced_count">%1$d cartelle sincronizzate</string>
+    <string name="gdrive_cd_add_folder">Aggiungi cartella</string>
+    <!-- Cloud dashboard generic -->
+    <string name="cloud_dashboard_playlists_synced_count">%1$d playlist sincronizzate</string>
+    <string name="cloud_dashboard_title_playlists">Playlist</string>
+    <string name="cloud_dashboard_action_sync">Sincronizza</string>
+    <string name="cloud_dashboard_playlists_empty_title">Ancora nessuna playlist sincronizzata</string>
+    <string name="cloud_dashboard_playlists_empty_hint">Tocca sincronizza per recuperare le tue playlist</string>
+    <string name="cloud_dashboard_quick_actions">Azioni rapide</string>
+    <string name="cloud_dashboard_action_sync_library">Sincronizza libreria</string>
+    <string name="cloud_dashboard_action_disconnect">Disconnetti</string>
+    <string name="cloud_dashboard_song_count">%1$d brani</string>
+    <!-- Cloud sync status -->
+    <string name="cloud_sync_status_syncing">Sincronizzazione</string>
+    <string name="cloud_sync_status_syncing_library">Sincronizzazione libreriaâ€¦</string>
+    <string name="cloud_sync_status_fetching_playlists">Recupero playlistâ€¦</string>
+    <string name="cloud_sync_status_syncing_playlist_format">Sincronizzazione playlist: %1$s</string>
+    <string name="cloud_sync_status_updating_local">Aggiornamento libreria localeâ€¦</string>
+    <string name="cloud_sync_status_sync_complete">Sincronizzazione completata</string>
+    <string name="cloud_sync_status_fetching_albums">Recupero elenco albumâ€¦</string>
+    <string name="cloud_sync_status_fetching_songs_from_format">Recupero brani da %1$sâ€¦</string>
+    <string name="cloud_sync_status_saving_songs_format">Salvataggio di %1$d brani nel databaseâ€¦</string>
+    <string name="cloud_sync_status_no_songs_found">Nessun brano trovato nella libreria</string>
+    <string name="cloud_sync_status_library_sync_complete">Sincronizzazione libreria completata</string>
+    <string name="cloud_sync_status_syncing_ellipsis">Sincronizzazioneâ€¦</string>
+    <string name="cloud_sync_error_with_message_format">Errore: %1$s</string>
+    <!-- Cloud content descriptions -->
+    <string name="cloud_cd_sync">Sincronizza</string>
+    <string name="cloud_cd_sync_all">Sincronizza tutto</string>
+    <string name="cloud_cd_logout">Disconnetti</string>
+    <string name="cloud_cd_sync_all_playlists">Sincronizza tutte le playlist</string>
+    <string name="cloud_cd_user_avatar">Avatar utente</string>
+    <!-- No internet -->
+    <string name="no_internet_dialog_title">Nessuna connessione internet</string>
+    <string name="no_internet_dialog_message">Questo contenuto richiede una connessione internet. Controlla le impostazioni di rete e riprova.</string>
+    <string name="offline_screen_title">Sei offline</string>
+    <string name="offline_screen_message">Controlla la tua connessione internet e riprova per accedere a questo contenuto.</string>
+    <!-- Cloud Authentication & Login Shared Strings -->
+    <!-- Google Drive Auth -->
+    <string name="auth_gdrive_connect_subtitle">Riproduci i file musicali direttamente dal tuo Google Drive</string>
+    <string name="auth_gdrive_connect_title">Connetti Google Drive</string>
+    <string name="auth_gdrive_connected_toast">Google Drive connesso!</string>
+    <string name="auth_gdrive_create_action">Crea \"PixelPlayer Music\"</string>
+    <string name="auth_gdrive_create_subtitle">Crea qui una nuova cartella per la tua musica</string>
+    <string name="auth_gdrive_empty_msg">Nessuna cartella qui</string>
+    <string name="auth_gdrive_open_cd">Apri cartella</string>
+    <string name="auth_gdrive_select_subtitle">Scegli o crea una cartella da usare come sorgente musicale</string>
+    <string name="auth_gdrive_select_title">Seleziona una cartella musicale</string>
+    <string name="auth_gdrive_setup_msg">Configurazione Google Driveâ€¦</string>
+    <string name="auth_gdrive_signin_action">Accedi con Google</string>
+    <string name="auth_gdrive_title">Google Drive</string>
+    <string name="auth_gdrive_use_action">Usa</string>
+    <!-- Web Login Shared/Generic -->
+    <string name="auth_web_retry_action">Riprova</string>
+</resources>

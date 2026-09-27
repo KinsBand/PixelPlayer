@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The turntable renders from the exact cell size it is given rather than from size buckets,
+  so the resize range here is deliberately wide: it stays legible from a single 1x1 cell up
+  to a large tablet tile.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="55dp"
+    android:minHeight="55dp"
+    android:minResizeWidth="40dp"
+    android:minResizeHeight="40dp"
+    android:maxResizeWidth="400dp"
+    android:maxResizeHeight="400dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="2"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/widget_preview_turntable"
+    android:description="@string/widget_turntable_desc"
+    android:previewImage="@drawable/widget_preview_turntable_image"
+    android:previewLayout="@layout/widget_preview_turntable"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:widgetFeatures="reconfigurable|configuration_optional">
+</appwidget-provider>

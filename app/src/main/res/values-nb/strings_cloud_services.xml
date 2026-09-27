@@ -1,0 +1,61 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Google Drive dashboard -->
+    <string name="gdrive_dashboard_music_folders">Musikkmapper</string>
+    <string name="gdrive_dashboard_add_folder_hint">Trykk + for Ã¥ legge til en Drive-mappe</string>
+    <string name="gdrive_dashboard_no_folders_yet">Ingen mapper lagt til ennÃ¥</string>
+    <string name="gdrive_dashboard_folders_synced_count">%1$d mapper synkronisert</string>
+    <string name="gdrive_cd_add_folder">Legg til mappe</string>
+    <!-- Cloud dashboard generic -->
+    <string name="cloud_dashboard_playlists_synced_count">%1$d spillelister synkronisert</string>
+    <string name="cloud_dashboard_title_playlists">Spillelister</string>
+    <string name="cloud_dashboard_action_sync">Synk</string>
+    <string name="cloud_dashboard_playlists_empty_title">Ingen spillelister synkronisert ennÃ¥</string>
+    <string name="cloud_dashboard_playlists_empty_hint">Trykk pÃ¥ synk for Ã¥ hente spillelister</string>
+    <string name="cloud_dashboard_quick_actions">Hurtighandlinger</string>
+    <string name="cloud_dashboard_action_sync_library">Synkroniser bibliotek</string>
+    <string name="cloud_dashboard_action_disconnect">Koble fra</string>
+    <string name="cloud_dashboard_song_count">%1$d sanger</string>
+    <!-- Cloud sync status -->
+    <string name="cloud_sync_status_syncing">Synkroniserer</string>
+    <string name="cloud_sync_status_syncing_library">Synkroniserer bibliotekâ€¦</string>
+    <string name="cloud_sync_status_fetching_playlists">Henter spillelisterâ€¦</string>
+    <string name="cloud_sync_status_syncing_playlist_format">Synkroniserer spilleliste: %1$s</string>
+    <string name="cloud_sync_status_updating_local">Oppdaterer lokalt bibliotekâ€¦</string>
+    <string name="cloud_sync_status_sync_complete">Synkronisering fullfÃ¸rt</string>
+    <string name="cloud_sync_status_fetching_albums">Henter albumlisteâ€¦</string>
+    <string name="cloud_sync_status_fetching_songs_from_format">Henter sanger fra %1$sâ€¦</string>
+    <string name="cloud_sync_status_saving_songs_format">Lagrer %1$d sanger i databasenâ€¦</string>
+    <string name="cloud_sync_status_no_songs_found">Ingen biblioteksanger funnet</string>
+    <string name="cloud_sync_status_library_sync_complete">Biblioteksynkronisering fullfÃ¸rt</string>
+    <string name="cloud_sync_status_syncing_ellipsis">Synkronisererâ€¦</string>
+    <string name="cloud_sync_error_with_message_format">Feil: %1$s</string>
+    <!-- Cloud content descriptions -->
+    <string name="cloud_cd_sync">Synkroniser</string>
+    <string name="cloud_cd_sync_all">Synkroniser alle</string>
+    <string name="cloud_cd_logout">Logg ut</string>
+    <string name="cloud_cd_sync_all_playlists">Synkroniser alle spillelister</string>
+    <string name="cloud_cd_user_avatar">Brukeravatar</string>
+    <!-- No internet -->
+    <string name="no_internet_dialog_title">Ingen internettforbindelse</string>
+    <string name="no_internet_dialog_message">Dette innholdet krever internettforbindelse. Vennligst sjekk nettverksinnstillingene dine og prÃ¸v igjen.</string>
+    <string name="offline_screen_title">Du er offline</string>
+    <string name="offline_screen_message">Vennligst sjekk internettforbindelsen din for Ã¥ fÃ¥ tilgang til dette innholdet.</string>
+    <!-- Cloud Authentication & Login Shared Strings -->
+    <!-- Google Drive Auth -->
+    <string name="auth_gdrive_connect_subtitle">StrÃ¸m musikkfiler direkte fra din Google Drive</string>
+    <string name="auth_gdrive_connect_title">Koble til Google Drive</string>
+    <string name="auth_gdrive_connected_toast">Google Drive tilkoblet!</string>
+    <string name="auth_gdrive_create_action">Opprett \"PixelPlayer Music\"</string>
+    <string name="auth_gdrive_create_subtitle">Opprett en ny mappe for musikken din her</string>
+    <string name="auth_gdrive_empty_msg">Ingen mapper her</string>
+    <string name="auth_gdrive_open_cd">Ã…pne mappe</string>
+    <string name="auth_gdrive_select_subtitle">Velg eller opprett en mappe som skal brukes som musikkilde</string>
+    <string name="auth_gdrive_select_title">Velg en musikkmappe</string>
+    <string name="auth_gdrive_setup_msg">Setter opp Google Driveâ€¦</string>
+    <string name="auth_gdrive_signin_action">Logg inn med Google</string>
+    <string name="auth_gdrive_title">Google Drive</string>
+    <string name="auth_gdrive_use_action">Bruk</string>
+    <!-- Web Login Shared/Generic -->
+    <string name="auth_web_retry_action">PrÃ¸v igjen</string>
+</resources>

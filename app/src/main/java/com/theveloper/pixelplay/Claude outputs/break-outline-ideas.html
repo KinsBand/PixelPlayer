@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Break Countdown Ideas</title>
+<style>
+  :root { --bg:#12141a; --fg:#e8e6f0; --muted:#9a98a8; --accent:#c9a7ff; --card:#1b1e26; }
+  @media (prefers-color-scheme: light) { :root { --bg:#f6f5fa; --fg:#1d1b24; --muted:#6b6878; --accent:#7a4fd6; --card:#ffffff; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui, sans-serif; padding:24px 16px 48px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  p.lead { color:var(--muted); margin:0 0 20px; max-width:640px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:16px; max-width:980px; }
+  .card { background:var(--card); border-radius:20px; padding:18px 16px 16px; }
+  .card h2 { font-size:15px; margin:0 0 2px; }
+  .card .tag { font-size:12px; color:var(--accent); font-weight:600; }
+  .card p { color:var(--muted); font-size:13px; margin:8px 0 0; }
+  .stage { height:110px; display:flex; align-items:center; justify-content:center; }
+  svg { overflow:visible; }
+  .note { fill:var(--accent); }
+  .controls { max-width:980px; margin:0 0 16px; display:flex; gap:12px; align-items:center; color:var(--muted); font-size:13px; flex-wrap:wrap; }
+  input[type=range] { width:200px; accent-color:var(--accent); }
+</style>
+</head>
+<body>
+<h1>Instrumental break: outline countdown</h1>
+<p class="lead">Each pill is an 8-second break on loop. The line closes exactly when the singing comes back. Number 1 is the one built into the app; the others are alternatives you could swap in or combine.</p>
+<div class="controls"><label>Break length <input id="len" type="range" min="3" max="20" value="8"> <span id="lenv">8 s</span></label></div>
+<div class="grid" id="grid"></div>
+<script>
+const ideas = [
+  { name: "Split trace (yours)", tag: "Built", desc: "Starts at the left middle, runs over the top and under the bottom at once, meets at the right middle. The faint outline shows the whole break; in the last 15% the line thickens and glows." },
+  { name: "Single sweep", tag: "Alternative", desc: "One line goes all the way round clockwise from the left middle. Simpler, but the end point is the same as the start, so 'almost done' is harder to read." },
+  { name: "Fill from the left", tag: "Alternative", desc: "The pill fills like a progress bar behind the notes. Very clear, but heavier; it competes with the notes animation." },
+  { name: "Notes walk across", tag: "Alternative", desc: "The three notes drift from left to right with the break and the outline closes behind them. Playful; works with the trace." },
+  { name: "Last-bars countdown", tag: "Add-on", desc: "The trace stays quiet, then the last 4 beats flash 4-3-2-1 dots on the pill so singers can count in. Needs the song's tempo." },
+];
+const W = 150, H = 58, R = 24, S = 2.5;
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, parent) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+const i = S * 1.5, l = i, t = i, r = W - i, b = H - i, cy = H / 2, rad = R - i / 2;
+const topD = `M${l},${cy} L${l},${t + rad} A${rad},${rad} 0 0 1 ${l + rad},${t} L${r - rad},${t} A${rad},${rad} 0 0 1 ${r},${t + rad} L${r},${cy}`;
+const botD = `M${l},${cy} L${l},${b - rad} A${rad},${rad} 0 0 0 ${l + rad},${b} L${r - rad},${b} A${rad},${rad} 0 0 0 ${r},${b - rad} L${r},${cy}`;
+const fullD = `M${l},${cy} L${l},${t + rad} A${rad},${rad} 0 0 1 ${l + rad},${t} L${r - rad},${t} A${rad},${rad} 0 0 1 ${r},${t + rad} L${r},${b - rad} A${rad},${rad} 0 0 1 ${r - rad},${b} L${l + rad},${b} A${rad},${rad} 0 0 1 ${l},${b - rad} Z`;
+const cards = [];
+ideas.forEach((idea, k) => {
+  const c = document.createElement("div"); c.className = "card";
+  c.innerHTML = `<div class="tag">${idea.tag}</div><h2>${k + 1}. ${idea.name}</h2><div class="stage"></div><p>${idea.desc}</p>`;
+  document.getElementById("grid").appendChild(c);
+  const svg = el("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}` }, c.querySelector(".stage"));
+  el("rect", { x: 0, y: 0, width: W, height: H, rx: R, fill: "var(--accent)", "fill-opacity": 0.12 }, svg);
+  const fill = el("rect", { x: 0, y: 0, width: 0, height: H, rx: R, fill: "var(--accent)", "fill-opacity": 0.22 }, svg);
+  const trackA = el("path", { d: k === 1 ? fullD : topD, fill: "none", stroke: "var(--accent)", "stroke-opacity": 0.16, "stroke-width": S, "stroke-linecap": "round" }, svg);
+  const trackB = k === 1 ? null : el("path", { d: botD, fill: "none", stroke: "var(--accent)", "stroke-opacity": 0.16, "stroke-width": S }, svg);
+  const glowA = el("path", { d: k === 1 ? fullD : topD, fill: "none", stroke: "var(--accent)", "stroke-width": S * 3.2, "stroke-linecap": "round", "stroke-opacity": 0 }, svg);
+  const glowB = k === 1 ? null : el("path", { d: botD, fill: "none", stroke: "var(--accent)", "stroke-width": S * 3.2, "stroke-linecap": "round", "stroke-opacity": 0 }, svg);
+  const lineA = el("path", { d: k === 1 ? fullD : topD, fill: "none", stroke: "var(--accent)", "stroke-width": S, "stroke-linecap": "round" }, svg);
+  const lineB = k === 1 ? null : el("path", { d: botD, fill: "none", stroke: "var(--accent)", "stroke-width": S, "stroke-linecap": "round" }, svg);
+  const dotA = el("circle", { r: S * 1.25, fill: "var(--accent)" }, svg);
+  const dotB = k === 1 ? null : el("circle", { r: S * 1.25, fill: "var(--accent)" }, svg);
+  const notes = [0, 1, 2].map(() => el("circle", { r: 5, class: "note" }, svg));
+  const beats = [0, 1, 2, 3].map(j => el("circle", { cx: W / 2 - 21 + j * 14, cy: H - 9, r: 3, fill: "var(--accent)", "fill-opacity": 0 }, svg));
+  if (k === 2 || k === 3 || k === 4) { [lineA, lineB, glowA, glowB, dotA, dotB].forEach(e => e && (e.style.display = (k === 3 ? "" : "none"))); if (k === 4) { trackA.style.display = ""; } }
+  if (k === 2 || k === 4) { trackA.style.display = "none"; trackB && (trackB.style.display = "none"); }
+  cards.push({ k, lineA, lineB, glowA, glowB, dotA, dotB, notes, fill, beats });
+});
+const lenA = document.querySelector("path").getTotalLength;
+let breakMs = 8000;
+const range = document.getElementById("len");
+range.oninput = () => { breakMs = range.value * 1000; document.getElementById("lenv").textContent = range.value + " s"; };
+function seg(path, p) {
+  const L = path.getTotalLength(); path.setAttribute("stroke-dasharray", `${L * p} ${L}`); return path.getPointAtLength(L * p);
+}
+function frame(now) {
+  const p = (now % (breakMs + 900)) / breakMs; const q = Math.min(1, p);
+  const ready = Math.max(0, Math.min(1, (q - 0.85) / 0.15));
+  for (const c of cards) {
+    const wave = now / 2800;
+    c.notes.forEach((n, j) => {
+      let x = W / 4 * (j + 1);
+      if (c.k === 3) x = 20 + ((q * (W - 40)) + j * 16) % (W - 30);
+      const y = H / 2 + Math.sin(((wave + j / 3) % 1) * 2 * Math.PI) * 6;
+      n.setAttribute("cx", x); n.setAttribute("cy", y);
+    });
+    if (c.k === 0 || c.k === 3) {
+      const w = S * (1 + 0.5 * ready);
+      [c.lineA, c.lineB].forEach(e => e.setAttribute("stroke-width", w));
+      const a = seg(c.lineA, q), b = seg(c.lineB, q); seg(c.glowA, q); seg(c.glowB, q);
+      c.glowA.setAttribute("stroke-opacity", 0.22 * ready); c.glowB.setAttribute("stroke-opacity", 0.22 * ready);
+      const show = q < 1 ? 1 : 0;
+      c.dotA.setAttribute("cx", a.x); c.dotA.setAttribute("cy", a.y); c.dotA.setAttribute("opacity", show);
+      c.dotB.setAttribute("cx", b.x); c.dotB.setAttribute("cy", b.y); c.dotB.setAttribute("opacity", show);
+    } else if (c.k === 1) {
+      const a = seg(c.lineA, q); seg(c.glowA, q); c.glowA.setAttribute("stroke-opacity", 0.22 * ready);
+      c.dotA.setAttribute("cx", a.x); c.dotA.setAttribute("cy", a.y); c.dotA.setAttribute("opacity", q < 1 ? 1 : 0);
+    } else if (c.k === 2) {
+      c.fill.setAttribute("width", W * q);
+    } else if (c.k === 4) {
+      const beatMs = 500; const left = breakMs * (1 - q);
+      c.beats.forEach((d, j) => { const lit = left <= (4 - j) * beatMs && q < 1; d.setAttribute("fill-opacity", lit ? 1 : 0.15); });
+    }
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

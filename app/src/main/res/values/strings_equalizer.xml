@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<resources>
+    <!-- Equalizer preset dialogs -->
+    <string name="equalizer_error_name_empty">Name cannot be empty</string>
+    <string name="equalizer_action_rename">Rename</string>
+
+    <!-- EqualizerScreen -->
+    <string name="equalizer_change_view_mode_cd">Change view mode</string>
+    <string name="equalizer_disable_cd">Disable equalizer</string>
+    <string name="equalizer_enable_cd">Enable equalizer</string>
+    <string name="equalizer_edit_tab_title">Edit</string>
+    <string name="equalizer_edit_presets_cd">Edit presets</string>
+    <string name="equalizer_custom_preset_cd">Custom preset</string>
+    <string name="equalizer_presets_cd">Presets</string>
+    <string name="equalizer_action_update">Update</string>
+    <string name="equalizer_bass_boost">Bass Boost</string>
+    <string name="equalizer_virtualizer">Virtualizer</string>
+    <string name="equalizer_loudness">Loudness</string>
+    <string name="equalizer_effect_not_supported">Not supported</string>
+    <string name="equalizer_effect_not_supported_device">Not supported on this device</string>
+    <string name="equalizer_volume">Volume</string>
+    <string name="equalizer_frequency_response">Frequency Response</string>
+    <string name="equalizer_visualizer_realtime">Real-Time Spectrum</string>
+    <string name="equalizer_switch_to_realtime_visualizer">Switch to real-time audio visualizer</string>
+    <string name="equalizer_switch_to_response_curve">Switch to frequency response curve</string>
+    <string name="equalizer_live_audio">Live Audio</string>
+    <string name="equalizer_preview_mode">Preview Mode</string>
+    <string name="equalizer_unit_hz">Hz</string>
+    <string name="equalizer_band_bass">Bass</string>
+    <string name="equalizer_band_low_mids">Low Mids</string>
+    <string name="equalizer_band_high_mids">High Mids</string>
+    <string name="equalizer_band_treble">Treble</string>
+    <string name="equalizer_band_bass_low">Bass / Low</string>
+    <string name="equalizer_band_mid_high">Mid / High</string>
+    <string name="equalizer_page_n">Page %1$d</string>
+    <string name="equalizer_reset_duration_cd">Reset duration</string>
+    <string name="equalizer_action_save_new">Save New</string>
+
+    <!-- CustomPresetsSheet -->
+    <string name="equalizer_presets_saved_title">Saved Presets</string>
+    <string name="equalizer_presets_empty">No custom presets saved yet.</string>
+    <string name="equalizer_presets_cd_unpin">Unpin</string>
+    <string name="equalizer_presets_cd_pin">Pin</string>
+    <string name="equalizer_presets_cd_rename">Rename</string>
+    <string name="equalizer_presets_cd_delete">Delete</string>
+
+    <!-- SavePresetDialog -->
+    <string name="equalizer_presets_save_custom_title">Save custom preset</string>
+    <string name="equalizer_presets_save_custom_body">Enter a name for your custom equalizer preset.</string>
+    <string name="equalizer_preset_name_placeholder">Preset name</string>
+    <string name="equalizer_presets_rename_title">Rename preset</string>
+
+    <!-- ReorderPresetsSheet -->
+    <string name="equalizer_manage_presets_title">Manage presets</string>
+    <string name="equalizer_presets_drag_hint">Drag to reorder • Tap the eye to show or hide</string>
+    <string name="equalizer_cd_reorder">Reorder</string>
+    <string name="equalizer_reset_presets_title">Reset presets</string>
+    <string name="equalizer_reset_presets_message">This will restore the default preset order and visibility. Continue?</string>
+    <string name="equalizer_cd_reset_presets_default">Reset to default</string>
+    <string name="equalizer_cd_visible">Visible</string>
+    <string name="equalizer_cd_hidden">Hidden</string>
+
+    <!-- Phase 1: Auto-Preamp, AutoEq, Output Auto-Switching, A/B, Ergonomics -->
+    <string name="equalizer_auto_preamp">Auto-Preamp</string>
+    <string name="equalizer_auto_preamp_desc">Headroom compensation against clipping</string>
+    <string name="equalizer_preamp">Pre-Amp</string>
+    <string name="equalizer_preamp_auto">Auto (%1$.1f dB)</string>
+    <string name="equalizer_preamp_manual">%1$.1f dB</string>
+
+    <string name="equalizer_autoeq_title">AutoEq Presets</string>
+    <string name="equalizer_autoeq_search_hint">Search headphones (Sony, AirPods, Sennheiser...)</string>
+    <string name="equalizer_autoeq_browse_action">AutoEq</string>
+    <string name="equalizer_autoeq_applied">Applied AutoEq for %1$s</string>
+    <string name="equalizer_target_curve">Target: %1$s</string>
+    <string name="equalizer_all_manufacturers">All Brands</string>
+
+    <string name="equalizer_output_routing">Audio Output</string>
+    <string name="equalizer_auto_switch_device">Auto-switch presets per device</string>
+    <string name="equalizer_auto_switch_desc">Automatically load preset when audio route changes</string>
+    <string name="equalizer_assign_to_current_device">Assign current preset to this device</string>
+    <string name="equalizer_device_assigned">Assigned \"%1$s\" to %2$s</string>
+
+    <string name="equalizer_marker_sub_bass">Sub-Bass</string>
+    <string name="equalizer_marker_bass">Bass</string>
+    <string name="equalizer_marker_low_mids">Low Mids</string>
+    <string name="equalizer_marker_midrange">Midrange</string>
+    <string name="equalizer_marker_high_mids">High Mids</string>
+    <string name="equalizer_marker_presence">Presence</string>
+    <string name="equalizer_marker_brilliance">Brilliance</string>
+    <string name="equalizer_fine_tune">Fine-Tune Band</string>
+    <string name="equalizer_reset_band">Reset to 0 dB</string>
+    <string name="equalizer_fine_tune_done">Done</string>
+
+    <string name="equalizer_audition_title">A/B Auditioning</string>
+    <string name="equalizer_audition_slot_a">Slot A</string>
+    <string name="equalizer_audition_slot_b">Slot B</string>
+    <string name="equalizer_audition_bypass">Bypass (Flat)</string>
+    <string name="equalizer_copy_to_a">Copy to A</string>
+    <string name="equalizer_copy_to_b">Copy to B</string>
+    <string name="equalizer_loudness_comp">Loudness Match</string>
+    <string name="equalizer_loudness_comp_desc">Matches perceived volume for unbiased comparison</string>
+
+    <!-- Phase 2: Pro Audiophile DSP Engine -->
+    <string name="equalizer_dsp_engine_title">Audiophile DSP Engine</string>
+    <string name="equalizer_dsp_pipeline">32-bit Float Pipeline</string>
+    <string name="equalizer_peq_title">Parametric EQ (PEQ)</string>
+    <string name="equalizer_peq_mode_graphic">10-Band Graphic</string>
+    <string name="equalizer_peq_mode_parametric">Parametric PEQ</string>
+    <string name="equalizer_peq_add_band">Add PEQ Band</string>
+    <string name="equalizer_subsonic_filter">Subsonic Rumble Filter</string>
+    <string name="equalizer_subsonic_desc">High-pass cuts inaudible cone flapping &amp; DC rumble (&lt; 25 Hz)</string>
+    <string name="equalizer_ultrasonic_filter">Ultrasonic Smoothing Filter</string>
+    <string name="equalizer_ultrasonic_desc">Low-pass removes DAC ultrasonic noise &amp; hash (&gt; 20 kHz)</string>
+    <string name="equalizer_crossfeed">Stereo Crossfeed</string>
+    <string name="equalizer_crossfeed_desc">Bauer/Meier natural loudspeaker simulation for headphones</string>
+    <string name="equalizer_limiter">True Peak Limiter</string>
+    <string name="equalizer_limiter_desc">Soft analog-style saturation prevents digital clipping crackle</string>
+    <string name="equalizer_soft_saturation">Soft Saturation</string>
+</resources>

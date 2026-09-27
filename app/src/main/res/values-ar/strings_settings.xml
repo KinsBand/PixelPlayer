@@ -1,0 +1,27 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_category_appearance_title">Ø§Ù„Ù…Ø¸Ù‡Ø±</string>
+    <string name="settings_category_appearance_subtitle">Ø§Ù„Ø³Ù…Ø§Øª (Ø§Ù„Ø«ÙŠÙ…Ø§Øª)ØŒ Ø§Ù„ØªØ®Ø·ÙŠØ·ØŒ ÙˆØ§Ù„Ø£Ù†Ù…Ø§Ø· Ø§Ù„Ù…Ø±Ø¦ÙŠØ©</string>
+    <string name="settings_category_playback_title">Ø§Ù„ØªØ´ØºÙŠÙ„</string>
+    <string name="settings_category_playback_subtitle">Ø³Ù„ÙˆÙƒ Ø§Ù„ØµÙˆØªØŒ Ø§Ù„ØªØ¯Ø§Ø®Ù„ (Crossfade)ØŒ ÙˆØ§Ù„ØªØ´ØºÙŠÙ„ ÙÙŠ Ø§Ù„Ø®Ù„ÙÙŠØ©</string>
+    <string name="settings_category_behavior_title">Ø§Ù„Ø³Ù„ÙˆÙƒ</string>
+    <string name="settings_category_behavior_subtitle">Ø§Ù„Ø¥ÙŠÙ…Ø§Ø¡Ø§ØªØŒ Ø§Ù„ØªÙØ§Ø¹Ù„ Ø§Ù„Ù„Ù…Ø³ÙŠØŒ ÙˆØ³Ù„ÙˆÙƒ Ø§Ù„ØªÙ†Ù‚Ù„</string>
+    <string name="settings_category_ai_title">Ø¯Ù…Ø¬ Ø§Ù„Ø°ÙƒØ§Ø¡ Ø§Ù„Ø§ØµØ·Ù†Ø§Ø¹ÙŠ (Î²)</string>
+    <string name="settings_category_ai_subtitle">Ù…Ø²ÙˆØ¯Ùˆ Ø§Ù„Ø°ÙƒØ§Ø¡ Ø§Ù„Ø§ØµØ·Ù†Ø§Ø¹ÙŠØŒ Ù…ÙØ§ØªÙŠØ­ Ø§Ù„Ù€ APIØŒ ÙˆØ¥Ø¹Ø¯Ø§Ø¯Ø§Øª Ø§Ù„Ù†Ù…ÙˆØ°Ø¬</string>
+    <string name="settings_category_backup_title">Ø§Ù„Ù†Ø³Ø® Ø§Ù„Ø§Ø­ØªÙŠØ§Ø·ÙŠ ÙˆØ§Ù„Ø§Ø³ØªØ¹Ø§Ø¯Ø©</string>
+    <string name="settings_category_backup_subtitle">ØªØµØ¯ÙŠØ± ÙˆØ§Ø³ØªØ¹Ø§Ø¯Ø© Ø¨ÙŠØ§Ù†Ø§Øª ØªØ·Ø¨ÙŠÙ‚Ùƒ Ø§Ù„Ø´Ø®ØµÙŠØ©</string>
+    <string name="settings_category_developer_title">Ø®ÙŠØ§Ø±Ø§Øª Ø§Ù„Ù…Ø·ÙˆØ±ÙŠÙ†</string>
+    <string name="settings_category_developer_subtitle">Ø§Ù„Ù…ÙŠØ²Ø§Øª Ø§Ù„ØªØ¬Ø±ÙŠØ¨ÙŠØ© ÙˆØ¥ØµÙ„Ø§Ø­ Ø§Ù„Ø£Ø®Ø·Ø§Ø¡</string>
+    <string name="settings_category_equalizer_title">Ù…Ø¹Ø§Ø¯Ù„ Ø§Ù„ØµÙˆØª (Equalizer)</string>
+    <string name="settings_category_equalizer_subtitle">Ø¶Ø¨Ø· ØªØ±Ø¯Ø¯Ø§Øª Ø§Ù„ØµÙˆØª ÙˆØ§Ù„Ù…Ø³ØªÙˆÙŠØ§Øª Ø§Ù„Ù…Ø³Ø¨Ù‚Ø©</string>
+    <string name="settings_category_device_capabilities_title">Ù‚Ø¯Ø±Ø§Øª Ø§Ù„Ø¬Ù‡Ø§Ø²</string>
+    <string name="settings_category_device_capabilities_subtitle">Ù…ÙˆØ§ØµÙØ§Øª Ø§Ù„ØµÙˆØªØŒ Ø¨Ø±Ø§Ù…Ø¬ Ø§Ù„ØªØ±Ù…ÙŠØ² (Codecs)ØŒ ÙˆÙ…Ø¹Ù„ÙˆÙ…Ø§Øª ÙÙƒ Ø§Ù„ØªØ´ÙÙŠØ±</string>
+    <string name="settings_category_about_title">Ø­ÙˆÙ„ Ø§Ù„ØªØ·Ø¨ÙŠÙ‚</string>
+    <string name="settings_category_about_subtitle">Ù…Ø¹Ù„ÙˆÙ…Ø§Øª Ø§Ù„ØªØ·Ø¨ÙŠÙ‚ØŒ Ø§Ù„Ø¥ØµØ¯Ø§Ø±ØŒ ÙˆØ§Ù„Ø­Ù‚ÙˆÙ‚</string>
+    <string name="about_github_label">GitHub</string>
+    <string name="about_github_subtitle">Ù…Ø³ØªÙˆØ¯Ø¹ Ø§Ù„ÙƒÙˆØ¯</string>
+    <string name="about_cd_open_github_repo">ÙØªØ­ Ù…Ø³ØªÙˆØ¯Ø¹ GitHub</string>
+    <string name="settings_volume_section">Ù…Ø³ØªÙˆÙ‰ Ø§Ù„ØµÙˆØª</string>
+    <string name="settings_pause_on_volume_zero">Ø¥ÙŠÙ‚Ø§Ù Ù…Ø¤Ù‚Øª Ø¹Ù†Ø¯ ÙˆØµÙˆÙ„ Ù…Ø³ØªÙˆÙ‰ Ø§Ù„ØµÙˆØª Ø¥Ù„Ù‰ Ø§Ù„ØµÙØ±</string>
+    <string name="settings_pause_on_volume_zero_desc">Ø¥ÙŠÙ‚Ø§Ù Ø§Ù„ØªØ´ØºÙŠÙ„ ØªÙ„Ù‚Ø§Ø¦ÙŠÙ‹Ø§ Ù…Ø¤Ù‚ØªÙ‹Ø§ Ø¹Ù†Ø¯Ù…Ø§ ÙŠÙƒÙˆÙ† Ù…Ø³ØªÙˆÙ‰ Ø§Ù„ØµÙˆØª 0</string>
+</resources>

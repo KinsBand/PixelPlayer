@@ -1,0 +1,61 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Google Drive dashboard -->
+    <string name="gdrive_dashboard_music_folders">MÃ¼zik klasÃ¶rleri</string>
+    <string name="gdrive_dashboard_add_folder_hint">KlasÃ¶r eklemek iÃ§in + simgesine dokunun</string>
+    <string name="gdrive_dashboard_no_folders_yet">HenÃ¼z klasÃ¶r eklenmedi</string>
+    <string name="gdrive_dashboard_folders_synced_count">%1$d klasÃ¶r senkronize edildi</string>
+    <string name="gdrive_cd_add_folder">KlasÃ¶r ekle</string>
+    <!-- Cloud dashboard generic -->
+    <string name="cloud_dashboard_playlists_synced_count">%1$d Ã§alma listesi senkronize edildi</string>
+    <string name="cloud_dashboard_title_playlists">Ã‡alma listeleri</string>
+    <string name="cloud_dashboard_action_sync">Senkronize et</string>
+    <string name="cloud_dashboard_playlists_empty_title">HenÃ¼z senkronize edilmiÅŸ Ã§alma listesi yok</string>
+    <string name="cloud_dashboard_playlists_empty_hint">Ã‡alma listelerinizi getirmek iÃ§in senkronizasyona dokunun</string>
+    <string name="cloud_dashboard_quick_actions">HÄ±zlÄ± eylemler</string>
+    <string name="cloud_dashboard_action_sync_library">KitaplÄ±ÄŸÄ± senkronize et</string>
+    <string name="cloud_dashboard_action_disconnect">BaÄŸlantÄ±yÄ± kes</string>
+    <string name="cloud_dashboard_song_count">%1$d ÅŸarkÄ±</string>
+    <!-- Cloud sync status -->
+    <string name="cloud_sync_status_syncing">Senkronize ediliyor</string>
+    <string name="cloud_sync_status_syncing_library">KitaplÄ±k senkronize ediliyorâ€¦</string>
+    <string name="cloud_sync_status_fetching_playlists">Ã‡alma listeleri getiriliyorâ€¦</string>
+    <string name="cloud_sync_status_syncing_playlist_format">Ã‡alma listesi senkronize ediliyor: %1$s</string>
+    <string name="cloud_sync_status_updating_local">Yerel kitaplÄ±k gÃ¼ncelleniyorâ€¦</string>
+    <string name="cloud_sync_status_sync_complete">Senkronizasyon tamamlandÄ±</string>
+    <string name="cloud_sync_status_fetching_albums">AlbÃ¼m listesi getiriliyorâ€¦</string>
+    <string name="cloud_sync_status_fetching_songs_from_format">%1$s kaynaÄŸÄ±ndan ÅŸarkÄ±lar getiriliyorâ€¦</string>
+    <string name="cloud_sync_status_saving_songs_format">%1$d ÅŸarkÄ± veritabanÄ±na kaydediliyorâ€¦</string>
+    <string name="cloud_sync_status_no_songs_found">KitaplÄ±k ÅŸarkÄ±sÄ± bulunamadÄ±</string>
+    <string name="cloud_sync_status_library_sync_complete">KitaplÄ±k senkronizasyonu tamamlandÄ±</string>
+    <string name="cloud_sync_status_syncing_ellipsis">Senkronize ediliyorâ€¦</string>
+    <string name="cloud_sync_error_with_message_format">Hata: %1$s</string>
+    <!-- Cloud content descriptions -->
+    <string name="cloud_cd_sync">Senkronize et</string>
+    <string name="cloud_cd_sync_all">TÃ¼mÃ¼nÃ¼ senkronize et</string>
+    <string name="cloud_cd_logout">Oturumu kapat</string>
+    <string name="cloud_cd_sync_all_playlists">TÃ¼m Ã§alma listelerini senkronize et</string>
+    <string name="cloud_cd_user_avatar">KullanÄ±cÄ± avatarÄ±</string>
+    <!-- No internet -->
+    <string name="no_internet_dialog_title">Ä°nternet baÄŸlantÄ±sÄ± yok</string>
+    <string name="no_internet_dialog_message">Bu iÃ§erik iÃ§in internet baÄŸlantÄ±sÄ± gereklidir. LÃ¼tfen aÄŸ ayarlarÄ±nÄ±zÄ± kontrol edip tekrar deneyin.</string>
+    <string name="offline_screen_title">Ã‡evrimdÄ±ÅŸÄ±sÄ±nÄ±z</string>
+    <string name="offline_screen_message">Bu iÃ§eriÄŸe eriÅŸmek iÃ§in lÃ¼tfen internet baÄŸlantÄ±nÄ±zÄ± kontrol edip tekrar deneyin.</string>
+    <!-- Cloud Authentication & Login Shared Strings -->
+    <!-- Google Drive Auth -->
+    <string name="auth_gdrive_connect_subtitle">MÃ¼zik dosyalarÄ±nÄ± doÄŸrudan Google Drive\'Ä±nÄ±zdan aktarÄ±n.</string>
+    <string name="auth_gdrive_connect_title">Connect Google Drive</string>
+    <string name="auth_gdrive_connected_toast">Google Drive baÄŸlandÄ±!</string>
+    <string name="auth_gdrive_create_action">\"PixelPlayer Music\" KlasÃ¶rÃ¼ OluÅŸtur</string>
+    <string name="auth_gdrive_create_subtitle">MÃ¼ziÄŸiniz iÃ§in burada yeni bir klasÃ¶r oluÅŸturun</string>
+    <string name="auth_gdrive_empty_msg">Burada klasÃ¶r yok</string>
+    <string name="auth_gdrive_open_cd">KlasÃ¶rÃ¼ aÃ§</string>
+    <string name="auth_gdrive_select_subtitle">MÃ¼zik kaynaÄŸÄ±nÄ±z olarak kullanmak Ã¼zere bir klasÃ¶r seÃ§in veya oluÅŸturun</string>
+    <string name="auth_gdrive_select_title">MÃ¼zik klasÃ¶rÃ¼ seÃ§in</string>
+    <string name="auth_gdrive_setup_msg">Google Drive kuruluyorâ€¦</string>
+    <string name="auth_gdrive_signin_action">Google ile oturum aÃ§Ä±n</string>
+    <string name="auth_gdrive_title">Google Drive</string>
+    <string name="auth_gdrive_use_action">Kullan</string>
+    <!-- Web Login Shared/Generic -->
+    <string name="auth_web_retry_action">Yeniden dene</string>
+</resources>

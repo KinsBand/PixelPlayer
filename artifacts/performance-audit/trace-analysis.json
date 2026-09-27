@@ -1,0 +1,622 @@
+{
+  "processes": [
+    {
+      "upid": 603,
+      "pid": 11419,
+      "name": "/data/data/com.theveloper.pixelplay.debug/code_cache/install_server-d77b4fbe"
+    },
+    {
+      "upid": 685,
+      "pid": 22716,
+      "name": "com.theveloper.pixelplay.debug"
+    }
+  ],
+  "main_slices": [
+    {
+      "name": "Choreographer#doFrame 104352246",
+      "n": 1,
+      "total_ms": 112.59,
+      "max_ms": 112.59
+    },
+    {
+      "name": "Choreographer#doFrame - resynced to 104352248 in 20.6ms",
+      "n": 1,
+      "total_ms": 112.49,
+      "max_ms": 112.49
+    },
+    {
+      "name": "Choreographer#doFrame 104379741",
+      "n": 1,
+      "total_ms": 78.91,
+      "max_ms": 78.91
+    },
+    {
+      "name": "traversal",
+      "n": 352,
+      "total_ms": 714.72,
+      "max_ms": 74.71
+    },
+    {
+      "name": "draw-VRI[MainActivity]",
+      "n": 383,
+      "total_ms": 599.42,
+      "max_ms": 74.55
+    },
+    {
+      "name": "Record View#draw()",
+      "n": 383,
+      "total_ms": 353.26,
+      "max_ms": 72.02
+    },
+    {
+      "name": "AndroidOwner:measureAndLayout",
+      "n": 320,
+      "total_ms": 273.45,
+      "max_ms": 63.16
+    },
+    {
+      "name": "Choreographer#doFrame 104383753",
+      "n": 1,
+      "total_ms": 60.88,
+      "max_ms": 60.88
+    },
+    {
+      "name": "animation",
+      "n": 328,
+      "total_ms": 869.43,
+      "max_ms": 37.76
+    },
+    {
+      "name": "Recomposer:recompose",
+      "n": 284,
+      "total_ms": 297.81,
+      "max_ms": 37.55
+    },
+    {
+      "name": "Compose:recompose",
+      "n": 93,
+      "total_ms": 198.84,
+      "max_ms": 32.46
+    },
+    {
+      "name": "Choreographer#doFrame 104382610",
+      "n": 1,
+      "total_ms": 30.41,
+      "max_ms": 30.41
+    },
+    {
+      "name": "Compose:onForgotten",
+      "n": 55,
+      "total_ms": 63.09,
+      "max_ms": 26.75
+    },
+    {
+      "name": "Choreographer#doFrame 104387797",
+      "n": 1,
+      "total_ms": 26.53,
+      "max_ms": 26.53
+    },
+    {
+      "name": "measure",
+      "n": 6,
+      "total_ms": 30.04,
+      "max_ms": 19.52
+    },
+    {
+      "name": "AndroidOwner:onMeasure",
+      "n": 4,
+      "total_ms": 29.53,
+      "max_ms": 19.36
+    },
+    {
+      "name": "Choreographer#doFrame 104388786",
+      "n": 1,
+      "total_ms": 18.02,
+      "max_ms": 18.02
+    },
+    {
+      "name": "Choreographer#doFrame 104352225",
+      "n": 1,
+      "total_ms": 16.23,
+      "max_ms": 16.23
+    },
+    {
+      "name": "Choreographer#doFrame 104380070",
+      "n": 1,
+      "total_ms": 16.1,
+      "max_ms": 16.1
+    },
+    {
+      "name": "Choreographer#doFrame - resynced to 104352227 in 24.1ms",
+      "n": 1,
+      "total_ms": 16.09,
+      "max_ms": 16.09
+    },
+    {
+      "name": "Choreographer#doFrame 104353122",
+      "n": 1,
+      "total_ms": 12.23,
+      "max_ms": 12.23
+    },
+    {
+      "name": "Choreographer#doFrame 104388807",
+      "n": 1,
+      "total_ms": 11.52,
+      "max_ms": 11.52
+    },
+    {
+      "name": "Choreographer#doFrame - resynced to 104388809 in 21.8ms",
+      "n": 1,
+      "total_ms": 11.41,
+      "max_ms": 11.41
+    },
+    {
+      "name": "Choreographer#doFrame 104384049",
+      "n": 1,
+      "total_ms": 10.67,
+      "max_ms": 10.67
+    },
+    {
+      "name": "Compose:onRemembered",
+      "n": 54,
+      "total_ms": 28.48,
+      "max_ms": 10.56
+    },
+    {
+      "name": "Choreographer#doFrame 104388843",
+      "n": 1,
+      "total_ms": 10.29,
+      "max_ms": 10.29
+    },
+    {
+      "name": "deliverInputEvent src=0x1002 eventTimeNano=138945517000000 id=0xe6dedf60",
+      "n": 1,
+      "total_ms": 10.28,
+      "max_ms": 10.28
+    },
+    {
+      "name": "Choreographer#doFrame - resynced to 104388845 in 20.1ms",
+      "n": 1,
+      "total_ms": 10.19,
+      "max_ms": 10.19
+    },
+    {
+      "name": "ViewPostImeInputStage id=0xe6dedf60",
+      "n": 1,
+      "total_ms": 10.01,
+      "max_ms": 10.01
+    },
+    {
+      "name": "Choreographer#doFrame 104388893",
+      "n": 1,
+      "total_ms": 9.86,
+      "max_ms": 9.86
+    },
+    {
+      "name": "Choreographer#doFrame 104379770",
+      "n": 1,
+      "total_ms": 9.68,
+      "max_ms": 9.68
+    },
+    {
+      "name": "AndroidOwner:onTouch",
+      "n": 53,
+      "total_ms": 68.03,
+      "max_ms": 9.26
+    },
+    {
+      "name": "Choreographer#doFrame 104387901",
+      "n": 1,
+      "total_ms": 9.16,
+      "max_ms": 9.16
+    },
+    {
+      "name": "Choreographer#doFrame - resynced to 104379911 in 20.9ms",
+      "n": 1,
+      "total_ms": 8.82,
+      "max_ms": 8.82
+    },
+    {
+      "name": "deliverInputEvent src=0x1002 eventTimeNano=138928958000000 id=0xd516f327",
+      "n": 1,
+      "total_ms": 8.77,
+      "max_ms": 8.77
+    },
+    {
+      "name": "ViewPostImeInputStage id=0xd516f327",
+      "n": 1,
+      "total_ms": 8.5,
+      "max_ms": 8.5
+    },
+    {
+      "name": "Compose:applyChanges",
+      "n": 85,
+      "total_ms": 44.46,
+      "max_ms": 8.46
+    },
+    {
+      "name": "Choreographer#doFrame 104382122",
+      "n": 1,
+      "total_ms": 8.46,
+      "max_ms": 8.46
+    },
+    {
+      "name": "deliverInputEvent src=0x1002 eventTimeNano=138928958000000 id=0xcaeed37d",
+      "n": 1,
+      "total_ms": 8.45,
+      "max_ms": 8.45
+    },
+    {
+      "name": "AndroidOwner:draw",
+      "n": 375,
+      "total_ms": 87.83,
+      "max_ms": 8.43
+    },
+    {
+      "name": "Choreographer#doFrame 104383789",
+      "n": 1,
+      "total_ms": 8.22,
+      "max_ms": 8.22
+    },
+    {
+      "name": "Choreographer#doFrame 104388915",
+      "n": 1,
+      "total_ms": 8.19,
+      "max_ms": 8.19
+    },
+    {
+      "name": "ViewPostImeInputStage id=0xcaeed37d",
+      "n": 1,
+      "total_ms": 8.16,
+      "max_ms": 8.16
+    },
+    {
+      "name": "Choreographer#doFrame - resynced to 104383956 in 19.7ms",
+      "n": 1,
+      "total_ms": 7.76,
+      "max_ms": 7.76
+    },
+    {
+      "name": "Choreographer#doFrame 104381721",
+      "n": 1,
+      "total_ms": 7.42,
+      "max_ms": 7.42
+    }
+  ],
+  "thread_states": [
+    {
+      "name": "DefaultDispatch",
+      "state": "S",
+      "ms": 138485.97
+    },
+    {
+      "name": "binder:22716_5",
+      "state": "S",
+      "ms": 45753.72
+    },
+    {
+      "name": "MediaCodec_loop",
+      "state": "S",
+      "ms": 34702.63
+    },
+    {
+      "name": "ExoPlayer:Playb",
+      "state": "S",
+      "ms": 23979.26
+    },
+    {
+      "name": "CCodecWatchdog",
+      "state": "S",
+      "ms": 22840.83
+    },
+    {
+      "name": "binder:22716_6",
+      "state": "S",
+      "ms": 22599.43
+    },
+    {
+      "name": "pixelplay.debug",
+      "state": "S",
+      "ms": 21916.14
+    },
+    {
+      "name": "android.bg",
+      "state": "S",
+      "ms": 21194.25
+    },
+    {
+      "name": "GPU completion",
+      "state": "S",
+      "ms": 21150.55
+    },
+    {
+      "name": "Jit thread pool",
+      "state": "S",
+      "ms": 20917.77
+    },
+    {
+      "name": "hwuiTask0",
+      "state": "S",
+      "ms": 20821.81
+    },
+    {
+      "name": "hwuiTask1",
+      "state": "S",
+      "ms": 20821.36
+    },
+    {
+      "name": "RenderThread",
+      "state": "S",
+      "ms": 20534.77
+    },
+    {
+      "name": "vkmem_free",
+      "state": "S",
+      "ms": 19496.05
+    },
+    {
+      "name": "AudioPortEventH",
+      "state": "S",
+      "ms": 18131.16
+    },
+    {
+      "name": "arch_disk_io_1",
+      "state": "S",
+      "ms": 18029.31
+    },
+    {
+      "name": "arch_disk_io_0",
+      "state": "S",
+      "ms": 17977.63
+    },
+    {
+      "name": "binder:22716_1",
+      "state": "S",
+      "ms": 17124.75
+    },
+    {
+      "name": "Profile Saver",
+      "state": "S",
+      "ms": 15519.91
+    },
+    {
+      "name": "binder:22716_A",
+      "state": "S",
+      "ms": 12480.54
+    },
+    {
+      "name": "pi.acoustid.org",
+      "state": "S",
+      "ms": 12195.74
+    },
+    {
+      "name": "Okio Watchdog",
+      "state": "S",
+      "ms": 12065.75
+    },
+    {
+      "name": "binder:22716_3",
+      "state": "S",
+      "ms": 10966.71
+    },
+    {
+      "name": "arch_disk_io_3",
+      "state": "S",
+      "ms": 10491.16
+    },
+    {
+      "name": "arch_disk_io_2",
+      "state": "S",
+      "ms": 10450.78
+    },
+    {
+      "name": "ConscryptStatsL",
+      "state": "S",
+      "ms": 10055.76
+    },
+    {
+      "name": "yAndAckSettings",
+      "state": "S",
+      "ms": 9114.63
+    },
+    {
+      "name": "rartarchive.org",
+      "state": "S",
+      "ms": 8838.66
+    },
+    {
+      "name": ".us.archive.org",
+      "state": "S",
+      "ms": 8397.72
+    },
+    {
+      "name": "archive.org/...",
+      "state": "S",
+      "ms": 7860.16
+    },
+    {
+      "name": "DefaultDispatch",
+      "state": "Running",
+      "ms": 7338.84
+    },
+    {
+      "name": "DefaultExecutor",
+      "state": "S",
+      "ms": 6428.04
+    },
+    {
+      "name": "OkHttp TaskRunn",
+      "state": "S",
+      "ms": 5521.95
+    },
+    {
+      "name": ".ca.archive.org",
+      "state": "S",
+      "ms": 5017.63
+    },
+    {
+      "name": "musicbrainz.org",
+      "state": "S",
+      "ms": 4265.58
+    },
+    {
+      "name": "ttp archive.org",
+      "state": "S",
+      "ms": 3190.67
+    },
+    {
+      "name": "RenderThread",
+      "state": "Running",
+      "ms": 2584.22
+    },
+    {
+      "name": "SurfaceSyncGrou",
+      "state": "S",
+      "ms": 2552.01
+    },
+    {
+      "name": "allocateBuffers",
+      "state": "S",
+      "ms": 2359.76
+    },
+    {
+      "name": "pixelplay.debug",
+      "state": "Running",
+      "ms": 2070.29
+    }
+  ],
+  "slow_main": [
+    {
+      "id": 7599,
+      "name": "Choreographer#doFrame 104352246",
+      "ts_s": 140202.085,
+      "dur_ms": 112.59
+    },
+    {
+      "id": 7611,
+      "name": "Choreographer#doFrame - resynced to 104352248 in 20.6ms",
+      "ts_s": 140202.086,
+      "dur_ms": 112.49
+    },
+    {
+      "id": 137441,
+      "name": "Choreographer#doFrame 104379741",
+      "ts_s": 140218.62,
+      "dur_ms": 78.91
+    },
+    {
+      "id": 10000,
+      "name": "traversal",
+      "ts_s": 140202.123,
+      "dur_ms": 74.71
+    },
+    {
+      "id": 10003,
+      "name": "draw-VRI[MainActivity]",
+      "ts_s": 140202.123,
+      "dur_ms": 74.55
+    },
+    {
+      "id": 10005,
+      "name": "Record View#draw()",
+      "ts_s": 140202.123,
+      "dur_ms": 72.02
+    },
+    {
+      "id": 10006,
+      "name": "AndroidOwner:measureAndLayout",
+      "ts_s": 140202.123,
+      "dur_ms": 63.16
+    },
+    {
+      "id": 201179,
+      "name": "Choreographer#doFrame 104383753",
+      "ts_s": 140220.189,
+      "dur_ms": 60.88
+    },
+    {
+      "id": 137893,
+      "name": "traversal",
+      "ts_s": 140218.64,
+      "dur_ms": 59.07
+    },
+    {
+      "id": 201857,
+      "name": "traversal",
+      "ts_s": 140220.208,
+      "dur_ms": 42.63
+    },
+    {
+      "id": 7613,
+      "name": "animation",
+      "ts_s": 140202.086,
+      "dur_ms": 37.76
+    },
+    {
+      "id": 7638,
+      "name": "Recomposer:recompose",
+      "ts_s": 140202.086,
+      "dur_ms": 37.55
+    },
+    {
+      "id": 7661,
+      "name": "Compose:recompose",
+      "ts_s": 140202.087,
+      "dur_ms": 32.46
+    },
+    {
+      "id": 195038,
+      "name": "Choreographer#doFrame 104382610",
+      "ts_s": 140219.672,
+      "dur_ms": 30.41
+    },
+    {
+      "id": 195039,
+      "name": "animation",
+      "ts_s": 140219.672,
+      "dur_ms": 30.39
+    },
+    {
+      "id": 195041,
+      "name": "Recomposer:recompose",
+      "ts_s": 140219.672,
+      "dur_ms": 30.34
+    },
+    {
+      "id": 10111,
+      "name": "Compose:recompose",
+      "ts_s": 140202.125,
+      "dur_ms": 29.57
+    },
+    {
+      "id": 195152,
+      "name": "Compose:onForgotten",
+      "ts_s": 140219.675,
+      "dur_ms": 26.75
+    },
+    {
+      "id": 263929,
+      "name": "Choreographer#doFrame 104387797",
+      "ts_s": 140221.582,
+      "dur_ms": 26.53
+    },
+    {
+      "id": 263930,
+      "name": "animation",
+      "ts_s": 140221.582,
+      "dur_ms": 26.51
+    },
+    {
+      "id": 263936,
+      "name": "Recomposer:recompose",
+      "ts_s": 140221.582,
+      "dur_ms": 26.45
+    },
+    {
+      "id": 264080,
+      "name": "Compose:onForgotten",
+      "ts_s": 140221.585,
+      "dur_ms": 22.6
+    }
+  ]
+}

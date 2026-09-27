@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PixelPlayer - Daily Mix Redesign Variations</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --bg-dark: #0e110a;
+      --surface-dark: #161a10;
+      --card-olive-darker: #1E2314;
+      --olive-accent-yellow: #D4B13B;
+      --olive-cream: #F7F5EC;
+      --olive-neon-green: #39FF14;
+      --text-muted: rgba(247, 245, 236, 0.65);
+      --font-main: 'Outfit', 'Inter', -apple-system, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      background: #080a06;
+      color: var(--olive-cream);
+      font-family: var(--font-main);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 24px 16px;
+    }
+
+    /* TOP CONTROLLER BAR */
+    .option-switcher-container {
+      background: rgba(30, 35, 20, 0.85);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(212, 177, 59, 0.25);
+      border-radius: 30px;
+      padding: 6px;
+      display: flex;
+      gap: 6px;
+      margin-bottom: 24px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      max-width: 540px;
+      width: 100%;
+      z-index: 100;
+    }
+
+    .option-tab {
+      flex: 1;
+      padding: 10px 14px;
+      font-size: 13px;
+      font-weight: 700;
+      border: none;
+      border-radius: 24px;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      text-align: center;
+    }
+
+    .option-tab.active {
+      background: var(--olive-accent-yellow);
+      color: #12160b;
+      box-shadow: 0 4px 14px rgba(212, 177, 59, 0.35);
+    }
+
+    /* APP CONTAINER MOCK (Android Phone Frame) */
+    .app-viewport {
+      width: 390px;
+      height: 800px;
+      background: var(--bg-dark);
+      border-radius: 44px;
+      border: 10px solid #1f2518;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.05);
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* STATUS BAR */
+    .status-bar {
+      height: 44px;
+      padding: 0 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--olive-cream);
+      z-index: 20;
+    }
+
+    /* APP TOP BAR */
+    .app-top-bar {
+      padding: 8px 24px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .greeting-title {
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      color: var(--olive-cream);
+    }
+
+    .settings-btn {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.08);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+
+    /* SCROLLABLE MAIN CONTENT */
+    .main-scroll-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 16px 100px;
+      scrollbar-width: none;
+    }
+
+    .main-scroll-content::-webkit-scrollbar {
+      display: none;
+    }
+
+    /* ============================================================
+       OPTION 1: TACTILE VINYL HERO + FLOATING ANCHOR PILL
+       ============================================================ */
+    .opt1-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+      margin-bottom: 24px;
+    }
+
+    .opt1-hero-card {
+      width: 100%;
+      background: linear-gradient(145deg, #1E2314, #14170d);
+      border-radius: 34px 34px 24px 24px;
+      padding: 24px 20px 36px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.3);
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .opt1-vinyl-box {
+      width: 180px;
+      height: 180px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 16px;
+    }
+
+    .opt1-vinyl-disc {
+      width: 170px;
+      height: 170px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #222 0%, #111 60%, #000 100%);
+      position: absolute;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.5s ease;
+    }
+
+    .opt1-vinyl-disc.spinning {
+      animation: spinVinyl 6s linear infinite;
+    }
+
+    @keyframes spinVinyl {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    .opt1-grooves {
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      border: 1px dashed rgba(255,255,255,0.1);
+      position: absolute;
+    }
+
+    .opt1-label {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: var(--olive-cream);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+    }
+
+    .opt1-center-hole {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #12160b;
+    }
+
+    .opt1-floating-thumb {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      border: 2px solid var(--card-olive-darker);
+      position: absolute;
+      object-fit: cover;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+    }
+
+    .thumb-1 { top: 0; left: 0; }
+    .thumb-2 { top: 0; right: 0; }
+    .thumb-3 { bottom: 0; left: 0; }
+    .thumb-4 { bottom: 0; right: 0; }
+
+    .opt1-hero-info {
+      text-align: center;
+      margin-top: 8px;
+    }
+
+    .opt1-hero-title {
+      font-size: 26px;
+      font-weight: 800;
+      color: var(--olive-cream);
+      letter-spacing: -0.5px;
+    }
+
+    .opt1-hero-subtitle {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .opt1-play-fab {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: var(--olive-neon-green);
+      color: #12160b;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(57, 255, 20, 0.4);
+      z-index: 10;
+      border: 2px solid var(--card-olive-darker);
+      transition: transform 0.2s;
+    }
+
+    .opt1-play-fab:active {
+      transform: translate(-50%, -50%) scale(0.92);
+    }
+
+    /* FLOATING ANCHOR PILL (Option 1 Anchor) */
+    .opt1-anchor-pill {
+      width: calc(100% - 32px);
+      margin-top: -20px;
+      background: rgba(212, 177, 59, 0.15);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(212, 177, 59, 0.4);
+      border-radius: 24px;
+      padding: 12px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+      z-index: 5;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+      transition: all 0.3s ease;
+    }
+
+    .opt1-anchor-pill:hover {
+      background: rgba(212, 177, 59, 0.25);
+    }
+
+    /* ============================================================
+       OPTION 2: FULL-BLEED UNIFIED DECK + EMBEDDED FILTER TOOLBAR
+       ============================================================ */
+    .opt2-hero-deck {
+      width: 100%;
+      background: #1B2012;
+      border-radius: 32px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+      margin-bottom: 24px;
+      box-shadow: 0 12px 35px rgba(0,0,0,0.4);
+    }
+
+    .opt2-deck-body {
+      padding: 20px;
+      display: flex;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .opt2-cover-art {
+      width: 100px;
+      height: 100px;
+      border-radius: 20px;
+      object-fit: cover;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.5);
+    }
+
+    .opt2-deck-meta {
+      flex: 1;
+    }
+
+    .opt2-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 12px;
+      background: rgba(212, 177, 59, 0.2);
+      color: var(--olive-accent-yellow);
+      font-size: 11px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .opt2-deck-title {
+      font-size: 22px;
+      font-weight: 800;
+      color: var(--olive-cream);
+      line-height: 1.2;
+    }
+
+    .opt2-deck-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .opt2-deck-toolbar-anchor {
+      background: #13170c;
+      border-top: 1px solid rgba(255,255,255,0.06);
+      padding: 12px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+    }
+
+    .opt2-filter-label {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--olive-accent-yellow);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* ============================================================
+       OPTION 3: WIDESCREEN BANNER HERO + HIGH-CONTRAST PILL ANCHOR
+       ============================================================ */
+    .opt3-banner-container {
+      margin-bottom: 24px;
+    }
+
+    .opt3-banner-hero {
+      width: 100%;
+      height: 160px;
+      border-radius: 28px 28px 12px 12px;
+      background: linear-gradient(135deg, #2b331b 0%, #15190e 100%);
+      position: relative;
+      overflow: hidden;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .opt3-peek-disc {
+      position: absolute;
+      right: -30px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 160px;
+      height: 160px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #222, #050505);
+      border: 6px solid #111;
+      box-shadow: -8px 0 20px rgba(0,0,0,0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .opt3-banner-title {
+      font-size: 26px;
+      font-weight: 800;
+      color: #FFF;
+      text-shadow: 0 2px 10px rgba(0,0,0,0.6);
+    }
+
+    .opt3-banner-tags {
+      display: flex;
+      gap: 6px;
+    }
+
+    .opt3-tag {
+      background: rgba(0,0,0,0.4);
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--olive-cream);
+    }
+
+    .opt3-anchor-button {
+      width: 100%;
+      margin-top: 6px;
+      background: var(--olive-accent-yellow);
+      color: #12160b;
+      border-radius: 18px;
+      padding: 14px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 800;
+      font-size: 14px;
+      cursor: pointer;
+      box-shadow: 0 6px 18px rgba(212, 177, 59, 0.25);
+    }
+
+    /* EXPANDABLE FILTER PANEL (COMMON LOGIC) */
+    .filter-panel-expanded {
+      width: 100%;
+      background: #12160b;
+      border-radius: 20px;
+      border: 1px solid rgba(212, 177, 59, 0.2);
+      padding: 16px;
+      margin-top: 8px;
+      display: none;
+      flex-direction: column;
+      gap: 14px;
+      animation: fadeIn 0.3s ease;
+    }
+
+    .filter-panel-expanded.open {
+      display: flex;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .filter-cat-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+    }
+
+    .chips-row {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      padding-bottom: 4px;
+    }
+
+    .chip {
+      padding: 6px 14px;
+      border-radius: 16px;
+      border: 1px solid rgba(247, 245, 236, 0.2);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--olive-cream);
+      background: transparent;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.2s;
+    }
+
+    .chip.selected {
+      background: var(--olive-accent-yellow);
+      color: #12160b;
+      border-color: var(--olive-accent-yellow);
+    }
+
+    .btn-generate {
+      width: 100%;
+      padding: 10px;
+      border-radius: 20px;
+      background: var(--olive-accent-yellow);
+      color: #12160b;
+      border: none;
+      font-weight: 800;
+      font-size: 13px;
+      cursor: pointer;
+      margin-top: 4px;
+    }
+
+    /* REST OF HOME SCREEN SECTIONS (FLOWING BELOW ANCHOR) */
+    .section-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      color: var(--olive-cream);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .recents-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 24px;
+    }
+
+    .track-card {
+      background: rgba(255,255,255,0.04);
+      border-radius: 16px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .track-art-placeholder {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #D4B13B, #1E2314);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+
+    .track-info {
+      flex: 1;
+    }
+
+    .track-name {
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .track-artist {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .playlists-scroll {
+      display: flex;
+      gap: 12px;
+      overflow-x: auto;
+      margin-bottom: 24px;
+      scrollbar-width: none;
+    }
+
+    .playlist-card {
+      min-width: 110px;
+      background: rgba(255,255,255,0.04);
+      border-radius: 18px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+
+    .playlist-art-placeholder {
+      width: 80px;
+      height: 80px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #1E2314, #39FF14);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+    }
+
+    .playlist-title {
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- TOP SWITCHER BAR -->
+  <div class="option-switcher-container">
+    <button class="option-tab active" onclick="switchOption(1)">Option 1: Tactile Hero</button>
+    <button class="option-tab" onclick="switchOption(2)">Option 2: Unified Deck</button>
+    <button class="option-tab" onclick="switchOption(3)">Option 3: Banner Hero</button>
+  </div>
+
+  <!-- PHONE MOCK FRAME -->
+  <div class="app-viewport">
+    
+    <!-- STATUS BAR -->
+    <div class="status-bar">
+      <span>9:41</span>
+      <span>5G ●●●</span>
+    </div>
+
+    <!-- APP TOP BAR -->
+    <div class="app-top-bar">
+      <h1 class="greeting-title">Afternoon, Trai.</h1>
+      <div class="settings-btn">⚙️</div>
+    </div>
+
+    <!-- MAIN SCROLLABLE CONTENT -->
+    <div class="main-scroll-content">
+
+      <!-- ============================================================
+           VARIATION 1: TACTILE VINYL HERO + FLOATING ANCHOR PILL
+           ============================================================ -->
+      <div id="view-option-1" class="opt1-container">
+        <div class="opt1-hero-card">
+          <div class="opt1-vinyl-box">
+            <!-- Floating Thumbnail Covers around Vinyl -->
+            <div class="opt1-floating-thumb thumb-1" style="background: #D4B13B; display:flex; align-items:center; justify-content:center; font-size:10px;">🎵</div>
+            <div class="opt1-floating-thumb thumb-2" style="background: #39FF14; display:flex; align-items:center; justify-content:center; font-size:10px;">⚡</div>
+            <div class="opt1-floating-thumb thumb-3" style="background: #1E2314; border: 1px solid #D4B13B; display:flex; align-items:center; justify-content:center; font-size:10px;">🎧</div>
+            <div class="opt1-floating-thumb thumb-4" style="background: #FFF; color:#000; display:flex; align-items:center; justify-content:center; font-size:10px;">💿</div>
+
+            <!-- Center Spinning Vinyl -->
+            <div class="opt1-vinyl-disc spinning" id="vinylDisc1">
+              <div class="opt1-grooves"></div>
+              <div class="opt1-label">
+                <div class="opt1-center-hole"></div>
+              </div>
+            </div>
+
+            <!-- Play / Pause FAB -->
+            <div class="opt1-play-fab" onclick="togglePlay(1)">
+              <span id="playIcon1">▶</span>
+            </div>
+          </div>
+
+          <div class="opt1-hero-info">
+            <h2 class="opt1-hero-title">Daily Mix</h2>
+            <p class="opt1-hero-subtitle">Curated for your afternoon vibe • 24 tracks</p>
+          </div>
+        </div>
+
+        <!-- BOTTOM ANCHOR BUTTON -->
+        <div class="opt1-anchor-pill" onclick="toggleFilters('filter1')">
+          <span style="font-weight: 800; font-size: 14px; color: var(--olive-cream);">⚡ Mix Filters</span>
+          <span style="font-size: 12px; color: var(--olive-accent-yellow);">▼ Filter Options</span>
+        </div>
+
+        <!-- EXPANDED FILTERS PANEL -->
+        <div class="filter-panel-expanded" id="filter1">
+          <div>
+            <div class="filter-cat-title">Country</div>
+            <div class="chips-row">
+              <div class="chip selected" onclick="toggleChip(this)">🇦🇺 AU</div>
+              <div class="chip" onclick="toggleChip(this)">🇺🇸 US</div>
+              <div class="chip" onclick="toggleChip(this)">🇯🇵 JP</div>
+              <div class="chip" onclick="toggleChip(this)">🇬🇧 UK</div>
+            </div>
+          </div>
+          <div>
+            <div class="filter-cat-title">Era</div>
+            <div class="chips-row">
+              <div class="chip" onclick="toggleChip(this)">70s</div>
+              <div class="chip" onclick="toggleChip(this)">80s</div>
+              <div class="chip selected" onclick="toggleChip(this)">90s</div>
+              <div class="chip" onclick="toggleChip(this)">Modern</div>
+            </div>
+          </div>
+          <div>
+            <div class="filter-cat-title">Genre</div>
+            <div class="chips-row">
+              <div class="chip selected" onclick="toggleChip(this)">Rock</div>
+              <div class="chip" onclick="toggleChip(this)">Electronic</div>
+              <div class="chip" onclick="toggleChip(this)">Jazz</div>
+            </div>
+          </div>
+          <button class="btn-generate" onclick="toggleFilters('filter1')">Generate Daily Mix</button>
+        </div>
+      </div>
+
+      <!-- ============================================================
+           VARIATION 2: FULL-BLEED UNIFIED DECK + EMBEDDED FILTER TOOLBAR
+           ============================================================ -->
+      <div id="view-option-2" class="hidden">
+        <div class="opt2-hero-deck">
+          <div class="opt2-deck-body">
+            <div class="opt2-cover-art" style="background: linear-gradient(135deg, #D4B13B, #1B2012); display: flex; align-items: center; justify-content: center; font-size: 32px;">💿</div>
+            <div class="opt2-deck-meta">
+              <span class="opt2-badge">Daily Mix 1</span>
+              <h2 class="opt2-deck-title">Your Mix Deck</h2>
+              <p class="opt2-deck-sub">Tame Impala, Daft Punk, Rufus Du Sol</p>
+            </div>
+          </div>
+
+          <!-- EMBEDDED BOTTOM TOOLBAR ANCHOR -->
+          <div class="opt2-deck-toolbar-anchor" onclick="toggleFilters('filter2')">
+            <div class="opt2-filter-label">
+              <span>🎛️</span>
+              <span>Mix Filters</span>
+            </div>
+            <span style="font-size: 12px; color: var(--text-muted);">Expand Filters ▲</span>
+          </div>
+        </div>
+
+        <!-- EXPANDED FILTERS PANEL -->
+        <div class="filter-panel-expanded" id="filter2">
+          <div>
+            <div class="filter-cat-title">Mood</div>
+            <div class="chips-row">
+              <div class="chip selected" onclick="toggleChip(this)">Chill</div>
+              <div class="chip" onclick="toggleChip(this)">Energetic</div>
+              <div class="chip" onclick="toggleChip(this)">Focus</div>
+            </div>
+          </div>
+          <button class="btn-generate" onclick="toggleFilters('filter2')">Update Deck Filters</button>
+        </div>
+      </div>
+
+      <!-- ============================================================
+           VARIATION 3: WIDESCREEN BANNER HERO + HIGH-CONTRAST PILL ANCHOR
+           ============================================================ -->
+      <div id="view-option-3" class="opt3-banner-container hidden">
+        <div class="opt3-banner-hero">
+          <div>
+            <h2 class="opt3-banner-title">Daily Mix</h2>
+            <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Tailored specifically to your listening history</p>
+          </div>
+          <div class="opt3-banner-tags">
+            <span class="opt3-tag">Indie Rock</span>
+            <span class="opt3-tag">Synthwave</span>
+            <span class="opt3-tag">120 BPM</span>
+          </div>
+
+          <div class="opt3-peek-disc">
+            <div style="width: 40px; height: 40px; border-radius: 50%; background: var(--olive-cream);"></div>
+          </div>
+        </div>
+
+        <!-- HIGH-CONTRAST ANCHOR BUTTON -->
+        <div class="opt3-anchor-button" onclick="toggleFilters('filter3')">
+          <span>⚙️ Mix Filters</span>
+          <span>Open Panel ➔</span>
+        </div>
+
+        <!-- EXPANDED FILTERS PANEL -->
+        <div class="filter-panel-expanded" id="filter3">
+          <div>
+            <div class="filter-cat-title">Era & Genre</div>
+            <div class="chips-row">
+              <div class="chip selected" onclick="toggleChip(this)">80s Synth</div>
+              <div class="chip" onclick="toggleChip(this)">90s Alternative</div>
+            </div>
+          </div>
+          <button class="btn-generate" onclick="toggleFilters('filter3')">Apply Banner Filters</button>
+        </div>
+      </div>
+
+      <!-- ============================================================
+           SHARED SECTIONS BELOW THE DAILY MIX + ANCHOR
+           ============================================================ -->
+      <div style="margin-top: 24px;">
+        <div class="section-title">
+          <span>Recently Played</span>
+          <span style="font-size: 12px; color: var(--olive-accent-yellow); font-weight: 600;">See all</span>
+        </div>
+
+        <div class="recents-list">
+          <div class="track-card">
+            <div class="track-art-placeholder">🎧</div>
+            <div class="track-info">
+              <div class="track-name">Borderline</div>
+              <div class="track-artist">Tame Impala</div>
+            </div>
+            <span style="font-size: 16px;">♡</span>
+          </div>
+          <div class="track-card">
+            <div class="track-art-placeholder">⚡</div>
+            <div class="track-info">
+              <div class="track-name">Instant Crush</div>
+              <div class="track-artist">Daft Punk ft. Julian Casablancas</div>
+            </div>
+            <span style="font-size: 16px;">♥</span>
+          </div>
+          <div class="track-card">
+            <div class="track-art-placeholder">🎵</div>
+            <div class="track-info">
+              <div class="track-name">Innerbloom</div>
+              <div class="track-artist">RÜFÜS DU SOL</div>
+            </div>
+            <span style="font-size: 16px;">♡</span>
+          </div>
+        </div>
+
+        <div class="section-title">
+          <span>Playlists</span>
+        </div>
+        <div class="playlists-scroll">
+          <div class="playlist-card">
+            <div class="playlist-art-placeholder">❤️</div>
+            <div class="playlist-title">Liked Songs</div>
+          </div>
+          <div class="playlist-card">
+            <div class="playlist-art-placeholder">🚗</div>
+            <div class="playlist-title">Late Night Drive</div>
+          </div>
+          <div class="playlist-card">
+            <div class="playlist-art-placeholder">☕</div>
+            <div class="playlist-title">Focus & Chill</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    function switchOption(optionNum) {
+      document.querySelectorAll('.option-tab').forEach((tab, idx) => {
+        if (idx === optionNum - 1) {
+          tab.classList.add('active');
+        } else {
+          tab.classList.remove('active');
+        }
+      });
+
+      document.getElementById('view-option-1').classList.add('hidden');
+      document.getElementById('view-option-2').classList.add('hidden');
+      document.getElementById('view-option-3').classList.add('hidden');
+
+      document.getElementById(`view-option-${optionNum}`).classList.remove('hidden');
+    }
+
+    function toggleFilters(filterId) {
+      const panel = document.getElementById(filterId);
+      if (panel.classList.contains('open')) {
+        panel.classList.remove('open');
+      } else {
+        panel.classList.add('open');
+      }
+    }
+
+    function toggleChip(chipEl) {
+      chipEl.classList.toggle('selected');
+    }
+
+    let isPlaying1 = true;
+    function togglePlay(num) {
+      const disc = document.getElementById('vinylDisc' + num);
+      const icon = document.getElementById('playIcon' + num);
+      isPlaying1 = !isPlaying1;
+
+      if (isPlaying1) {
+        disc.classList.add('spinning');
+        icon.textContent = '⏸';
+      } else {
+        disc.classList.remove('spinning');
+        icon.textContent = '▶';
+      }
+    }
+  </script>
+</body>
+</html>

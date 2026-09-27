@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="glance_widget_description">Responsive widget that adapts to its size</string>
+    <string name="widget_bar_4x1_desc">Compact player bar</string>
+    <string name="widget_control_4x2_desc">Full controls with shuffle and repeat</string>
+    <string name="widget_grid_2x2_desc">Minimalist square player</string>
+
+    <string name="widget_tap_to_open">Tap to open</string>
+    <string name="widget_album_art">Album art</string>
+    <string name="widget_album_art_placeholder">Album art placeholder</string>
+
+    <string name="widget_tap_to_play">Tap to play</string>
+    <string name="widget_preview_song_title">Song title</string>
+    <string name="widget_preview_artist">Artist</string>
+
+    <string name="widget_wavy_progress_bar_desc">Progress bar, %1$d percent</string>
+
+    <!-- ===================== Turntable widget ===================== -->
+    <string name="widget_turntable_desc">Spinning vinyl record</string>
+    <string name="widget_turntable_disc_cd">Now playing record, tap to open PixelPlay</string>
+    <string name="widget_turntable_favorite_cd">Add to favourites</string>
+    <string name="widget_turntable_unfavorite_cd">Remove from favourites</string>
+
+    <!-- Widget names, as shown in the Visual Widgets settings screen -->
+    <string name="widget_kind_adaptive">Adaptive player</string>
+    <string name="widget_kind_bar">Player bar</string>
+    <string name="widget_kind_control">Full controls</string>
+    <string name="widget_kind_grid">Square player</string>
+    <string name="widget_kind_turntable">Turntable</string>
+
+    <!-- Background styles -->
+    <string name="widget_background_solid">Solid</string>
+    <string name="widget_background_transparent">Transparent</string>
+    <string name="widget_background_outlined">Outlined</string>
+
+    <!-- Accent sources -->
+    <string name="widget_accent_material_you">Material You</string>
+    <string name="widget_accent_album_art">Album art</string>
+    <string name="widget_accent_fixed">Fixed colour</string>
+
+    <!-- Spin modes -->
+    <string name="widget_spin_smooth">Smooth</string>
+    <string name="widget_spin_smooth_desc">Turns continuously while music is playing, and stops when it pauses</string>
+    <string name="widget_spin_tick">Slow tick</string>
+    <string name="widget_spin_tick_desc">Advances one step every couple of seconds. Uses far less battery</string>
+    <string name="widget_spin_position">Follow track position</string>
+    <string name="widget_spin_position_desc">Never wakes the app on its own. The angle changes only when the widget refreshes</string>
+    <string name="widget_spin_off">Don\'t turn</string>
+    <string name="widget_spin_off_desc">The record stays still</string>
+
+    <!-- Progress styles -->
+    <string name="widget_progress_none">None</string>
+    <string name="widget_progress_line">Line</string>
+    <string name="widget_progress_wavy">Wavy</string>
+
+    <!-- ===================== Visual Widgets settings ===================== -->
+    <string name="settings_category_widgets_title">Visual widgets</string>
+    <string name="settings_category_widgets_subtitle">Customise your home screen widgets</string>
+    <string name="settings_visual_widgets_title">Visual widgets</string>
+    <string name="settings_visual_widgets_summary">Customise how your home screen widgets look</string>
+
+    <string name="settings_widgets_preview_section">Preview</string>
+    <string name="settings_widgets_preview_hint">Previews are live — they follow whatever is playing now.</string>
+    <string name="settings_widgets_appearance_section">Appearance</string>
+    <string name="settings_widgets_turntable_section">Turntable</string>
+    <string name="settings_widgets_content_section">Controls &amp; content</string>
+
+    <string name="settings_widget_pick_title">Widget</string>
+    <string name="settings_widget_pick_subtitle">Choose which widget these settings apply to</string>
+
+    <string name="settings_widget_background_title">Background</string>
+    <string name="settings_widget_background_subtitle">How the widget fills the space behind its content</string>
+    <string name="settings_widget_corner_title">Corner radius</string>
+    <string name="settings_widget_corner_value">%1$d dp</string>
+    <string name="settings_widget_accent_title">Accent colour</string>
+    <string name="settings_widget_accent_subtitle">Where the widget takes its colours from</string>
+    <string name="settings_widget_accent_color_title">Fixed colour</string>
+    <string name="settings_widget_corner_fixed_note">The adaptive player chooses its own shape for each size — at 1x1 it is a circle — so it has no corner radius setting.</string>
+
+    <string name="settings_widget_show_title">Show song title</string>
+    <string name="settings_widget_show_artist">Show artist</string>
+    <string name="settings_widget_show_prev_next">Show previous and next</string>
+    <string name="settings_widget_show_shuffle">Show shuffle</string>
+    <string name="settings_widget_show_repeat">Show repeat</string>
+    <string name="settings_widget_show_favorite">Show favourite</string>
+    <string name="settings_widget_progress_title">Progress bar</string>
+
+    <string name="settings_turntable_disc_scale_title">Record size</string>
+    <string name="settings_turntable_disc_scale_value">%1$d%%</string>
+    <string name="settings_turntable_label_scale_title">Album art size</string>
+    <string name="settings_turntable_spin_mode_title">Spin</string>
+    <string name="settings_turntable_spin_speed_title">Spin speed</string>
+    <string name="settings_turntable_spin_speed_value">%1$d rpm</string>
+    <string name="settings_turntable_direction_title">Direction</string>
+    <string name="settings_turntable_clockwise">Clockwise</string>
+    <string name="settings_turntable_counter_clockwise">Anticlockwise</string>
+    <string name="settings_turntable_badges_title">Floating buttons</string>
+    <string name="settings_turntable_badges_subtitle">Play and favourite bubbles resting on the record\'s edge</string>
+    <string name="settings_turntable_tonearm_title">Tonearm</string>
+    <string name="settings_turntable_grooves_title">Grooves</string>
+    <string name="settings_turntable_sheen_title">Light sheen</string>
+
+    <string name="settings_widget_reset_title">Reset this widget</string>
+    <string name="settings_widget_reset_subtitle">Restore the default look for %1$s</string>
+    <string name="settings_widget_reset_confirm_title">Reset %1$s?</string>
+    <string name="settings_widget_reset_confirm_body">Every appearance and content option for this widget goes back to its default. Widgets you have already placed keep working.</string>
+    <string name="settings_widget_reset_confirm_action">Reset</string>
+
+    <string name="settings_widget_battery_note">Smooth spinning re-draws the widget several times a second while music plays. It pauses automatically when the screen is off, when playback stops, and in battery saver.</string>
+</resources>
