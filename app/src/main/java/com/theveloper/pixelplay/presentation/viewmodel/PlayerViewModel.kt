@@ -121,11 +121,15 @@ import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import coil.imageLoader
 import coil.memory.MemoryCache
+import coil.request.CachePolicy
+import coil.request.ImageRequest
 import dagger.Lazy
 
 private const val CAST_LOG_TAG = "PlayerCastTransfer"
 private const val ENABLE_FOLDERS_SOURCE_SWITCHING = true
 private const val HOME_MIX_PREVIEW_LIMIT = 48
+/** Full-player / notification artwork size; maps to the shared 1024 px CDN variant. */
+private const val PLAYER_ARTWORK_PREFETCH_PX = 1024
 private const val EXTERNAL_SONG_ID_PREFIX = "external:"
 
 internal fun List<Song>.toPlaybackQueue(): ImmutableList<Song> = when (this) {
@@ -3441,6 +3445,26 @@ class PlayerViewModel @Inject constructor(
     fun updateSearchFilter(filterType: SearchFilterType) {
         searchStateHolder.updateSearchFilter(filterType)
     }
+
+    /**
+     * Touch-down on an online song row: its stream work starts before the tap lands, and its
+     * full-player cover is fetched into the disk cache so the player opens with it.
+     */
+    fun onSongPressed(song: Song) {
+        searchStateHolder.onSongPressed(song)
+        song.albumArtUriString?.takeIf { it.startsWith("https://") }?.let { url ->
+            context.imageLoader.enqueue(
+                ImageRequest.Builder(context)
+                    .data(url)
+                    // Same shared 1024 px variant the full player and notification request.
+                    .size(PLAYER_ARTWORK_PREFETCH_PX)
+                    .memoryCachePolicy(CachePolicy.DISABLED)
+                    .build()
+            )
+        }
+    }
+
+    fun onSongPressCancelled(song: Song) = searchStateHolder.onSongPressCancelled(song)
 
     fun loadSearchHistory(limit: Int = 15) {
         searchStateHolder.loadSearchHistory(limit)

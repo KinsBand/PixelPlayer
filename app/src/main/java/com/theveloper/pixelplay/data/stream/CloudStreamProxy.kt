@@ -16,7 +16,11 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import io.ktor.utils.io.writeFully
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -24,10 +28,10 @@ import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import timber.log.Timber
-import java.net.ServerSocket
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -96,10 +100,12 @@ abstract class CloudStreamProxy<K : Any>(
 
     // ─── Server State ──────────────────────────────────────────────────
 
-    private var server: EmbeddedServer<CIOApplicationEngine, CIOApplicationEngine.Configuration>? = null
-    private var actualPort: Int = 0
+    @Volatile private var server: EmbeddedServer<CIOApplicationEngine, CIOApplicationEngine.Configuration>? = null
+    @Volatile private var actualPort: Int = 0
     private val proxyScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var startJob: Job? = null
+    /** Completed with the bound port; replaced on [stop] so a restart can be awaited again. */
+    @Volatile private var readySignal = CompletableDeferred<Int>()
 
     private val urlCache = ConcurrentHashMap<K, CachedUrl>()
 
@@ -111,21 +117,16 @@ abstract class CloudStreamProxy<K : Any>(
 
     fun isReady(): Boolean = actualPort > 0
 
+    @Synchronized
     fun startIfNeeded() {
         if (isReady() || startJob?.isActive == true) return
         start()
     }
 
+    /** Resumes the moment the server is bound; no polling interval is added to startup. */
     suspend fun awaitReady(timeoutMs: Long = 10_000L): Boolean {
         if (isReady()) return true
-        val stepMs = 50L
-        var elapsed = 0L
-        while (elapsed < timeoutMs) {
-            if (isReady()) return true
-            delay(stepMs)
-            elapsed += stepMs
-        }
-        return false
+        return withTimeoutOrNull(timeoutMs) { readySignal.await() } != null
     }
 
     suspend fun ensureReady(timeoutMs: Long = 10_000L): Boolean {
@@ -152,15 +153,20 @@ abstract class CloudStreamProxy<K : Any>(
         return getProxyUrl(id)
     }
 
+    @Synchronized
     fun start() {
         startJob?.cancel()
+        val signal = readySignal
         startJob = proxyScope.launch {
             try {
-                val freePort = ServerSocket(0).use { it.localPort }
-                val createdServer = createServer(freePort)
-                createdServer.start(wait = false)
+                // Let the engine bind an ephemeral port itself. Probing a free port with a
+                // ServerSocket and binding it again later could lose the port to another process.
+                val createdServer = createServer(0)
+                createdServer.startSuspend(wait = false)
+                val boundPort = createdServer.engine.resolvedConnectors().first().port
                 server = createdServer
-                actualPort = freePort
+                actualPort = boundPort
+                signal.complete(boundPort)
                 Timber.d("$proxyTag started on port $actualPort")
             } catch (_: CancellationException) {
                 Timber.d("$proxyTag start cancelled")
@@ -170,6 +176,7 @@ abstract class CloudStreamProxy<K : Any>(
         }
     }
 
+    @Synchronized
     fun stop() {
         startJob?.cancel()
         startJob = null
@@ -177,6 +184,7 @@ abstract class CloudStreamProxy<K : Any>(
         server?.stop(1000, 2000)
         server = null
         actualPort = 0
+        if (readySignal.isCompleted) readySignal = CompletableDeferred()
         urlCache.clear()
         Timber.d("$proxyTag stopped")
     }
@@ -188,6 +196,15 @@ abstract class CloudStreamProxy<K : Any>(
 
     open fun invalidateStream(id: K) {
         urlCache.remove(id)
+    }
+
+    /**
+     * Called before retrying a failed upstream request. [httpStatus] is null for transport
+     * failures (connect/read errors, early EOF). [consecutiveFailures] starts at 1.
+     * The default re-resolves every time; subclasses can keep a still-valid signed URL.
+     */
+    protected open fun onUpstreamFailure(id: K, httpStatus: Int?, consecutiveFailures: Int) {
+        invalidateStream(id)
     }
 
     // ─── Internal ──────────────────────────────────────────────────────
@@ -214,14 +231,15 @@ abstract class CloudStreamProxy<K : Any>(
                 }
                 val response = streamingClient.newCall(buildUpstreamRequest(url, range)).awaitResponse()
                 if (attempt == 2 || !StreamRetryPolicy.retryStatus(response.code)) return Upstream(url, response)
-                Timber.tag(proxyTag).w("Upstream HTTP %d (attempt %d), re-resolving", response.code, attempt + 1)
+                Timber.tag(proxyTag).w("Upstream HTTP %d (attempt %d), retrying", response.code, attempt + 1)
                 response.close()
+                onUpstreamFailure(id, response.code, attempt + 1)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: java.io.IOException) {
                 if (attempt == 2) throw error
+                onUpstreamFailure(id, null, attempt + 1)
             }
-            invalidateStream(id)
             delay(StreamRetryPolicy.delayMs(attempt))
         }
         error("Unreachable retry state")
@@ -241,18 +259,97 @@ abstract class CloudStreamProxy<K : Any>(
         return upstream
     }
 
+    // ─── Head cache: stream before resolving ───────────────────────────
+
+    /** Leading bytes of renditions streamed before; null disables serving from it. */
+    protected open val headCache: StreamHeadCache? = null
+
+    /** Identity of the rendition behind [url], when the URL states it (itag, size, type). */
+    protected open fun headKeyFor(id: K, url: String): StreamHeadCache.Key? = null
+
+    /** A cached head that can be served for [id] before its stream URL is resolved. */
+    protected open fun cachedHeadFor(id: K): StreamHeadCache.Entry? = null
+
+    /** Makes the next URL resolution for [id] pick exactly the rendition of [key]. */
+    protected open fun pinRendition(id: K, key: StreamHeadCache.Key) {}
+
+    /** The head for [id] could not be continued upstream (the rendition changed or vanished). */
+    protected open fun onHeadUnusable(id: K, key: StreamHeadCache.Key) {
+        headCache?.remove(key)
+    }
+
+    /**
+     * Size of the first upstream range of a response; later ranges use [upstreamChunkBytes].
+     * A quick skip or seek then abandons a small request rather than a 10 MiB one.
+     */
+    protected open val initialChunkBytes: Long = 1024L * 1024L
+
+    /**
+     * Fetches and stores the first [bytes] of [id]'s current rendition, unless already cached.
+     * This also leaves a warm connection to the CDN node that will serve the song.
+     */
+    protected suspend fun prefetchHead(id: K, bytes: Int): Boolean {
+        val cache = headCache ?: return false
+        val url = getOrFetchStreamUrl(id) ?: return false
+        val key = headKeyFor(id, url) ?: return false
+        val size = minOf(bytes.toLong(), cache.headBytes.toLong(), key.contentLength).toInt()
+        if (size <= 0 || cache.has(key, size)) return size > 0
+        if (!CloudStreamSecurity.isSafeRemoteStreamUrl(url, allowedHostSuffixes, true)) return false
+        return withContext(Dispatchers.IO) {
+            streamingClient.newCall(buildUpstreamRequest(url, "bytes=0-${size - 1}")).awaitResponse().use { response ->
+                if (response.code != 206 && response.code != 200) return@use false
+                val data = ByteArray(size)
+                var filled = 0
+                val input = response.body.byteStream()
+                while (filled < size) {
+                    val read = input.read(data, filled, size - filled)
+                    if (read < 0) break
+                    filled += read
+                }
+                cache.store(key, data, filled)
+            }
+        }
+    }
+
+    /** Bytes `[from, entry.length)` of a cached head, read before headers are committed. */
+    private class HeadData(val entry: StreamHeadCache.Entry, val from: Long, val bytes: ByteArray)
+
+    private class Pending(val upstream: Upstream, val endInclusive: Long)
+
+    private fun rangeStart(validation: CloudStreamSecurity.RangeHeaderValidation, total: Long): Long = when {
+        validation.normalizedHeader == null -> 0L
+        validation.isSuffixRange -> (total - (validation.endInclusive ?: 0L)).coerceAtLeast(0L)
+        else -> validation.startInclusive ?: 0L
+    }
+
+    /** The cached head that covers this request's first byte, if any. */
+    private fun headDataFor(id: K, validation: CloudStreamSecurity.RangeHeaderValidation): HeadData? {
+        val cache = headCache ?: return null
+        val entry = cachedHeadFor(id) ?: return null
+        val from = rangeStart(validation, entry.key.contentLength)
+        if (from !in 0 until entry.length) return null
+        val bytes = cache.read(entry, from.toInt()) ?: return null
+        return HeadData(entry, from, bytes)
+    }
+
     /**
      * Serves [validation]'s range of a resource of known [total] size, fetching it upstream in
      * bounded chunks. Only the first chunk is opened before headers are committed so failures
      * still map to a proper status code for the player.
+     *
+     * With [head], the response starts from cached bytes immediately while the rest of the
+     * rendition is resolved and opened in parallel. If that rendition can no longer be fetched
+     * the response is aborted (never continued with different bytes); the player reopens and
+     * the retry takes the normal path.
      */
     private suspend fun serveChunked(
         call: ApplicationCall,
         id: K,
         total: Long,
         validation: CloudStreamSecurity.RangeHeaderValidation,
-        requestStartedNanos: Long
-    ) {
+        requestStartedNanos: Long,
+        head: HeadData? = null
+    ) = coroutineScope {
         val from: Long
         val to: Long
         when {
@@ -268,23 +365,75 @@ abstract class CloudStreamProxy<K : Any>(
         if (from >= total || from > to) {
             call.response.header("Content-Range", "bytes */$total")
             call.respond(HttpStatusCode(416, "Range Not Satisfiable"), "Range not satisfiable")
-            return
+            return@coroutineScope
         }
 
         val chunk = upstreamChunkBytes.coerceAtLeast(64L * 1024L)
+        val initialChunk = initialChunkBytes.coerceIn(64L * 1024L, chunk)
         var position = from
-        val first = openChunk(id, position, minOf(position + chunk - 1, to), total)
-        var pending: Upstream? = first
-        val contentTypeHeader = first.response.header("Content-Type")
-            ?.takeIf { it.substringBefore(';').trim().startsWith("audio/") }
-            ?: knownContentType(first.url)
-        if (!CloudStreamSecurity.isSupportedAudioContentType(contentTypeHeader)) {
-            first.response.close()
-            call.respond(HttpStatusCode.BadGateway, "Unsupported stream content type")
-            return
+        var pending: Pending? = null
+        // Opened in parallel with serving the head; handed over (and nulled) when consumed.
+        val openedContinuation = java.util.concurrent.atomic.AtomicReference<Pending?>(null)
+        var continuation: Deferred<Pending>? = null
+        val contentType: ContentType
+
+        // Leading bytes are copied into the head cache as they stream (no extra request).
+        val cache = headCache
+        var teeKey: StreamHeadCache.Key? = null
+        var teeBuffer: ByteArray? = null
+        var teeFilled = 0
+
+        if (head != null) {
+            val key = head.entry.key
+            val headEnd = head.entry.length.toLong()
+            pinRendition(id, key)
+            if (to >= headEnd) {
+                val end = minOf(headEnd + initialChunk - 1, to)
+                continuation = async(Dispatchers.IO) {
+                    try {
+                        Pending(openChunk(id, headEnd, end, total), end).also { openedContinuation.set(it) }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Timber.tag(proxyTag).w(e, "Cached head could not be continued; dropping it")
+                        onHeadUnusable(id, key)
+                        throw e
+                    }
+                }
+            }
+            if (cache != null && head.from == 0L && headEnd < minOf(cache.headBytes.toLong(), total)) {
+                // Extend a short (prewarmed) head while the song streams.
+                teeKey = key
+                teeBuffer = ByteArray(minOf(cache.headBytes.toLong(), total).toInt()).also {
+                    head.bytes.copyInto(it, 0, 0, head.entry.length)
+                }
+                teeFilled = head.entry.length
+            }
+            contentType = ContentType.parse(key.mimeType)
+        } else {
+            val firstEnd = minOf(position + initialChunk - 1, to)
+            val first = openChunk(id, position, firstEnd, total)
+            pending = Pending(first, firstEnd)
+            val contentTypeHeader = first.response.header("Content-Type")
+                ?.takeIf { it.substringBefore(';').trim().startsWith("audio/") }
+                ?: knownContentType(first.url)
+            if (!CloudStreamSecurity.isSupportedAudioContentType(contentTypeHeader)) {
+                first.response.close()
+                call.respond(HttpStatusCode.BadGateway, "Unsupported stream content type")
+                return@coroutineScope
+            }
+            contentType = contentTypeHeader?.substringBefore(';')?.trim()
+                ?.let { runCatching { ContentType.parse(it) }.getOrNull() } ?: ContentType.Audio.Any
+            if (cache != null && from == 0L) {
+                headKeyFor(id, first.url)?.let { key ->
+                    val size = minOf(cache.headBytes.toLong(), total).toInt()
+                    if (!cache.has(key, size)) {
+                        teeKey = key
+                        teeBuffer = ByteArray(size)
+                    }
+                }
+            }
         }
-        val contentType = contentTypeHeader?.substringBefore(';')?.trim()
-            ?.let { runCatching { ContentType.parse(it) }.getOrNull() } ?: ContentType.Audio.Any
 
         val partial = validation.normalizedHeader != null
         call.response.header("Accept-Ranges", "bytes")
@@ -297,16 +446,32 @@ abstract class CloudStreamProxy<K : Any>(
                 contentLength = to - from + 1
             ) {
                 withContext(Dispatchers.IO) {
+                    if (head != null) {
+                        val count = (minOf(head.entry.length.toLong(), to + 1) - from).toInt()
+                        writeFully(head.bytes, 0, count)
+                        flush()
+                        Timber.tag("StreamingLatency").d("proxy_first_bytes_ms=%d source=head",
+                            (System.nanoTime() - requestStartedNanos) / 1_000_000)
+                        com.theveloper.pixelplay.data.diagnostics.PlaybackTrace.mark("first_bytes", "head")
+                        position += count
+                    }
                     val buffer = ByteArray(64 * 1024)
                     var failures = 0
+                    var firstNetworkWrite = head == null
                     while (position <= to) {
-                        val chunkEnd = minOf(position + chunk - 1, to)
                         try {
-                            val upstream = pending ?: openChunk(id, position, chunkEnd, total)
+                            val next = pending
+                                ?: continuation?.let { deferred ->
+                                    continuation = null
+                                    deferred.await().also { openedContinuation.set(null) }
+                                }
+                                ?: minOf(position + chunk - 1, to).let { end ->
+                                    Pending(openChunk(id, position, end, total), end)
+                                }
                             pending = null
-                            upstream.response.use { response ->
+                            next.upstream.response.use { response ->
                                 val input = response.body.byteStream()
-                                var remaining = chunkEnd - position + 1
+                                var remaining = next.endInclusive - position + 1
                                 while (remaining > 0) {
                                     val read = try {
                                         input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
@@ -315,10 +480,19 @@ abstract class CloudStreamProxy<K : Any>(
                                     }
                                     if (read < 0) throw UpstreamReadException(java.io.IOException("Upstream chunk ended early"))
                                     writeFully(buffer, 0, read)
-                                    if (position == from) {
+                                    if (firstNetworkWrite) {
+                                        firstNetworkWrite = false
                                         flush()
-                                        Timber.tag("StreamingLatency").d("proxy_first_bytes_ms=%d",
+                                        Timber.tag("StreamingLatency").d("proxy_first_bytes_ms=%d source=network",
                                             (System.nanoTime() - requestStartedNanos) / 1_000_000)
+                                        com.theveloper.pixelplay.data.diagnostics.PlaybackTrace.mark("first_bytes", "network")
+                                    }
+                                    teeBuffer?.let { tee ->
+                                        if (position == teeFilled.toLong() && teeFilled < tee.size) {
+                                            val copy = minOf(read, tee.size - teeFilled)
+                                            buffer.copyInto(tee, teeFilled, 0, copy)
+                                            teeFilled += copy
+                                        }
                                     }
                                     position += read
                                     remaining -= read
@@ -330,14 +504,21 @@ abstract class CloudStreamProxy<K : Any>(
                         } catch (e: UpstreamReadException) {
                             if (++failures > 3) throw e
                             Timber.tag(proxyTag).w(e, "Chunk failed at %d/%d, resuming", position, total)
-                            invalidateStream(id)
+                            onUpstreamFailure(id, null, failures)
                             delay(StreamRetryPolicy.delayMs(failures - 1))
                         }
                     }
                 }
             }
         } finally {
-            pending?.response?.close()
+            pending?.upstream?.response?.close()
+            continuation?.cancel()
+            openedContinuation.getAndSet(null)?.upstream?.response?.close()
+            val key = teeKey
+            val tee = teeBuffer
+            if (cache != null && key != null && tee != null) {
+                runCatching { cache.store(key, tee, teeFilled) }
+            }
         }
     }
 
@@ -362,6 +543,14 @@ abstract class CloudStreamProxy<K : Any>(
                                 HttpStatusCode(416, "Range Not Satisfiable"),
                                 "Invalid range header"
                             )
+                            return@get
+                        }
+
+                        // A song streamed before starts from its cached head at once; its URL is
+                        // resolved while those bytes play.
+                        val head = headDataFor(id, rangeValidation)
+                        if (head != null) {
+                            serveChunked(call, id, head.entry.key.contentLength, rangeValidation, requestStartedNanos, head)
                             return@get
                         }
 

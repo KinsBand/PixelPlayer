@@ -31,6 +31,11 @@ class StreamReliabilityTest {
         assertEquals(600L, StreamRetryPolicy.delayMs(1))
     }
 
+    @Test fun `only rejected signatures force a new manifest`() {
+        listOf(401, 403, 410).forEach { assertTrue(StreamRetryPolicy.urlRejected(it)) }
+        listOf(408, 429, 500, 503).forEach { assertFalse(StreamRetryPolicy.urlRejected(it)) }
+    }
+
     @Test fun `empty and truncated downloads cannot be published`() {
         assertThrows(IOException::class.java) { DownloadIntegrity.requireComplete(0, -1) }
         assertThrows(IOException::class.java) { DownloadIntegrity.requireComplete(99, 100) }

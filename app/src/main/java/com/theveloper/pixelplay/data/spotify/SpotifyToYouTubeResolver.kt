@@ -131,6 +131,12 @@ class SpotifyToYouTubeResolver @Inject constructor(
         return@withContext winningVideoId
     }
 
+    /** A previously stored match only; never searches. */
+    suspend fun cachedVideoId(spotifyId: String, isrc: String? = null): String? = withContext(Dispatchers.IO) {
+        (trackMappingDao.getMappingBySpotifyId(spotifyId) ?: isrc?.let { trackMappingDao.getMappingByIsrc(it) })
+            ?.ytVideoId?.takeIf { it.isNotBlank() }?.removePrefix("yt_")
+    }
+
     suspend fun resolveSpotifyTrackToStreamUrl(
         spotifyId: String,
         title: String,
