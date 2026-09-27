@@ -349,3 +349,43 @@ On-device checks, required before enabling each remote flag:
 - Check the rebuffer rate in the first 10 s, speculative bytes that were never played, and head-cache hit ratio.
 - Check that no 429s were caused by speculation.
 - Artwork: confirm the first frame of the full player is never blank when coming from a list, and count exactly one HD request per new song (OkHttp `EventListener` counters).
+
+---
+
+## 10. Implementation status (2026-09-27)
+
+Implemented on branch `claude/magical-mccarthy-gv9uau`.
+
+**Build status:** this environment has no Android SDK, so **no Gradle build or full test run was possible**. Instead, every platform-independent file that changed was compiled with Kotlin 2.4 against the project's real library versions (Ktor 3.5, OkHttp 5.4, coroutines 1.11), with small stubs for Android, Hilt, Timber and NewPipe. The listed unit tests were run that way with JUnit 6. Compose, Hilt wiring and Android-only files were reviewed by hand but not compiled. **Run `./gradlew :app:testDebugUnitTest` and a device smoke test before merging.**
+
+| Plan item | Status | Where |
+| --- | --- | --- |
+| 0 PlaybackTrace | Done: one `StreamingLatency tap_to_audio_ms=… stages=dispatch,manifest(provider),first_bytes(head/network),audio` line per play | `data/diagnostics/PlaybackTrace.kt` |
+| 1.1 Start-song-only catalog matching | Done. The player now resolves `spotify://`, `applemusic://` and `deezer://` on open; the next-song prewarmer matches ahead; Cast keeps full matching | `data/accounts/CatalogPlaybackResolver.kt`, `DualPlayerEngine`, `PlaybackDispatchStateHolder` |
+| 1.2 Proxy port and readiness | Done. The engine binds port 0 itself; readiness is a `CompletableDeferred`; the proxy starts in `DualPlayerEngine.initialize()` | `CloudStreamProxy` |
+| 1.3 Non-blocking network policy | Done for both the YouTube and the app interceptors (`decisionNow`, falling back to the blocking read until the first value is known) | `NetworkAccessPolicy`, `YouTubeNetworkModule`, `AppModule` |
+| 1.4 Invalidation reasons | Done. 401/403/410 re-resolve with the cooldown; 429 reports rate limiting; other failures retry the same URL, and re-resolve without the penalty only after they repeat | `YouTubeStreamProxy.onUpstreamFailure`, `StreamRetryPolicy.urlRejected` |
+| 1.5 Persisted client version | Done, **without** a compiled-in fallback version (an invented version could make the first search fail); a rejected saved version is cleared and retried once | `InnerTubeVersionStore` |
+| 1.6 Coil connection pool | Done. Also raised the shared pool's keep-alive from 30 s to 5 min so connections warmed by prewarming survive until the tap. The HEAD warm-up pings were not added | `AppModule` |
+| 1.7 `bufferForPlaybackMs` 250 | Done | `DualPlayerEngine` |
+| 2.2 In-memory download lookup on reopen | Done. The separate 15 s URI cache (2.1) was unnecessary once the DB query and manifest wait were gone | `DualPlayerEngine.resolveYouTubeUriAsync` |
+| 3 Extraction lanes | Done: PLAYBACK and BACKGROUND lanes, 3 threads each; related songs, collection search and speculation run in BACKGROUND | `NewPipeExecution` |
+| 4 Speculation | Done: press prewarm (256 KB head) and top 2 search results (128 KB head, unmetered only), 2 concurrent jobs, 20 per minute, 10 min back-off after a 429. The "rows visible ≥ 600 ms" trigger (P4) was not added | `StreamPrewarmScheduler`, `PressPrewarm.kt`, `SearchStateHolder` |
+| 4.3 Artwork on press | Done (1024 px variant into the disk cache) | `PlayerViewModel.onSongPressed` |
+| 5.1–5.4 Head cache, stream-before-resolve, 1 MiB first range | Done. The "rendition memo" is the cache's file names (`<id>.<itag>.<clen>.<bitrate>.<ext>`), so no Room table was needed. Heads fill from normal plays at no extra cost and from prewarm; the next song gets a 256 KB head | `StreamHeadCache`, `CloudStreamProxy.serveChunked`, `YouTubeStreamProxy` |
+| 5.5 Full replay cache | Not done (optional) | |
+| 6 Field-masked `/player` | **Not done**: marked experimental and high-risk in the plan; needs device measurements first | |
+| 7.1 Placeholder from list tier | Done | `OptimizedAlbumArt.smallerArtworkKeyCandidates` |
+| 7.2 Tiers | **No change needed**: at the default "High" quality (800 px) the player, notification and widget already share the 1024 px variant. Mapping above 1024 px was left alone so the "Original" quality setting is still respected | |
+| 7.3 Google player-tier enlargement | **No change needed**: YouTube Music thumbnails are already upgraded to 1400 px when search results are parsed | |
+| 7.4 YouTube video frames | Done for list sizes (≤ 256 px): `mqdefault.jpg`, not `vi_webp`, because not every video has WebP variants and a 404 would show no cover | `ArtworkUrls` |
+| 7.5 Metadata gatherer on OkHttp | Done | `SongMetadataGatherer` |
+| 7.6 Hardware bitmaps | Not changed (needs the per-call-site audit) | |
+| 7.7 Local artwork | Timestamp throttle done. Permits stay at 2 (a deliberate OOM safeguard); `isLikelyLocalMedia` was unchanged, since it had no speed impact | `AlbumArtUtils.touchIfStale` |
+
+Tests added or updated (all pass in the standalone harness):
+- New: `StreamHeadCacheTest` (7), `HeadCacheProxyTest` (5, end to end through the real Ktor proxy and a fake CDN), `StreamPrewarmSchedulerTest` (6), `CatalogPlaybackResolverTest` (4), `PlaybackTraceTest` (2).
+- Updated: `ArtworkUrlsTest`, `NewPipeExecutionTest` (lane isolation), `StreamReliabilityTest`.
+- Updated but not run here (Compose/Coil or Android): `OptimizedAlbumArtTest`, `AlbumArtUtilsTest`, `LoadControlBufferProfileTest`, and the `PlayerViewModelTest` constructor.
+
+In the harness end-to-end test, a song with a cached head delivered its first byte in about 6 ms while its URL took 1.5 s to resolve. That is a loopback measurement, not device latency.
