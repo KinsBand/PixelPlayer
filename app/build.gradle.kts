@@ -267,6 +267,8 @@ dependencies {
     implementation(libs.androidx.media3.session)
     implementation(libs.androidx.media3.exoplayer.ffmpeg)
     implementation(libs.androidx.media3.exoplayer.midi)
+    // Internet radio: many stations stream as HLS (.m3u8)
+    implementation(libs.androidx.media3.exoplayer.hls)
     implementation(libs.androidx.media3.transformer)
     implementation(libs.androidx.mediarouter)
     implementation(libs.androidx.media)

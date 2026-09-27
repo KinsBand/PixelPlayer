@@ -53,6 +53,7 @@ import com.theveloper.pixelplay.presentation.screens.PlatformPlaylistsScreen
 import com.theveloper.pixelplay.presentation.screens.PlaylistPlatform
 import com.theveloper.pixelplay.presentation.screens.PracticeScreen
 import com.theveloper.pixelplay.presentation.screens.RecentlyPlayedScreen
+import com.theveloper.pixelplay.presentation.screens.radio.RadioScreen
 
 import com.theveloper.pixelplay.presentation.screens.AboutScreen
 import com.theveloper.pixelplay.presentation.screens.SearchScreen
@@ -344,6 +345,15 @@ fun AppNavigation(
             composable(Screen.Practice.route) {
                 ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
                     PracticeScreen(
+                        playerViewModel = playerViewModel,
+                        onBackClick = { navController.popBackStack() }
+                    )
+                }
+            }
+
+            composable(Screen.Radio.route) {
+                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                    RadioScreen(
                         playerViewModel = playerViewModel,
                         onBackClick = { navController.popBackStack() }
                     )

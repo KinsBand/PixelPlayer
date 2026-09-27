@@ -33,6 +33,9 @@ sealed class Screen(val route: String) {
 
     /** Songs you're learning to play: Want → Learning → Finished. */
     object Practice : Screen("practice")
+
+    /** Internet radio: local → region → country → world, as a list, tuner dial or map. */
+    object Radio : Screen("radio")
     object  DailyMixScreen : Screen("daily_mix")
     object RecentlyPlayed : Screen("recently_played")
     object Stats : Screen("stats")
