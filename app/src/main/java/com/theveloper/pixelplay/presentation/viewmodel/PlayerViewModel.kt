@@ -3442,6 +3442,11 @@ class PlayerViewModel @Inject constructor(
         searchStateHolder.updateSearchFilter(filterType)
     }
 
+    /** Touch-down on an online song row: its stream work starts before the tap lands. */
+    fun onSongPressed(song: Song) = searchStateHolder.onSongPressed(song)
+
+    fun onSongPressCancelled(song: Song) = searchStateHolder.onSongPressCancelled(song)
+
     fun loadSearchHistory(limit: Int = 15) {
         searchStateHolder.loadSearchHistory(limit)
     }

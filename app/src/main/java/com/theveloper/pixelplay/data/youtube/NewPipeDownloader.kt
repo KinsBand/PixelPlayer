@@ -46,6 +46,7 @@ class NewPipeDownloader @Inject constructor(
         try {
             call.execute().use { response ->
                 if (response.code == 429) {
+                    YouTubeRateLimit.report()
                     throw ReCaptchaException("reCaptcha challenge requested", url)
                 }
                 return NewPipeResponse(

@@ -84,7 +84,11 @@ class YouTubeStreamProxy @Inject constructor(
     override fun onUpstreamFailure(id: String, httpStatus: Int?, consecutiveFailures: Int) {
         when {
             httpStatus != null && StreamRetryPolicy.urlRejected(httpStatus) -> invalidateStream(id)
-            httpStatus == 429 -> Unit // Rate limited: a new manifest request would make it worse.
+            httpStatus == 429 -> {
+                // Rate limited: a new manifest request would make it worse. Speculative
+                // prewarming also stands down for a while.
+                com.theveloper.pixelplay.data.youtube.YouTubeRateLimit.report()
+            }
             consecutiveFailures >= 2 -> {
                 super.invalidateStream(id)
                 youTubeStreamExtractor.invalidate(id, penalizeDirect = false)

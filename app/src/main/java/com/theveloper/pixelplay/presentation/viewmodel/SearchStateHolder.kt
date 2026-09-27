@@ -37,6 +37,7 @@ import javax.inject.Singleton
 @Singleton
 class SearchStateHolder @Inject constructor(
     private val musicRepository: MusicRepository,
+    private val prewarmScheduler: com.theveloper.pixelplay.data.stream.StreamPrewarmScheduler? = null,
 ) {
     private data class SearchRequest(
         val query: String,
@@ -120,6 +121,10 @@ class SearchStateHolder @Inject constructor(
                             }
                             if (_searchResults.value != immutableResults) {
                                 _searchResults.value = immutableResults
+                                // The top online song results are the likeliest next tap.
+                                prewarmScheduler?.onSearchResults(
+                                    immutableResults.mapNotNull { (it as? SearchResultItem.SongItem)?.song?.streamVideoId() }
+                                )
                             }
                         }
                     } catch (_: CancellationException) {
@@ -173,6 +178,18 @@ class SearchStateHolder @Inject constructor(
             }
         }
     }
+
+    /** A song row is being pressed: start its stream work before the tap lands. */
+    fun onSongPressed(song: com.theveloper.pixelplay.data.model.Song) {
+        song.streamVideoId()?.let { prewarmScheduler?.onPress(it) }
+    }
+
+    fun onSongPressCancelled(song: com.theveloper.pixelplay.data.model.Song) {
+        song.streamVideoId()?.let { prewarmScheduler?.onPressCancelled(it) }
+    }
+
+    private fun com.theveloper.pixelplay.data.model.Song.streamVideoId(): String? =
+        if (contentUriString.startsWith("youtube://")) youtubeId ?: contentUriString.removePrefix("youtube://") else null
 
     fun performSearch(query: String) {
         val normalizedQuery = query.trim()

@@ -76,6 +76,7 @@ class InnerTubeClient @Inject constructor(
             .header("X-Youtube-Client-Name", "67").header("X-Youtube-Client-Version", clientVersion)
             .post(body.toString().toRequestBody("application/json".toMediaType())).build()
         val result = http.newCall(request).awaitResponse().use { response ->
+            if (response.code == 429) YouTubeRateLimit.report()
             if (response.code == 400) {
                 version = null
                 if (staleCandidate) {
