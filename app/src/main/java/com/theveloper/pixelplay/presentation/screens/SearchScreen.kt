@@ -30,6 +30,7 @@ import androidx.compose.ui.zIndex
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImagePainter
 
+import com.theveloper.pixelplay.presentation.components.onPressObserved
 import com.theveloper.pixelplay.presentation.components.MultiSelectionBottomSheet
 import com.theveloper.pixelplay.presentation.components.AlbumMultiSelectionOptionSheet
 import com.theveloper.pixelplay.presentation.components.PlaylistMultiSelectionBottomSheet
@@ -1184,7 +1185,14 @@ fun SearchResultsList(
                     }
                 ) { index ->
                     val item = itemsForSection[index]
-                    Box(modifier = Modifier.padding(bottom = 12.dp)) {
+                    val pressModifier = if (item is SearchResultItem.SongItem) {
+                        Modifier.onPressObserved(
+                            key = item.song.id,
+                            onPress = { playerViewModel.onSongPressed(item.song) },
+                            onCancel = { playerViewModel.onSongPressCancelled(item.song) }
+                        )
+                    } else Modifier
+                    Box(modifier = Modifier.padding(bottom = 12.dp).then(pressModifier)) {
                         when (item) {
                             is SearchResultItem.SongItem -> {
                                 val isSelected = selectedSongIds.contains(item.song.id)

@@ -107,7 +107,7 @@ class YouTubeMusicApiService @Inject constructor(
             else -> return@withContext emptyList()
         }
         val handler = ServiceList.YouTube.searchQHFactory.fromQuery(query, listOf(contentFilter), "")
-        val info = NewPipeExecution.run { SearchInfo.getInfo(ServiceList.YouTube, handler) }
+        val info = NewPipeExecution.run(NewPipeExecution.Lane.BACKGROUND) { SearchInfo.getInfo(ServiceList.YouTube, handler) }
         ensureActive()
         info.relatedItems.mapNotNull { item ->
             val url = item.url.toHttpUrlOrNull() ?: return@mapNotNull null

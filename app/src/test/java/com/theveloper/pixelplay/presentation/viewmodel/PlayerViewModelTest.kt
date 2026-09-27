@@ -261,7 +261,8 @@ class PlayerViewModelTest {
             mockConnectivityStateHolder,
             mockThemeStateHolder,
             mockSpotifyToYouTubeResolver,
-            mockContext
+            mockContext,
+            mockk(relaxed = true)
         )
         // Real controller-sync holder wired to the same mocks, so existing tests
         // (e.g. the repeat-mode restore test) keep exercising the moved logic.

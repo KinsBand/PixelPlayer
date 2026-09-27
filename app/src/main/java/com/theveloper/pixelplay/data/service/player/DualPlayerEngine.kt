@@ -203,7 +203,7 @@ private fun baseLoadControlBufferProfileFor(isLowRamDevice: Boolean): LoadContro
         LoadControlBufferProfile(
             minBufferMs = 15_000,
             maxBufferMs = 30_000,
-            bufferForPlaybackMs = 500,
+            bufferForPlaybackMs = 250,
             bufferForPlaybackAfterRebufferMs = 1_000,
             targetBufferBytes = 12 * 1024 * 1024
         )
@@ -211,7 +211,7 @@ private fun baseLoadControlBufferProfileFor(isLowRamDevice: Boolean): LoadContro
         LoadControlBufferProfile(
             minBufferMs = 30_000,
             maxBufferMs = 60_000,
-            bufferForPlaybackMs = 500,
+            bufferForPlaybackMs = 250,
             bufferForPlaybackAfterRebufferMs = 1_000,
             targetBufferBytes = 24 * 1024 * 1024
         )
@@ -235,7 +235,8 @@ class DualPlayerEngine @Inject constructor(
     private val cloudSongDao: com.theveloper.pixelplay.data.database.CloudSongDao,
     private val connectivityStateHolder: com.theveloper.pixelplay.presentation.viewmodel.ConnectivityStateHolder,
     private val dspEngineManager: com.theveloper.pixelplay.data.dsp.DspEngineManager,
-    private val bluetoothDevicePrefs: com.theveloper.pixelplay.data.connectivity.BluetoothDevicePrefs
+    private val bluetoothDevicePrefs: com.theveloper.pixelplay.data.connectivity.BluetoothDevicePrefs,
+    private val catalogPlaybackResolver: com.theveloper.pixelplay.data.accounts.CatalogPlaybackResolver
 ) {
     private companion object {
         /** How long after a Listen recognizer restart its focus request is treated as a blip. */
@@ -250,12 +251,19 @@ class DualPlayerEngine @Inject constructor(
         private const val POST_TRANSITION_OFFLOAD_GUARD_MS = 2_000L
         private const val MAX_AUXILIARY_TIMELINE_ITEMS = 200
         private const val DOWNLOAD_SWAP_DEBOUNCE_MS = 300L
+        /** About 13 s of 160 kbps Opus: enough to cover URL resolution on a slow network. */
+        private const val NEXT_SONG_HEAD_BYTES = 256 * 1024
         private const val LOCAL_SWAP_SEEK_WINDOW_MS = 1_000L
         private val LOCAL_MEDIA_SCHEMES = setOf("content", "file", "android.resource")
-        private val REMOTE_MEDIA_SCHEMES = setOf("http", "https", "gdrive", "youtube")
+        // Spotify / Apple Music / Deezer songs are matched to YouTube audio when opened, so a
+        // catalog queue can start after matching only its first song.
+        private val CATALOG_SCHEMES = com.theveloper.pixelplay.data.accounts.CatalogPlaybackResolver.SCHEMES
+        private val REMOTE_MEDIA_SCHEMES = setOf("http", "https", "gdrive", "youtube") + CATALOG_SCHEMES
         // Subset of REMOTE_MEDIA_SCHEMES: schemes that need proxy resolution.
         // http/https resolve directly and must NOT enter the resolvedUriCache lookup path.
-        private val CLOUD_PROXY_SCHEMES = setOf("gdrive", "youtube")
+        private val CLOUD_PROXY_SCHEMES = setOf("gdrive", "youtube") + CATALOG_SCHEMES
+        /** Resolved on every open: downloads, signed URLs and the proxy port can all change. */
+        private val UNCACHED_PROXY_SCHEMES = setOf("youtube") + CATALOG_SCHEMES
     }
 
     data class TransitionTarget(
@@ -521,6 +529,7 @@ class DualPlayerEngine @Inject constructor(
             awaitingFirstAudioFor = null
             Timber.tag("StreamingLatency").d("player_transition_to_audio_ms=%d",
                 SystemClock.elapsedRealtime() - lastMediaItemTransitionAtMs)
+            com.theveloper.pixelplay.data.diagnostics.PlaybackTrace.audioStarted(mediaId)
         }
 
         override fun onAudioInputFormatChanged(
@@ -889,6 +898,9 @@ class DualPlayerEngine @Inject constructor(
         resetPreparedWindowState()
         observeDownloadedSources()
         observeSpatialAudio()
+        // Bind the loopback stream proxy now (off the main thread) so the first online tap
+        // does not also pay for the server's cold start.
+        youTubeStreamProxy.startIfNeeded()
     }
 
     // ── Spatial audio per Bluetooth device (connect menu → device settings) ──
@@ -942,6 +954,8 @@ class DualPlayerEngine @Inject constructor(
      */
     @Volatile private var localSourcesById: Map<String, Uri> = emptyMap()
     @Volatile private var localSourcesByVideoId: Map<String, Uri> = emptyMap()
+    /** True once [localSourcesByVideoId] reflects the downloads table, so reopens can skip the DB. */
+    @Volatile private var localSourcesLoaded = false
 
     private fun localSourceFor(item: MediaItem): Uri? {
         val uri = item.localConfiguration?.uri ?: return null
@@ -976,9 +990,13 @@ class DualPlayerEngine @Inject constructor(
                 val byVideoId = files.mapNotNull { (download, uri) ->
                     download.youtubeId?.removePrefix("yt_")?.let { it to uri }
                 }.toMap()
-                if (byId == localSourcesById && byVideoId == localSourcesByVideoId) return@collectLatest
+                if (byId == localSourcesById && byVideoId == localSourcesByVideoId) {
+                    localSourcesLoaded = true
+                    return@collectLatest
+                }
                 localSourcesById = byId
                 localSourcesByVideoId = byVideoId
+                localSourcesLoaded = true
                 // Do not mutate the timeline halfway through a crossfade.
                 while (transitionRunning) delay(100)
                 applyLocalSources(includeCurrent = false)
@@ -1306,7 +1324,7 @@ class DualPlayerEngine @Inject constructor(
                 val scheme = uri.scheme
                 if (scheme in CLOUD_PROXY_SCHEMES) {
                     val originalUri = uri.toString()
-                    val cached = if (scheme == "youtube") null else resolvedUriCache.get(originalUri)
+                    val cached = if (scheme in UNCACHED_PROXY_SCHEMES) null else resolvedUriCache.get(originalUri)
                     if (cached != null) {
                         return dataSpec.buildUpon().setUri(cached).build()
                     }
@@ -1409,26 +1427,34 @@ class DualPlayerEngine @Inject constructor(
     /** Resolve only the next manifest in advance; no player mutation or audio download. */
     suspend fun prewarmNextStream(item: MediaItem) {
         val uri = item.localConfiguration?.uri ?: return
-        if (uri.scheme != "youtube" || !connectivityStateHolder.isOnline.value) return
-        val videoId = uri.host?.removePrefix("yt_") ?: return
+        if (!connectivityStateHolder.isOnline.value) return
+        val videoId = when (uri.scheme) {
+            "youtube" -> uri.host?.removePrefix("yt_")
+            // Match the next catalog song ahead of time, so its transition is not a search.
+            in CATALOG_SCHEMES -> catalogPlaybackResolver.videoIdFor(uri.toString())
+            else -> null
+        } ?: return
         withContext(Dispatchers.IO) {
             if (cloudSongDao.getDownloadsByVideoId(videoId).any { it.downloadedAudioFile() != null }) return@withContext
-            youTubeStreamProxy.prewarm(videoId)
+            // Also cache the next song's first bytes so its transition needs no network wait.
+            youTubeStreamProxy.prewarm(videoId, headBytes = NEXT_SONG_HEAD_BYTES)
         }
     }
 
     suspend fun resolveCloudUri(uri: Uri): Uri = withContext(Dispatchers.IO) {
         val uriString = uri.toString()
-        if (uri.scheme != "youtube") resolvedUriCache.get(uriString)?.let { return@withContext it }
+        if (uri.scheme !in UNCACHED_PROXY_SCHEMES) resolvedUriCache.get(uriString)?.let { return@withContext it }
 
         val resolved: Uri? = when (uri.scheme) {
             "gdrive" -> resolveGDriveUriAsync(uriString)
             "youtube" -> resolveYouTubeUriAsync(uriString)
+            in CATALOG_SCHEMES -> catalogPlaybackResolver.videoIdFor(uriString)
+                ?.let { videoId -> resolveYouTubeUriAsync("youtube://$videoId") }
             else -> null
         }
 
         if (resolved != null) {
-            if (uri.scheme != "youtube") resolvedUriCache.put(uriString, resolved)
+            if (uri.scheme !in UNCACHED_PROXY_SCHEMES) resolvedUriCache.put(uriString, resolved)
             return@withContext resolved
         }
         uri
@@ -1436,15 +1462,25 @@ class DualPlayerEngine @Inject constructor(
 
     private suspend fun resolveYouTubeUriAsync(uriString: String): Uri? = withContext(Dispatchers.IO) {
         val videoId = Uri.parse(uriString).host?.removePrefix("yt_") ?: return@withContext null
-        cloudSongDao.getDownloadsByVideoId(videoId).firstNotNullOfOrNull { downloaded ->
-            downloaded.downloadedAudioFile()
-        }?.let { return@withContext Uri.fromFile(it) }
+        // ExoPlayer can open a source several times while starting one track; once the
+        // downloads table has been observed, answer from memory instead of querying Room.
+        val downloaded = if (localSourcesLoaded) {
+            localSourcesByVideoId[videoId]?.takeIf { uri ->
+                uri.path?.let { java.io.File(it) }?.let { it.isFile && it.canRead() && it.length() > 0 } == true
+            }
+        } else {
+            cloudSongDao.getDownloadsByVideoId(videoId).firstNotNullOfOrNull { it.downloadedAudioFile() }
+                ?.let { Uri.fromFile(it) }
+        }
+        downloaded?.let { return@withContext it }
         if (!connectivityStateHolder.isOnline.value) {
             connectivityStateHolder.triggerOfflineBlockedEvent()
             return@withContext null
         }
         if (!youTubeStreamProxy.ensureReady(5_000L)) return@withContext null
-        youTubeStreamProxy.prewarm(videoId)
+        // A song with cached leading bytes starts from them while the proxy resolves its URL
+        // in parallel, so don't wait for the manifest here.
+        if (!youTubeStreamProxy.hasCachedHead(videoId)) youTubeStreamProxy.prewarm(videoId)
         youTubeStreamProxy.resolveUri(uriString)?.toUri()
     }
 
@@ -1464,7 +1500,7 @@ class DualPlayerEngine @Inject constructor(
         // reach resolveCloudUri, so checking them wastes an IO dispatch.
         // Keep the logical YouTube URI in the queue. Every reopen must check offline
         // storage and fresh manifests, including items prepared before a download.
-        if (scheme == "youtube") return mediaItem
+        if (scheme in UNCACHED_PROXY_SCHEMES) return mediaItem
         if (scheme !in CLOUD_PROXY_SCHEMES) return mediaItem
         val resolvedUri = resolveCloudUri(uri)
         return if (resolvedUri == uri) mediaItem else mediaItem.buildUpon().setUri(resolvedUri).build()

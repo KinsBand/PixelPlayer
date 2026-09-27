@@ -715,6 +715,7 @@ class MainActivity : ComponentActivity() {
                 Screen.AlbumDetail.route,
                 Screen.ArtistDetail.route,
                 Screen.DJSpace.route,
+                Screen.Radio.route,
                 Screen.NavBarCrRad.route,
                 Screen.About.route,
                 Screen.Stats.route,

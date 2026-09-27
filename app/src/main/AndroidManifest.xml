@@ -37,6 +37,8 @@
     <!-- Required only on Android 11 and below for legacy Bluetooth discovery and Wi-Fi SSID access. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
         android:maxSdkVersion="30" />
+    <!-- Radio: approximate location finds stations near you (optional; region can be picked by hand). -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- For disabling battery optimization -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <queries>

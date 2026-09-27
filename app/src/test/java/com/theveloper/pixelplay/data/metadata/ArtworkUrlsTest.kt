@@ -12,6 +12,18 @@ class ArtworkUrlsTest {
         assertEquals("https://e-cdns-images.dzcdn.net/images/cover/id/512x512-000000-80-0-0.jpg", ArtworkUrls.forDisplay("https://e-cdns-images.dzcdn.net/images/cover/id/1000x1000-000000-80-0-0.jpg", 300, 300))
     }
 
+    @Test fun `large youtube frames shrink to the unletterboxed frame only at list size`() {
+        val expected = "https://i.ytimg.com/vi/abcdefghijk/mqdefault.jpg"
+        assertEquals(expected, ArtworkUrls.forDisplay("https://i.ytimg.com/vi/abcdefghijk/maxresdefault.jpg", 128, 128))
+        assertEquals(expected, ArtworkUrls.forDisplay("https://i9.ytimg.com/vi/abcdefghijk/hqdefault.jpg", 96, 96))
+        assertEquals(expected, ArtworkUrls.forDisplay("https://i.ytimg.com/vi/abcdefghijk/hq720.jpg?sqp=-oaymw&rs=AOn4CL", 128, 128))
+        assertEquals(expected, ArtworkUrls.forDisplay("https://i.ytimg.com/vi_webp/abcdefghijk/sddefault.webp", 128, 128))
+        // Grid and player sizes keep the larger frame.
+        val large = "https://i.ytimg.com/vi/abcdefghijk/maxresdefault.jpg"
+        assertEquals(large, ArtworkUrls.forDisplay(large, 300, 300))
+        assertEquals(large, ArtworkUrls.forDisplay(large, 1024, 1024))
+    }
+
     @Test fun `original large signed local unknown and small sources are preserved`() {
         val original = "https://lh3.googleusercontent.com/cover=w1400-h1400-l90-rj"
         assertEquals(original, ArtworkUrls.forDisplay(original, 2048, 2048))
@@ -21,7 +33,9 @@ class ArtworkUrlsTest {
             "$original#fragment",
             "content://media/external/audio/albumart/1",
             "pixelplay_local_art://song/1",
-            "https://i.ytimg.com/vi/abcdefghijk/maxresdefault.jpg",
+            "https://i.ytimg.com/vi/abcdefghijk/mqdefault.jpg",
+            "https://i.ytimg.com/vi/abcdefghijk/default.jpg",
+            "https://i.ytimg.com.evil.test/vi/abcdefghijk/maxresdefault.jpg",
             "https://mzstatic.com.evil.test/1400x1400bb.jpg",
             "https://example.com/mzstatic.com/1400x1400bb.jpg",
             "https://is1-ssl.mzstatic.com/image/100x100bb.jpg",

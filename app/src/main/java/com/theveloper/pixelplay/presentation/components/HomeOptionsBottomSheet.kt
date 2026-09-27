@@ -4,6 +4,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Radio
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.Text
@@ -18,6 +20,7 @@ import com.theveloper.pixelplay.R
 @Composable
 fun HomeOptionsBottomSheet(
     onNavigateToMashup: () -> Unit,
+    onNavigateToRadio: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Column(modifier.padding(bottom = 32.dp)) { // Padding for gesture bar
@@ -33,6 +36,20 @@ fun HomeOptionsBottomSheet(
                 .padding(20.dp)
                 .clip(RoundedCornerShape(18.dp))
                 .clickable(onClick = onNavigateToMashup)
+        )
+        ListItem(
+            headlineContent = { Text("Radio") },
+            supportingContent = { Text("Local, national and world stations") },
+            leadingContent = {
+                Icon(
+                    imageVector = Icons.Rounded.Radio,
+                    contentDescription = "Radio"
+                )
+            },
+            modifier = Modifier
+                .padding(horizontal = 20.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .clickable(onClick = onNavigateToRadio)
         )
     }
 }

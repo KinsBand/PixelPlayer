@@ -42,9 +42,9 @@ object YouTubeNetworkModule {
         .followSslRedirects(true)
         .retryOnConnectionFailure(true)
         .addInterceptor { chain ->
-            val decision = kotlinx.coroutines.runBlocking {
-                networkAccessPolicy.getDecision(NetworkPurpose.Update)
-            }
+            // Mirrored preferences: no thread blocking per request once they have been read.
+            val decision = networkAccessPolicy.decisionNow(NetworkPurpose.Update)
+                ?: kotlinx.coroutines.runBlocking { networkAccessPolicy.getDecision(NetworkPurpose.Update) }
             if (decision != NetworkDecision.Allowed) {
                 throw IOException("Network request blocked by policy: $decision")
             }

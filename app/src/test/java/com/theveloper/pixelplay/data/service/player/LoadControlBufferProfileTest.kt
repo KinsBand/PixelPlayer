@@ -11,7 +11,7 @@ class LoadControlBufferProfileTest {
 
         assertThat(profile.minBufferMs).isEqualTo(30_000)
         assertThat(profile.maxBufferMs).isEqualTo(60_000)
-        assertThat(profile.bufferForPlaybackMs).isEqualTo(500)
+        assertThat(profile.bufferForPlaybackMs).isEqualTo(250)
         assertThat(profile.bufferForPlaybackAfterRebufferMs).isEqualTo(1_000)
     }
 

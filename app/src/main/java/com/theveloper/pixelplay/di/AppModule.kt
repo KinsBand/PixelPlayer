@@ -337,9 +337,18 @@ object AppModule {
     @Provides
     @Singleton
     fun provideImageLoader(
-        @ApplicationContext context: Context
+        @ApplicationContext context: Context,
+        base: OkHttpClient
     ): ImageLoader {
-        val okHttpClient = OkHttpClient.Builder().build()
+        // Share the app's connection pool and dispatcher so covers reuse warm HTTP/2
+        // connections. Interceptors are dropped to keep image loading behaviour unchanged.
+        val okHttpClient = base.newBuilder()
+            .apply {
+                interceptors().clear()
+                networkInterceptors().clear()
+            }
+            .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
 
         return ImageLoader.Builder(context)
             .components {
@@ -491,10 +500,13 @@ object AppModule {
         }
         
         // Connection pool with optimized connections for better performance
+        // Shared by the YouTube and image clients. A warm TLS/HTTP2 connection is what lets a
+        // prewarmed search result (or the next song) start without a new handshake, so keep
+        // idle connections for OkHttp's default five minutes instead of 30 seconds.
         val connectionPool = okhttp3.ConnectionPool(
-            maxIdleConnections = 5,
-            keepAliveDuration = 30,
-            timeUnit = java.util.concurrent.TimeUnit.SECONDS
+            maxIdleConnections = 8,
+            keepAliveDuration = 5,
+            timeUnit = java.util.concurrent.TimeUnit.MINUTES
         )
 
         val networkPolicyInterceptor = okhttp3.Interceptor { chain ->
@@ -517,9 +529,9 @@ object AppModule {
                     enrichmentHostMarkers.any { urlStr.contains(it, ignoreCase = true) } -> com.theveloper.pixelplay.data.network.NetworkPurpose.Enrichment
                     else -> com.theveloper.pixelplay.data.network.NetworkPurpose.Update
                 }
-                val decision = kotlinx.coroutines.runBlocking {
-                    networkAccessPolicy.getDecision(purpose)
-                }
+                // Mirrored preferences avoid blocking an OkHttp thread on DataStore per request.
+                val decision = networkAccessPolicy.decisionNow(purpose)
+                    ?: kotlinx.coroutines.runBlocking { networkAccessPolicy.getDecision(purpose) }
 
                 if (decision != com.theveloper.pixelplay.data.network.NetworkDecision.Allowed) {
                     throw java.io.IOException("Network request blocked by policy: $decision")
@@ -568,10 +580,13 @@ object AppModule {
         loggingInterceptor.setLevel(HttpLoggingInterceptor.Level.HEADERS)
         
         // Connection pool to reuse connections for better performance
+        // Shared by the YouTube and image clients. A warm TLS/HTTP2 connection is what lets a
+        // prewarmed search result (or the next song) start without a new handshake, so keep
+        // idle connections for OkHttp's default five minutes instead of 30 seconds.
         val connectionPool = okhttp3.ConnectionPool(
-            maxIdleConnections = 5,
-            keepAliveDuration = 30,
-            timeUnit = java.util.concurrent.TimeUnit.SECONDS
+            maxIdleConnections = 8,
+            keepAliveDuration = 5,
+            timeUnit = java.util.concurrent.TimeUnit.MINUTES
         )
         
         // Use Cloudflare and Google DNS to avoid potential DNS issues
@@ -605,9 +620,9 @@ object AppModule {
                     enrichmentHostMarkers.any { urlStr.contains(it, ignoreCase = true) } -> com.theveloper.pixelplay.data.network.NetworkPurpose.Enrichment
                     else -> com.theveloper.pixelplay.data.network.NetworkPurpose.Update
                 }
-                val decision = kotlinx.coroutines.runBlocking {
-                    networkAccessPolicy.getDecision(purpose)
-                }
+                // Mirrored preferences avoid blocking an OkHttp thread on DataStore per request.
+                val decision = networkAccessPolicy.decisionNow(purpose)
+                    ?: kotlinx.coroutines.runBlocking { networkAccessPolicy.getDecision(purpose) }
 
                 if (decision != com.theveloper.pixelplay.data.network.NetworkDecision.Allowed) {
                     throw java.io.IOException("Network request blocked by policy: $decision")

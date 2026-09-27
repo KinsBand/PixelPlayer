@@ -8,13 +8,16 @@ package com.theveloper.pixelplay.data.metadata
  * - Apple (`*.mzstatic.com`): `/100x100bb.jpg` (serves up to 3000 px)
  * - Deezer (`*.dzcdn.net`): `/500x500-000000-80-0-0.jpg` (1000 px is the documented max)
  *
- * Anything else (local `content://` art, YouTube video frames, unknown hosts) is left untouched.
+ * YouTube video frames (`i.ytimg.com/vi/<id>/…`) shown at list size become `mqdefault.jpg`
+ * (320×180, no letterbox bars, published for every video) instead of a 480–1280 px frame.
+ * Anything else (local `content://` art, unknown hosts) is left untouched.
  */
 object ArtworkUrls {
     /** A few shared variants avoid a separate network/disk entry for every layout size. */
     fun forDisplay(url: String, widthPx: Int, heightPx: Int): String {
         if (widthPx <= 0 || heightPx <= 0) return url
         val edge = maxOf(widthPx, heightPx)
+        if (edge <= 256) youTubeListFrame(url)?.let { return it }
         val size = when {
             edge <= 256 -> 256
             edge <= 512 -> 512
@@ -72,6 +75,17 @@ object ArtworkUrls {
         val px = sizeInUrl.findAll(url).lastOrNull()?.groupValues?.drop(1)?.firstOrNull { it.isNotEmpty() }?.toIntOrNull()
         return px != null && px < minSize
     }
+
+    private val youTubeFrame = Regex(
+        """^https://(?:i\d?\.ytimg\.com|img\.youtube\.com)/vi(?:_webp)?/([A-Za-z0-9_-]{11})/(hqdefault|hq720|sddefault|maxresdefault|hq[1-3])\.(?:jpg|webp)(?:\?[^#]*)?$"""
+    )
+
+    /**
+     * List-size replacement for a large YouTube video frame. The query of a frame URL only
+     * signs a custom crop of that public image, so it is safe to drop.
+     */
+    private fun youTubeListFrame(url: String): String? =
+        youTubeFrame.find(url)?.groupValues?.get(1)?.let { id -> "https://i.ytimg.com/vi/$id/mqdefault.jpg" }
 
     private fun isGoogle(url: String) = url.contains("googleusercontent.com") || url.contains("ggpht.com")
     private fun isApple(url: String) = url.contains("mzstatic.com")

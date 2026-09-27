@@ -18,6 +18,20 @@ class OptimizedAlbumArtTest {
     }
 
     @Test
+    fun smallerArtworkKeys_pointAtListRowCacheEntries() {
+        val url = "https://lh3.googleusercontent.com/cover=w1400-h1400-l90-rj"
+
+        assertThat(smallerArtworkKeyCandidates(url)).containsExactly(
+            "https://lh3.googleusercontent.com/cover=w256-h256-l90-rj",
+            "https://lh3.googleusercontent.com/cover=w512-h512-l90-rj",
+            url
+        ).inOrder()
+        assertThat(smallerArtworkKeyCandidates("content://media/external/audio/albumart/1"))
+            .containsExactly("content://media/external/audio/albumart/1")
+        assertThat(smallerArtworkKeyCandidates(null)).isEmpty()
+    }
+
+    @Test
     fun safeAlbumArtTargetSize_keepsBoundedRequests() {
         val targetSize = Size(800, 600)
 
