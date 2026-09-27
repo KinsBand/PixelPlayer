@@ -93,13 +93,50 @@ class SongDownloadManager @Inject constructor(
      * Downloads an online song to local storage.
      * Pipeline: resolve stream URL -> download -> tag metadata -> scan to MediaStore
      */
-    suspend fun downloadSong(song: Song): Result<File> =
+    suspend fun downloadSong(song: Song, quality: DownloadQuality? = null): Result<File> =
         downloadLocks[(song.id.hashCode() and Int.MAX_VALUE) % downloadLocks.size].withLock {
-            downloadLocked(song)
+            downloadLocked(song, quality)
         }
 
+    /** Recent download speed (bytes/s) measured from real transfers, or 0 before the first one. */
+    @Volatile
+    private var measuredBytesPerSecond: Long = 0L
+
+    /** Rough seconds to download [bytes] now: measured speed, else a guess from the network type. */
+    fun estimateSeconds(bytes: Long): Long {
+        val speed = measuredBytesPerSecond.takeIf { it > 0 } ?: run {
+            val cm = context.getSystemService(android.net.ConnectivityManager::class.java)
+            val caps = cm?.getNetworkCapabilities(cm.activeNetwork)
+            val kbps = caps?.linkDownstreamBandwidthKbps?.takeIf { it > 0 } ?: 4_000
+            // Link bandwidth is optimistic; assume about a third of it for a single transfer.
+            kbps * 1000L / 8 / 3
+        }
+        return (bytes / speed.coerceAtLeast(1)).coerceAtLeast(1)
+    }
+
+    /** High / Medium / Low for [song] with exact (or estimated) sizes, for the download menu. */
+    suspend fun downloadOptions(song: Song): List<DownloadOption> = withContext(Dispatchers.IO) {
+        val saved = cloudSongDao.getById(song.id)
+        val videoId = resolveVideoId(song, saved) ?: return@withContext emptyList()
+        val manifest = youTubeStreamExtractor.streamManifest(videoId)
+        DownloadQuality.entries.mapNotNull { quality ->
+            val stream = quality.pick(manifest) ?: return@mapNotNull null
+            val size = stream.contentLength.takeIf { it > 0 }
+                ?: (stream.bitrate.toLong() / 8 * (song.duration / 1000).coerceAtLeast(1))
+            DownloadOption(quality, stream.codecLabel(), stream.bitrate / 1000, size)
+        }
+    }
+
+    private suspend fun resolveVideoId(song: Song, saved: com.theveloper.pixelplay.data.database.CloudSongEntity?): String? =
+        (song.youtubeId ?: saved?.youtubeId ?: if (com.theveloper.pixelplay.data.accounts.CatalogTracks.isCatalogSongId(song.id)) {
+            spotifyResolver.resolveSpotifyTrackToVideoId(
+                com.theveloper.pixelplay.data.accounts.CatalogTracks.matchKey(song.id), song.title, song.artist,
+                song.duration.coerceIn(0, Int.MAX_VALUE.toLong()).toInt(), song.creditsAndRelease.isrc
+            )
+        } else song.id.removePrefix("yt_"))?.removePrefix("yt_")
+
     // Background-priority threads: a download must never steal CPU from audio decoding/rendering.
-    private suspend fun downloadLocked(song: Song): Result<File> = withContext(com.theveloper.pixelplay.data.stream.PlaybackBandwidthGate.downloadDispatcher) {
+    private suspend fun downloadLocked(song: Song, quality: DownloadQuality?): Result<File> = withContext(com.theveloper.pixelplay.data.stream.PlaybackBandwidthGate.downloadDispatcher) {
         val songId = song.id
         var stagingFile: File? = null
         try {
@@ -113,12 +150,7 @@ class SongDownloadManager @Inject constructor(
             }
             // Step 1: Resolve stream URL
             updateProgress(songId, DownloadProgress.Resolving(songId))
-            val videoId = (song.youtubeId ?: saved?.youtubeId ?: if (com.theveloper.pixelplay.data.accounts.CatalogTracks.isCatalogSongId(song.id)) {
-                spotifyResolver.resolveSpotifyTrackToVideoId(
-                    com.theveloper.pixelplay.data.accounts.CatalogTracks.matchKey(song.id), song.title, song.artist,
-                    song.duration.coerceIn(0, Int.MAX_VALUE.toLong()).toInt(), song.creditsAndRelease.isrc
-                )
-            } else song.id.removePrefix("yt_"))?.removePrefix("yt_")
+            val videoId = resolveVideoId(song, saved)
                 ?: throw java.io.IOException("No matching audio source")
 
             // Prefer the MP4/AAC rendition because jaudiotagger can tag it; fall back to the
@@ -134,8 +166,9 @@ class SongDownloadManager @Inject constructor(
                 youTubeStreamExtractor.invalidate(videoId)
                 manifest = youTubeStreamExtractor.streamManifest(videoId, forceRefresh = true)
             }
-            val stream: YouTubeAudioStream =
-                YouTubeAudioStream.select(manifest.filter { it.container == "mp4" }, AudioQualityPreset.AUTO)
+            // A quality picked in the download menu wins; otherwise the default rule below.
+            val stream: YouTubeAudioStream = quality?.pick(manifest)
+                ?: YouTubeAudioStream.select(manifest.filter { it.container == "mp4" }, AudioQualityPreset.AUTO)
                     ?: YouTubeAudioStream.select(manifest, AudioQualityPreset.AUTO)
                     ?: run {
                         val error = "No downloadable audio stream is available"
@@ -322,6 +355,8 @@ class SongDownloadManager @Inject constructor(
             position = 0L
         }
         var lastEmittedPercent = -1
+        val startPosition = position
+        val startedAt = android.os.SystemClock.elapsedRealtime()
         FileOutputStream(outputFile, true).use { output ->
             val buffer = ByteArray(64 * 1024)
             while (total == null || position < total) {
@@ -370,6 +405,13 @@ class SongDownloadManager @Inject constructor(
             output.fd.sync()
         }
         if (total != null) DownloadIntegrity.requireComplete(outputFile.length(), total)
+        val elapsedMs = android.os.SystemClock.elapsedRealtime() - startedAt
+        val transferred = position - startPosition
+        // Only transfers big enough to say something about the connection.
+        if (elapsedMs > 500 && transferred > 256 * 1024) {
+            val speed = transferred * 1000 / elapsedMs
+            measuredBytesPerSecond = if (measuredBytesPerSecond == 0L) speed else (measuredBytesPerSecond * 2 + speed) / 3
+        }
     }
 
     private suspend fun readArtwork(input: java.io.InputStream): ByteArray {

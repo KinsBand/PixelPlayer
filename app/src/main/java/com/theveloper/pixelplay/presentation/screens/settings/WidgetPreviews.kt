@@ -146,6 +146,73 @@ internal fun WidgetPreviewStrip(
     }
 }
 
+/**
+ * The selected widget, large, on a wallpaper-like stage: the fixed top of the Widgets page.
+ * The stage is always two cells tall so switching widgets never moves what's below it.
+ */
+@Composable
+internal fun WidgetMainPreview(
+    kind: WidgetKind,
+    config: WidgetConfig,
+    playerInfo: PlayerInfo,
+    modifier: Modifier = Modifier,
+) {
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        val cell = minOf((maxWidth - 48.dp) / 4, 68.dp)
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            // Stands in for a wallpaper, so transparent backgrounds are visibly transparent.
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier.fillMaxWidth().height(cell * 2 + 40.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                androidx.compose.animation.AnimatedContent(
+                    targetState = kind,
+                    label = "widgetMainPreview",
+                ) { shown ->
+                    val (w, h) = PREVIEW_CELLS.getValue(shown)
+                    Box(Modifier.width(cell * w).height(cell * h), contentAlignment = Alignment.Center) {
+                        WidgetPreview(kind = shown, config = if (shown == kind) config else WidgetConfig(kind = shown), playerInfo = playerInfo)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A fixed row of widget names under the main preview: picks which widget is being edited. */
+@Composable
+internal fun WidgetKindSelector(
+    selectedKind: WidgetKind,
+    onSelect: (WidgetKind) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        WidgetKind.entries.forEach { kind ->
+            val selected = kind == selectedKind
+            Surface(
+                onClick = { onSelect(kind) },
+                shape = CircleShape,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
+                contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+            ) {
+                Text(
+                    text = stringResource(kind.labelRes),
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun WidgetPreviewCard(
     kind: WidgetKind,

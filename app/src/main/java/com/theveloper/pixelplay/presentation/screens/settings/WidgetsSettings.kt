@@ -1,6 +1,8 @@
 package com.theveloper.pixelplay.presentation.screens.settings
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Album
@@ -28,6 +30,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -53,10 +57,10 @@ import kotlin.math.roundToInt
 /**
  * Visual widgets: how the home-screen widgets look.
  *
- * The preview strip at the top doubles as the picker — everything below applies to whichever
- * widget is selected there, which is why there is no separate "which widget" dropdown. The
- * turntable section only appears when the turntable is selected, since none of it means
- * anything for the other four.
+ * [WidgetsPinnedHeader] (big live preview + a row of widget names) stays fixed at the top;
+ * everything here scrolls under it and applies to the widget picked there. Appearance comes
+ * first; on/off options are icon toggles (tap the icon). The turntable section only appears
+ * when the turntable is selected. Reset lives in the top bar ([WidgetResetAction]).
  *
  * This category is backed by [VisualWidgetsViewModel] rather than the shared
  * `SettingsViewModel`: nothing here reads the 58-field settings state, and keeping it out of
@@ -76,16 +80,6 @@ internal fun WidgetsSettingsContent(
     val appearance = config.appearance
     val content = config.content
     val turntable = config.turntable
-    val widgetName = stringResource(selectedKind.labelRes)
-
-    SettingsSubsection(title = stringResource(R.string.settings_widgets_preview_section)) {
-        WidgetPreviewStrip(
-            configs = configs,
-            playerInfo = playerInfo,
-            selectedKind = selectedKind,
-            onSelect = viewModel::selectKind,
-        )
-    }
 
     SettingsSubsection(title = stringResource(R.string.settings_widgets_appearance_section)) {
         SettingsSegmentedSelectorItem(
@@ -144,68 +138,52 @@ internal fun WidgetsSettingsContent(
     }
 
     SettingsSubsection(title = stringResource(R.string.settings_widgets_content_section)) {
-        if (selectedKind != WidgetKind.TURNTABLE) {
-            SwitchSettingItem(
-                title = stringResource(R.string.settings_widget_show_title),
-                subtitle = "",
-                checked = content.showTitle,
-                onCheckedChange = { viewModel.setShowTitle(selectedKind, it) },
-                leadingIcon = {
-                    Icon(Icons.Rounded.Title, null, tint = MaterialTheme.colorScheme.secondary)
-                },
-                settingKey = "widget_show_title",
+        WidgetToggleRow {
+            if (selectedKind != WidgetKind.TURNTABLE) {
+                WidgetIconToggle(
+                    icon = Icons.Rounded.Title,
+                    label = stringResource(R.string.settings_widget_show_title),
+                    checked = content.showTitle,
+                    onCheckedChange = { viewModel.setShowTitle(selectedKind, it) },
+                    settingKey = "widget_show_title",
+                )
+                WidgetIconToggle(
+                    icon = Icons.Rounded.Person,
+                    label = stringResource(R.string.settings_widget_show_artist),
+                    checked = content.showArtist,
+                    onCheckedChange = { viewModel.setShowArtist(selectedKind, it) },
+                    settingKey = "widget_show_artist",
+                )
+            }
+            WidgetIconToggle(
+                icon = Icons.Rounded.SkipNext,
+                label = stringResource(R.string.settings_widget_show_prev_next),
+                checked = content.showPrevNext,
+                onCheckedChange = { viewModel.setShowPrevNext(selectedKind, it) },
+                settingKey = "widget_show_prev_next",
             )
-            SwitchSettingItem(
-                title = stringResource(R.string.settings_widget_show_artist),
-                subtitle = "",
-                checked = content.showArtist,
-                onCheckedChange = { viewModel.setShowArtist(selectedKind, it) },
-                leadingIcon = {
-                    Icon(Icons.Rounded.Person, null, tint = MaterialTheme.colorScheme.secondary)
-                },
-                settingKey = "widget_show_artist",
+            WidgetIconToggle(
+                icon = Icons.Rounded.Shuffle,
+                label = stringResource(R.string.settings_widget_show_shuffle),
+                checked = content.showShuffle,
+                onCheckedChange = { viewModel.setShowShuffle(selectedKind, it) },
+                settingKey = "widget_show_shuffle",
+            )
+            WidgetIconToggle(
+                icon = Icons.Rounded.Repeat,
+                label = stringResource(R.string.settings_widget_show_repeat),
+                checked = content.showRepeat,
+                onCheckedChange = { viewModel.setShowRepeat(selectedKind, it) },
+                settingKey = "widget_show_repeat",
+            )
+            WidgetIconToggle(
+                icon = Icons.Rounded.Favorite,
+                label = stringResource(R.string.settings_widget_show_favorite),
+                checked = content.showFavorite,
+                onCheckedChange = { viewModel.setShowFavorite(selectedKind, it) },
+                settingKey = "widget_show_favorite",
             )
         }
-        SwitchSettingItem(
-            title = stringResource(R.string.settings_widget_show_prev_next),
-            subtitle = "",
-            checked = content.showPrevNext,
-            onCheckedChange = { viewModel.setShowPrevNext(selectedKind, it) },
-            leadingIcon = {
-                Icon(Icons.Rounded.SkipNext, null, tint = MaterialTheme.colorScheme.secondary)
-            },
-            settingKey = "widget_show_prev_next",
-        )
-        SwitchSettingItem(
-            title = stringResource(R.string.settings_widget_show_shuffle),
-            subtitle = "",
-            checked = content.showShuffle,
-            onCheckedChange = { viewModel.setShowShuffle(selectedKind, it) },
-            leadingIcon = {
-                Icon(Icons.Rounded.Shuffle, null, tint = MaterialTheme.colorScheme.secondary)
-            },
-            settingKey = "widget_show_shuffle",
-        )
-        SwitchSettingItem(
-            title = stringResource(R.string.settings_widget_show_repeat),
-            subtitle = "",
-            checked = content.showRepeat,
-            onCheckedChange = { viewModel.setShowRepeat(selectedKind, it) },
-            leadingIcon = {
-                Icon(Icons.Rounded.Repeat, null, tint = MaterialTheme.colorScheme.secondary)
-            },
-            settingKey = "widget_show_repeat",
-        )
-        SwitchSettingItem(
-            title = stringResource(R.string.settings_widget_show_favorite),
-            subtitle = "",
-            checked = content.showFavorite,
-            onCheckedChange = { viewModel.setShowFavorite(selectedKind, it) },
-            leadingIcon = {
-                Icon(Icons.Rounded.Favorite, null, tint = MaterialTheme.colorScheme.secondary)
-            },
-            settingKey = "widget_show_favorite",
-        )
         if (selectedKind != WidgetKind.TURNTABLE) {
             SettingsSegmentedSelectorItem(
                 title = stringResource(R.string.settings_widget_progress_title),
@@ -287,46 +265,36 @@ internal fun WidgetsSettingsContent(
                 valueText = { value -> context.percentText(value) },
                 settingKey = "turntable_label_size",
             )
-            SwitchSettingItem(
-                title = stringResource(R.string.settings_turntable_badges_title),
-                subtitle = stringResource(R.string.settings_turntable_badges_subtitle),
-                checked = turntable.showBadges,
-                onCheckedChange = viewModel::setShowBadges,
-                leadingIcon = {
-                    Icon(Icons.Rounded.Tune, null, tint = MaterialTheme.colorScheme.secondary)
-                },
-                settingKey = "turntable_badges",
-            )
-            SwitchSettingItem(
-                title = stringResource(R.string.settings_turntable_tonearm_title),
-                subtitle = "",
-                checked = turntable.showTonearm,
-                onCheckedChange = viewModel::setShowTonearm,
-                leadingIcon = {
-                    Icon(Icons.Rounded.Timeline, null, tint = MaterialTheme.colorScheme.secondary)
-                },
-                settingKey = "turntable_tonearm",
-            )
-            SwitchSettingItem(
-                title = stringResource(R.string.settings_turntable_grooves_title),
-                subtitle = "",
-                checked = turntable.showGrooves,
-                onCheckedChange = viewModel::setShowGrooves,
-                leadingIcon = {
-                    Icon(Icons.Rounded.Album, null, tint = MaterialTheme.colorScheme.secondary)
-                },
-                settingKey = "turntable_grooves",
-            )
-            SwitchSettingItem(
-                title = stringResource(R.string.settings_turntable_sheen_title),
-                subtitle = "",
-                checked = turntable.showSheen,
-                onCheckedChange = viewModel::setShowSheen,
-                leadingIcon = {
-                    Icon(Icons.Rounded.Lightbulb, null, tint = MaterialTheme.colorScheme.secondary)
-                },
-                settingKey = "turntable_sheen",
-            )
+            WidgetToggleRow {
+                WidgetIconToggle(
+                    icon = Icons.Rounded.Tune,
+                    label = stringResource(R.string.settings_turntable_badges_title),
+                    checked = turntable.showBadges,
+                    onCheckedChange = viewModel::setShowBadges,
+                    settingKey = "turntable_badges",
+                )
+                WidgetIconToggle(
+                    icon = Icons.Rounded.Timeline,
+                    label = stringResource(R.string.settings_turntable_tonearm_title),
+                    checked = turntable.showTonearm,
+                    onCheckedChange = viewModel::setShowTonearm,
+                    settingKey = "turntable_tonearm",
+                )
+                WidgetIconToggle(
+                    icon = Icons.Rounded.Album,
+                    label = stringResource(R.string.settings_turntable_grooves_title),
+                    checked = turntable.showGrooves,
+                    onCheckedChange = viewModel::setShowGrooves,
+                    settingKey = "turntable_grooves",
+                )
+                WidgetIconToggle(
+                    icon = Icons.Rounded.Lightbulb,
+                    label = stringResource(R.string.settings_turntable_sheen_title),
+                    checked = turntable.showSheen,
+                    onCheckedChange = viewModel::setShowSheen,
+                    settingKey = "turntable_sheen",
+                )
+            }
         }
 
         // Smooth spinning is the one option here with a real running cost, so say so where
@@ -341,19 +309,6 @@ internal fun WidgetsSettingsContent(
                     .padding(horizontal = 20.dp, vertical = 12.dp),
             )
         }
-    }
-
-    SettingsSubsection(title = stringResource(R.string.settings_widget_reset_title)) {
-        ActionSettingsItem(
-            title = stringResource(R.string.settings_widget_reset_title),
-            subtitle = stringResource(R.string.settings_widget_reset_subtitle, widgetName),
-            icon = {
-                Icon(Icons.Rounded.Restore, null, tint = MaterialTheme.colorScheme.secondary)
-            },
-            primaryActionLabel = stringResource(R.string.settings_widget_reset_confirm_action),
-            onPrimaryAction = { viewModel.resetKind(selectedKind) },
-            settingKey = "widget_reset",
-        )
     }
 }
 
@@ -373,3 +328,112 @@ private val TURNTABLE_KEYS = setOf(
 /** Formats a 0..1 scale as a whole percentage, e.g. 0.82 becomes "82%". */
 private fun android.content.Context.percentText(value: Float): String =
     getString(R.string.settings_turntable_disc_scale_value, (value * 100f).roundToInt())
+
+/** Fixed top of the Widgets page: the selected widget, large, and the row of widget names. */
+@Composable
+internal fun WidgetsPinnedHeader(
+    modifier: Modifier = Modifier,
+    viewModel: VisualWidgetsViewModel = hiltViewModel(),
+) {
+    val configs by viewModel.configs.collectAsStateWithLifecycle()
+    val selectedKind by viewModel.selectedKind.collectAsStateWithLifecycle()
+    val playerInfo by viewModel.playerInfo.collectAsStateWithLifecycle()
+    androidx.compose.foundation.layout.Column(modifier = modifier.fillMaxWidth()) {
+        WidgetMainPreview(
+            kind = selectedKind,
+            config = configs[selectedKind] ?: WidgetConfig(kind = selectedKind),
+            playerInfo = playerInfo,
+        )
+        WidgetKindSelector(selectedKind = selectedKind, onSelect = viewModel::selectKind)
+    }
+}
+
+/** Reset for the selected widget: an icon in the top bar, with a confirmation. */
+@Composable
+internal fun WidgetResetAction(viewModel: VisualWidgetsViewModel = hiltViewModel()) {
+    val selectedKind by viewModel.selectedKind.collectAsStateWithLifecycle()
+    var confirm by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    val widgetName = stringResource(selectedKind.labelRes)
+    androidx.compose.material3.IconButton(onClick = { confirm = true }) {
+        Icon(Icons.Rounded.Restore, contentDescription = stringResource(R.string.settings_widget_reset_title))
+    }
+    if (confirm) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirm = false },
+            icon = { Icon(Icons.Rounded.Restore, null) },
+            title = { Text(stringResource(R.string.settings_widget_reset_confirm_title, widgetName)) },
+            text = { Text(stringResource(R.string.settings_widget_reset_confirm_body)) },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    confirm = false
+                    viewModel.resetKind(selectedKind)
+                }) { Text(stringResource(R.string.settings_widget_reset_confirm_action)) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { confirm = false }) {
+                    Text(stringResource(android.R.string.cancel))
+                }
+            },
+        )
+    }
+}
+
+/** Icon toggles wrap onto as many lines as they need. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun WidgetToggleRow(content: @Composable () -> Unit) {
+    androidx.compose.foundation.layout.FlowRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp),
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp),
+    ) { content() }
+}
+
+/**
+ * An on/off option as just its icon: filled when on, outlined when off. The label is read by
+ * TalkBack and shown on long press, so the row stays compact.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun WidgetIconToggle(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    settingKey: String,
+) {
+    val highlighted = com.theveloper.pixelplay.presentation.screens.LocalHighlightSettingKey.current
+        ?.equals(settingKey, ignoreCase = true) == true
+    androidx.compose.material3.TooltipBox(
+        positionProvider = androidx.compose.material3.TooltipDefaults.rememberTooltipPositionProvider(
+            androidx.compose.material3.TooltipAnchorPosition.Above
+        ),
+        tooltip = { androidx.compose.material3.PlainTooltip { Text(label) } },
+        state = androidx.compose.material3.rememberTooltipState(),
+    ) {
+        androidx.compose.material3.FilledIconToggleButton(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+            colors = androidx.compose.material3.IconButtonDefaults.filledIconToggleButtonColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                checkedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                checkedContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            ),
+            modifier = Modifier
+                .size(56.dp)
+                .then(
+                    if (highlighted) Modifier.border(
+                        2.dp, MaterialTheme.colorScheme.primary,
+                        androidx.compose.foundation.shape.RoundedCornerShape(18.dp)
+                    ) else Modifier
+                )
+                .semantics { stateDescription = if (checked) "Shown" else "Hidden" },
+        ) {
+            Icon(icon, contentDescription = label)
+        }
+    }
+}

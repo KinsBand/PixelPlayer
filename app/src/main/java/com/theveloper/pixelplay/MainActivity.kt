@@ -202,6 +202,8 @@ class MainActivity : ComponentActivity() {
     lateinit var songDownloadManager: SongDownloadManager
     @Inject
     lateinit var voiceSearchStateHolder: VoiceSearchStateHolder
+    @Inject
+    lateinit var friendFollowController: com.theveloper.pixelplay.data.social.FriendFollowController
     // For handling shortcut navigation - using StateFlow so composables can observe changes
     private val _pendingPlaylistNavigation = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     private val _pendingShuffleAll = kotlinx.coroutines.flow.MutableStateFlow(false)
@@ -254,6 +256,19 @@ class MainActivity : ComponentActivity() {
                 syncManager.rebuildDatabase()
                 delay(1_500L)
                 playerViewModel.prepareBenchmarkPlayerFromLibrary()
+            }
+        }
+
+        // Following a friend: each new song they start plays next (or starts playback if
+        // nothing is playing). Not tied to STARTED, so it keeps going in the background.
+        lifecycleScope.launch {
+            friendFollowController.newSongs.collect { song ->
+                val name = friendFollowController.session.value?.friendName ?: "Friend"
+                if (playerViewModel.stablePlayerState.value.currentSong == null) {
+                    playerViewModel.playSongs(listOf(song), song, "Following $name")
+                } else {
+                    playerViewModel.addSongNextToQueue(song)
+                }
             }
         }
 

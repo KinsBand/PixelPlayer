@@ -5,10 +5,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.theveloper.pixelplay.data.accounts.ConnectedLibraryRepository
 import com.theveloper.pixelplay.data.social.FriendActivityRepository
+import com.theveloper.pixelplay.data.social.FriendFollowController
+import com.theveloper.pixelplay.data.social.toPlayableSong
 import com.theveloper.pixelplay.data.social.FriendPresence
 import com.theveloper.pixelplay.data.social.FriendTrack
 import com.theveloper.pixelplay.data.social.presence
-import com.theveloper.pixelplay.data.spotify.toSong
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -46,6 +47,7 @@ data class FriendUi(
 class FriendsViewModel @Inject constructor(
     private val library: ConnectedLibraryRepository,
     private val activity: FriendActivityRepository,
+    private val follow: FriendFollowController,
 ) : ViewModel() {
 
     /** Re-judges live / "2 h ago" every 30 s even when no new data arrives. */
@@ -129,15 +131,15 @@ class FriendsViewModel @Inject constructor(
     }
 
     /** A friend's song as something PixelPlayer can play (matched to audio when it starts), or null if unknown. */
-    fun songFor(track: FriendTrack): com.theveloper.pixelplay.data.model.Song? {
-        val uri = track.trackUri ?: return null
-        if (!uri.startsWith("spotify:track:") || track.title.isBlank()) return null
-        return com.theveloper.pixelplay.data.spotify.SpotifyTrack(
-            id = uri.substringAfterLast(':'), title = track.title, artistName = track.artist.ifBlank { "Unknown artist" },
-            albumName = "", durationMs = (track.durationMs ?: 0L).coerceIn(0L, Int.MAX_VALUE.toLong()).toInt(),
-            isrc = null, coverUrl = track.coverUrl
-        ).toSong()
+    fun songFor(track: FriendTrack): com.theveloper.pixelplay.data.model.Song? = track.toPlayableSong()
+
+    val following: StateFlow<FriendFollowController.Session?> = follow.session
+
+    fun toggleFollow(friend: FriendUi) {
+        if (follow.isFollowing(friend.id)) follow.stop() else follow.follow(friend.id, friend.name)
     }
+
+    fun stopFollowing() = follow.stop()
 
     private fun launch(block: suspend () -> Unit) = viewModelScope.launch {
         try { block() } catch (e: CancellationException) { throw e }

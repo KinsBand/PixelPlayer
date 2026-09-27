@@ -366,15 +366,40 @@ object SettingsRegistry {
             keywords = listOf("lyrics size", "text size", "bigger lyrics", "smaller lyrics")
         ),
         SettingEntry(
-            key = "lyrics_experimental",
+            key = "animated_lyrics",
             categoryId = "lyrics",
-            titleRes = R.string.settings_player_tweaks_title,
-            descriptionRes = R.string.settings_player_tweaks_subtitle,
-            route = Screen.Experimental.route,
-            keywords = listOf(
-                "experimental", "animated lyrics", "spring", "lyrics effects", "blur",
-                "loading tweaks", "player lag", "placeholders"
-            )
+            titleRes = R.string.settings_tweak_animated_lyrics,
+            keywords = listOf("animated lyrics", "spring", "lyrics effects", "experimental")
+        ),
+        SettingEntry(
+            key = "animated_lyrics_blur",
+            categoryId = "lyrics",
+            titleRes = R.string.settings_tweak_lyrics_blur,
+            keywords = listOf("blur", "lyrics blur", "experimental")
+        ),
+        SettingEntry(
+            key = "animated_lyrics_blur_strength",
+            categoryId = "lyrics",
+            titleRes = R.string.settings_tweak_blur_strength,
+            keywords = listOf("blur strength", "blur amount")
+        ),
+        SettingEntry(
+            key = "player_load_after_open",
+            categoryId = "lyrics",
+            titleRes = R.string.settings_tweak_load_after_open,
+            keywords = listOf("loading tweaks", "player lag", "delay", "experimental")
+        ),
+        SettingEntry(
+            key = "player_placeholders",
+            categoryId = "lyrics",
+            titleRes = R.string.settings_tweak_placeholders,
+            keywords = listOf("placeholders", "loading", "experimental")
+        ),
+        SettingEntry(
+            key = "album_art_quality",
+            categoryId = "lyrics",
+            titleRes = R.string.settings_tweak_album_art_quality,
+            keywords = listOf("album art", "resolution", "quality", "artwork")
         ),
 
         // AI features
@@ -543,12 +568,6 @@ object SettingsRegistry {
             categoryId = "widgets",
             titleRes = R.string.settings_widget_progress_title,
             keywords = listOf("widget", "progress", "bar", "wavy", "seek")
-        ),
-        SettingEntry(
-            key = "widget_reset",
-            categoryId = "widgets",
-            titleRes = R.string.settings_widget_reset_title,
-            keywords = listOf("widget", "reset", "default", "restore", "revert")
         ),
 
         // Developer

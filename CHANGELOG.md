@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **About:** removed the maintainer, spotlight and contributor lists; GitHub links point to KinsBand/PixelPlayer.
 
 ### Added
+- **Friends:** a new song sheet (Play / Play next / Add to queue tiles, like, go to artist, search). The history sheet is redesigned with **Shuffle** (the friend's whole week) and **Follow** (each new song they start plays next; stops by itself after 15 minutes of silence).
+- **Downloads:** tapping download in the player opens a quality menu under the button (High = Opus, Medium = AAC 128, Low) with the size in MB and an estimated time; long-press downloads High.
+- **Playlists:** friend playlists show the friend's avatar and name on the details line; blank covers fall back to the collage.
+- **Widgets:** the selected widget's big live preview and a row of widget names stay fixed at the top; options scroll below with Appearance first; on/off options are icon toggles; reset moved to the top bar.
+- **Settings:** the Experimental screen is merged into Player & Lyrics as short toggles; utility screens open with the condensed bar (back button and title on one row).
 - **Downloads:** "Download on Wi-Fi only" for downloading all liked songs. It waits for Wi-Fi, asks with a notification before starting, shows one progress notification with Cancel, and pauses if Wi-Fi drops.
 
 ## [0.7.5-beta] - 2026-06-13

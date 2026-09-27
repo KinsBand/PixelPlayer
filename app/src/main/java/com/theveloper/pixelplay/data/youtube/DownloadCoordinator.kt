@@ -193,14 +193,19 @@ class DownloadCoordinator @Inject constructor(
     fun isDownloaded(song: Song): Boolean =
         song.downloadState == DownloadState.DOWNLOADED || song.id in downloadedIds.value
 
+    /** High / Medium / Low with sizes, for the full player's download menu. */
+    suspend fun downloadOptions(song: Song): List<DownloadOption> = songDownloadManager.downloadOptions(song)
+
+    fun estimateSeconds(bytes: Long): Long = songDownloadManager.estimateSeconds(bytes)
+
     /** Starts (or joins) a download for [song]. Safe to call repeatedly. */
-    fun download(song: Song) {
+    fun download(song: Song, quality: DownloadQuality? = null) {
         if (!isOnlineSong(song)) {
             announce("This song is already on your device")
             return
         }
         scope.launch {
-            val ok = downloadWithNotification(song, notifyUser = true)
+            val ok = downloadWithNotification(song, notifyUser = true, quality = quality)
             // Keep the liked-downloads playlist current once the user has created it.
             if (ok && playlistPreferencesRepository.getPlaylistsOnce().any { it.id == LIKED_DOWNLOADS_PLAYLIST_ID }) {
                 syncLikedDownloadsPlaylist()
@@ -212,7 +217,12 @@ class DownloadCoordinator @Inject constructor(
      * @param songNotification Per-song notification; off for the bulk run, which has one
      *   notification for the whole batch.
      */
-    private suspend fun downloadWithNotification(song: Song, notifyUser: Boolean, songNotification: Boolean = true): Boolean {
+    private suspend fun downloadWithNotification(
+        song: Song,
+        notifyUser: Boolean,
+        songNotification: Boolean = true,
+        quality: DownloadQuality? = null,
+    ): Boolean {
         try { musicRepository.saveCloudSong(song) } catch (e: CancellationException) { throw e }
         catch (e: Exception) { Timber.tag(TAG).w(e, "Could not persist cloud song %s", song.id) }
 
@@ -229,7 +239,7 @@ class DownloadCoordinator @Inject constructor(
             }
         }
         return try {
-            val result = songDownloadManager.downloadSong(song)
+            val result = songDownloadManager.downloadSong(song, quality)
             result.fold(
                 onSuccess = {
                     notifications.showCompleted(song.title, notifId)

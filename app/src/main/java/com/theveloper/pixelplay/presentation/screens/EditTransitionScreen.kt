@@ -46,7 +46,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.LargeTopAppBar
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -106,7 +106,8 @@ fun EditTransitionScreen(
     val isCrossfadeEnabled = displayedSettings.mode != TransitionMode.NONE
 
     // Configuración para el comportamiento de la TopBar colapsable (Material 3)
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    // Condensed bar (back + title on one row); colours as the content scrolls under it.
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     LaunchedEffect(uiState.isSaved, isPlaylistScope, uiState.useGlobalDefaults) {
         if (uiState.isSaved) {
@@ -123,7 +124,7 @@ fun EditTransitionScreen(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            LargeTopAppBar(
+            TopAppBar(
                 title = {
                     Text(
                         modifier = Modifier.padding(start = 4.dp),

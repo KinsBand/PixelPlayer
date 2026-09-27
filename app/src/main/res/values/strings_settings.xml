@@ -820,6 +820,12 @@
     <!-- Liked songs downloads -->
     <string name="settings_downloads_section">Downloads</string>
     <string name="settings_download_liked_title">Download all liked songs</string>
+    <string name="settings_tweak_animated_lyrics">Animated lyrics</string>
+    <string name="settings_tweak_lyrics_blur">Blur other lines</string>
+    <string name="settings_tweak_blur_strength">Blur strength</string>
+    <string name="settings_tweak_load_after_open">Load player after it opens</string>
+    <string name="settings_tweak_placeholders">Placeholders while loading</string>
+    <string name="settings_tweak_album_art_quality">Album art quality</string>
     <string name="settings_lyrics_song_structure_title">Song structure</string>
     <string name="settings_lyrics_song_structure_subtitle">Show Intro, Verse, Chorus… under the song title</string>
     <string name="settings_download_liked_wifi_only_title">Download on Wi-Fi only</string>
