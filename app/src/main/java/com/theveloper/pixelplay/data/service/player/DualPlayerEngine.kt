@@ -529,6 +529,7 @@ class DualPlayerEngine @Inject constructor(
             awaitingFirstAudioFor = null
             Timber.tag("StreamingLatency").d("player_transition_to_audio_ms=%d",
                 SystemClock.elapsedRealtime() - lastMediaItemTransitionAtMs)
+            com.theveloper.pixelplay.data.diagnostics.PlaybackTrace.audioStarted(mediaId)
         }
 
         override fun onAudioInputFormatChanged(

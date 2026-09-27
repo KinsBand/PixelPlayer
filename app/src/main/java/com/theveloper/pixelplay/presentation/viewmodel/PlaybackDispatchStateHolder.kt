@@ -541,6 +541,7 @@ class PlaybackDispatchStateHolder @Inject constructor(
     }
 
     fun playSongs(songsToPlay: List<Song>, startSong: Song, queueName: String = "None", playlistId: String? = null) {
+        com.theveloper.pixelplay.data.diagnostics.PlaybackTrace.begin(startSong.id)
         cancelPendingFullQueuePlayback()
         val requestToken = beginDirectPlaybackRequest()
         directPlaybackJob = cb.scope.launch {
@@ -914,6 +915,7 @@ class PlaybackDispatchStateHolder @Inject constructor(
                 dualPlayerEngine.cancelNext()
                 val enginePlayer = dualPlayerEngine.masterPlayer
 
+                com.theveloper.pixelplay.data.diagnostics.PlaybackTrace.mark("dispatch")
                 enginePlayer.setMediaItem(startMediaItem, 0L)
                 enginePlayer.prepare()
                 enginePlayer.play()
@@ -988,6 +990,7 @@ class PlaybackDispatchStateHolder @Inject constructor(
     }
 
     fun loadAndPlaySong(song: Song) {
+        com.theveloper.pixelplay.data.diagnostics.PlaybackTrace.begin(song.id)
         continuousMixRuntime.stop()
         cancelPendingFullQueuePlayback()
         beginPreparingSong(song)

@@ -452,6 +452,7 @@ abstract class CloudStreamProxy<K : Any>(
                         flush()
                         Timber.tag("StreamingLatency").d("proxy_first_bytes_ms=%d source=head",
                             (System.nanoTime() - requestStartedNanos) / 1_000_000)
+                        com.theveloper.pixelplay.data.diagnostics.PlaybackTrace.mark("first_bytes", "head")
                         position += count
                     }
                     val buffer = ByteArray(64 * 1024)
@@ -484,6 +485,7 @@ abstract class CloudStreamProxy<K : Any>(
                                         flush()
                                         Timber.tag("StreamingLatency").d("proxy_first_bytes_ms=%d source=network",
                                             (System.nanoTime() - requestStartedNanos) / 1_000_000)
+                                        com.theveloper.pixelplay.data.diagnostics.PlaybackTrace.mark("first_bytes", "network")
                                     }
                                     teeBuffer?.let { tee ->
                                         if (position == teeFilled.toLong() && teeFilled < tee.size) {

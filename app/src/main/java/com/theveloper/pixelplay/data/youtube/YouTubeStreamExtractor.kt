@@ -88,6 +88,7 @@ class YouTubeStreamExtractor @Inject constructor(private val innerTube: InnerTub
                 ensureActive()
                 Timber.tag("StreamingLatency").d("manifest_provider=%s manifest_network_ms=%d streams=%d",
                     resolved?.first ?: "none", (System.nanoTime() - started) / 1_000_000, streams.size)
+                com.theveloper.pixelplay.data.diagnostics.PlaybackTrace.mark("manifest", resolved?.first ?: "none")
                 if (streams.isNotEmpty()) synchronized(manifests) { manifests[id] = streams }
                 streams
             } catch (e: CancellationException) {
