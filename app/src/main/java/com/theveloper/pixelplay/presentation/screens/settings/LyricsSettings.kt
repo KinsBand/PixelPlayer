@@ -214,8 +214,8 @@ internal fun LyricsSettingsContent(
 
         SwitchSettingItem(
             settingKey = "lyrics_song_structure",
-            title = "Song structure",
-            subtitle = "Show Intro, Verse, Chorus… under the song title",
+            title = stringResource(R.string.settings_lyrics_song_structure_title),
+            subtitle = stringResource(R.string.settings_lyrics_song_structure_subtitle),
             checked = lyricsDisplayPrefs.showSongStructure,
             onCheckedChange = { enabled ->
                 scope.launch {

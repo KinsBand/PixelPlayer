@@ -215,7 +215,15 @@ fun AccountsScreen(
                         syncingPlaylists = syncingPlaylists,
                         onSyncLibrary = { viewModel.sync() },
                         onSyncPlaylist = { playlistId -> viewModel.syncPlaylist(playlistId) },
-                        onPlaylistClick = { playlist -> openedPlaylist = playlist },
+                        // Straight to the playlist page; the preview dialog only stays as a
+                        // fallback for callers that have no navController.
+                        onPlaylistClick = { playlist ->
+                            if (navController != null) {
+                                navController.navigateSafely(Screen.PlaylistDetail.createRoute(playlist.id))
+                            } else {
+                                openedPlaylist = playlist
+                            }
+                        },
                         onLogout = { viewModel.logout(account.service) }
                     )
                 }

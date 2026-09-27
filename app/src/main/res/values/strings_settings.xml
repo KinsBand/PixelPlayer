@@ -299,8 +299,8 @@
     <string name="settings_hifi_mode_unsupported_subtitle">Not supported on this device (PCM_FLOAT AudioTrack unavailable).</string>
     <string name="settings_persistent_shuffle_title">Persistent Shuffle</string>
     <string name="settings_persistent_shuffle_subtitle">Remember shuffle setting even after closing the app.</string>
-    <string name="settings_show_queue_history_title">Show queue history</string>
-    <string name="settings_show_queue_history_subtitle">Show previously played songs in the queue.</string>
+    <string name="settings_show_queue_history_title">History in queue</string>
+    <string name="settings_show_queue_history_subtitle">Show the History button above the playing song.</string>
 
     <!-- Behavior category -->
     <string name="settings_behavior_gestures_feedback_section">Gestures &amp; Feedback</string>
@@ -771,7 +771,7 @@
     <string name="settings_category_general_subtitle">Language, starting screen, gestures and full screen.</string>
     <string name="settings_category_player_lyrics_title">Player &amp; Lyrics</string>
     <string name="settings_category_player_lyrics_subtitle">Player look, lyrics sources and lyrics display.</string>
-    <string name="settings_category_widgets_island_title">Widgets &amp; Island</string>
+    <string name="settings_category_widgets_island_title">Widgets</string>
     <string name="settings_category_services_title">Accounts &amp; Services</string>
     <string name="settings_category_services_subtitle">Linked accounts and scrobbling.</string>
     <string name="settings_language_section">Language</string>
@@ -820,6 +820,11 @@
     <!-- Liked songs downloads -->
     <string name="settings_downloads_section">Downloads</string>
     <string name="settings_download_liked_title">Download all liked songs</string>
+    <string name="settings_lyrics_song_structure_title">Song structure</string>
+    <string name="settings_lyrics_song_structure_subtitle">Show Intro, Verse, Chorus… under the song title</string>
+    <string name="settings_download_liked_wifi_only_title">Download on Wi-Fi only</string>
+    <string name="settings_download_liked_wifi_only_subtitle">Waits for Wi-Fi and asks before downloading all liked songs</string>
+    <string name="settings_download_liked_waiting_wifi">Waiting for Wi-Fi · tap to cancel</string>
     <string name="settings_download_liked_progress">Downloading %1$d of %2$d</string>
     <string name="settings_download_liked_failed_suffix">" · %1$d failed"</string>
     <string name="settings_download_liked_tap_to_stop">" · tap to stop"</string>

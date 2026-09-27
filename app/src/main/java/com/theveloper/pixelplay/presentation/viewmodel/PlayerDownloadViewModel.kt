@@ -22,6 +22,11 @@ class PlayerDownloadViewModel @Inject constructor(
 
     suspend fun likedSongsToDownloadCount(): Int = coordinator.likedSongsToDownload().size
     suspend fun likedSongsDownloadedCount(): Int = coordinator.likedSongsDownloadedCount()
-    fun downloadAllLiked() = coordinator.downloadAllLiked()
+    fun downloadAllLiked() = coordinator.requestDownloadAllLiked()
     fun cancelBulk() = coordinator.cancelBulk()
+
+    val wifiOnly: StateFlow<Boolean> = coordinator.wifiOnly
+    val waitingForWifi: StateFlow<Boolean> = coordinator.waitingForWifi
+    fun setWifiOnly(enabled: Boolean) = coordinator.setWifiOnly(enabled)
+    fun cancelWaitingForWifi() = coordinator.cancelWaitingForWifi()
 }

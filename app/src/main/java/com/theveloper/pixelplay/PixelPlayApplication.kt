@@ -69,6 +69,9 @@ class PixelPlayApplication : Application(), ImageLoaderFactory, Configuration.Pr
     @Inject
     lateinit var streamCollectionRepository: dagger.Lazy<com.theveloper.pixelplay.data.library.StreamCollectionRepository>
 
+    @Inject
+    lateinit var downloadCoordinator: dagger.Lazy<com.theveloper.pixelplay.data.youtube.DownloadCoordinator>
+
     private val startupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // AÑADE EL COMPANION OBJECT
@@ -151,6 +154,9 @@ class PixelPlayApplication : Application(), ImageLoaderFactory, Configuration.Pr
                 .onFailure { Timber.tag("PixelPlayApp").w(it, "Download indexer failed to start") }
             runCatching { streamCollectionRepository.get().start() }
                 .onFailure { Timber.tag("PixelPlayApp").w(it, "Streamed collection failed to start") }
+            // Wi-Fi-only "download all liked songs": asks when Wi-Fi connects.
+            runCatching { downloadCoordinator.get().start() }
+                .onFailure { Timber.tag("PixelPlayApp").w(it, "Download coordinator failed to start") }
         }
 
         startupScope.launch {

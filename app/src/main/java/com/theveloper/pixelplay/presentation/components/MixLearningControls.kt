@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.HeartBroken
 import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Block
@@ -275,7 +276,7 @@ fun MixFeedbackBottomSheet(
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                painter = painterResource(R.drawable.rounded_heart_broken_24),
+                                imageVector = androidx.compose.material.icons.Icons.Rounded.HeartBroken,
                                 contentDescription = "Exclude from this mix and skip",
                                 modifier = Modifier.size(44.dp)
                             )

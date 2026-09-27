@@ -29,6 +29,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -39,6 +42,7 @@ import timber.log.Timber
 
 private const val CAST_LOG_TAG = "PlayerCastTransfer"
 private const val SONG_ID_QUERY_CHUNK_SIZE = 900
+private const val CATALOG_MATCH_PARALLELISM = 4
 private val LOCAL_PLAYBACK_SCHEMES = setOf("content", "file", "android.resource")
 
 /**
@@ -497,32 +501,49 @@ class PlaybackDispatchStateHolder @Inject constructor(
             emptyList()
         }
         val hydratedById = hydratedSongs.associateBy { it.id }
-        return songs.mapNotNull { original ->
-            val candidate = hydratedById[original.id] ?: original
-            if (com.theveloper.pixelplay.data.accounts.CatalogTracks.isCatalogUri(candidate.contentUriString)) {
-                val spotifyId = com.theveloper.pixelplay.data.accounts.CatalogTracks.matchKey(candidate.id)
-                val ytId = candidate.youtubeId ?: spotifyToYouTubeResolver.resolveSpotifyTrackToVideoId(
-                    spotifyId = spotifyId,
-                    title = candidate.title,
-                    artistName = candidate.artist,
-                    durationMs = candidate.duration.toInt(),
-                    isrc = candidate.creditsAndRelease.isrc
-                )
-                if (ytId != null) {
-                    candidate.copy(
-                        youtubeId = ytId,
-                        contentUriString = "youtube://$ytId"
-                    )
-                } else {
-                    candidate
-                }
-            } else if (candidate.contentUriString.isNotBlank()) {
-                candidate
-            } else {
-                null
-            }
+        // Catalog songs (Deezer / Apple Music / Spotify) each need a YouTube match. Matching them
+        // one after another made a tap on e.g. "Fans also like" wait for every song in the list
+        // before anything played; match a few at a time instead (order is kept).
+        val candidates = songs.map { hydratedById[it.id] ?: it }
+        val matchGate = kotlinx.coroutines.sync.Semaphore(CATALOG_MATCH_PARALLELISM)
+        val matched = kotlinx.coroutines.coroutineScope {
+            candidates.withIndex()
+                .filter { (_, song) -> song.needsCatalogMatch() }
+                .map { (index, song) -> async { index to matchGate.withPermit { hydrateOne(song) } } }
+                .awaitAll()
+                .toMap()
+        }
+        return candidates.mapIndexedNotNull { index, song ->
+            if (index in matched) matched[index] else hydrateOne(song)
         }
     }
+
+    private fun Song.needsCatalogMatch(): Boolean =
+        youtubeId == null && com.theveloper.pixelplay.data.accounts.CatalogTracks.isCatalogUri(contentUriString)
+
+    private suspend fun hydrateOne(candidate: Song): Song? =
+        if (com.theveloper.pixelplay.data.accounts.CatalogTracks.isCatalogUri(candidate.contentUriString)) {
+            val spotifyId = com.theveloper.pixelplay.data.accounts.CatalogTracks.matchKey(candidate.id)
+            val ytId = candidate.youtubeId ?: spotifyToYouTubeResolver.resolveSpotifyTrackToVideoId(
+                spotifyId = spotifyId,
+                title = candidate.title,
+                artistName = candidate.artist,
+                durationMs = candidate.duration.toInt(),
+                isrc = candidate.creditsAndRelease.isrc
+            )
+            if (ytId != null) {
+                candidate.copy(
+                    youtubeId = ytId,
+                    contentUriString = "youtube://$ytId"
+                )
+            } else {
+                candidate
+            }
+        } else if (candidate.contentUriString.isNotBlank()) {
+            candidate
+        } else {
+            null
+        }
 
     fun playSongs(songsToPlay: List<Song>, startSong: Song, queueName: String = "None", playlistId: String? = null) {
         cancelPendingFullQueuePlayback()

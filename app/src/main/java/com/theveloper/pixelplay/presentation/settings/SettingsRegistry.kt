@@ -158,36 +158,8 @@ object SettingsRegistry {
             descriptionRes = R.string.settings_carousel_style_subtitle,
             keywords = listOf("carousel", "album", "peek", "carousel style")
         ),
-        SettingEntry(
-            key = "collage_pattern",
-            categoryId = "appearance",
-            titleRes = R.string.settings_collage_pattern_title,
-            descriptionRes = R.string.settings_collage_pattern_subtitle,
-            keywords = listOf("collage", "pattern", "mix", "shape")
-        ),
-        SettingEntry(
-            key = "auto_rotate_patterns",
-            categoryId = "appearance",
-            titleRes = R.string.settings_auto_rotate_patterns_title,
-            descriptionRes = R.string.settings_auto_rotate_patterns_subtitle,
-            keywords = listOf("rotate", "collage", "patterns", "cycle")
-        ),
 
-        // General (gestures and haptics)
-        SettingEntry(
-            key = "folder_back_gesture",
-            categoryId = "general",
-            titleRes = R.string.settings_folder_back_gesture_title,
-            descriptionRes = R.string.settings_folder_back_gesture_subtitle,
-            keywords = listOf("back gesture", "folders", "navigate", "stack")
-        ),
-        SettingEntry(
-            key = "tap_bg_closes",
-            categoryId = "general",
-            titleRes = R.string.settings_tap_bg_closes_title,
-            descriptionRes = R.string.settings_tap_bg_closes_subtitle,
-            keywords = listOf("tap close", "background", "dismiss")
-        ),
+        // General (haptics)
         SettingEntry(
             key = "haptic_feedback",
             categoryId = "general",
@@ -661,14 +633,14 @@ object SettingsRegistry {
         ),
         SettingEntry(
             key = "camera_cutout_island_overlay",
-            categoryId = "widgets",
+            categoryId = "appearance",
             titleRes = R.string.settings_camera_island_title,
             descriptionRes = R.string.settings_camera_island_subtitle,
             keywords = listOf("island", "dynamic island", "camera", "cutout", "punch hole", "overlay", "hud", "floating lyrics")
         ),
         SettingEntry(
             key = "camera_cutout_island_tap_access",
-            categoryId = "widgets",
+            categoryId = "appearance",
             titleRes = R.string.settings_camera_island_tap_title,
             keywords = listOf("island", "tap", "accessibility", "camera hole", "touch")
         ),
@@ -677,6 +649,20 @@ object SettingsRegistry {
             categoryId = "library",
             titleRes = R.string.settings_download_liked_title,
             keywords = listOf("download", "offline", "liked", "favorites", "save", "all songs")
+        ),
+        SettingEntry(
+            key = "lyrics_song_structure",
+            categoryId = "lyrics",
+            titleRes = R.string.settings_lyrics_song_structure_title,
+            descriptionRes = R.string.settings_lyrics_song_structure_subtitle,
+            keywords = listOf("structure", "verse", "chorus", "intro", "sections")
+        ),
+        SettingEntry(
+            key = "liked_downloads_wifi_only",
+            categoryId = "library",
+            titleRes = R.string.settings_download_liked_wifi_only_title,
+            descriptionRes = R.string.settings_download_liked_wifi_only_subtitle,
+            keywords = listOf("wifi", "wi-fi", "mobile data", "download", "liked")
         )
     )
 

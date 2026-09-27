@@ -836,8 +836,9 @@ class MainActivity : ComponentActivity() {
             onPartialTranscript = { playerViewModel.updateSearchQuery(it) },
             onFinalTranscript = { transcript ->
                 val cleaned = voiceSearchStateHolder.cleanSpokenQuery(transcript)
+                // Dictation is text only: it fills the search bar. The song card (cover, live
+                // lyrics, like, queue) is reserved for Hum & Sing and Listen matches.
                 playerViewModel.updateSearchQuery(cleaned.ifBlank { transcript })
-                voiceSearchStateHolder.onSpokenQuery(transcript)
             }
         )
         // The transcript is typed into the Search tab's search bar, so opening voice search

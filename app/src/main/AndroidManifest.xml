@@ -179,6 +179,10 @@
             android:resource="@xml/automotive_app_desc" />
 
         <receiver
+            android:name=".data.youtube.DownloadActionReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".ui.glancewidget.PixelPlayGlanceWidgetReceiver"
             android:exported="false">
             <intent-filter>

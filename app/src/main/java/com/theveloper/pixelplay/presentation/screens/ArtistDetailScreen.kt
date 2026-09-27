@@ -330,7 +330,22 @@ fun ArtistDetailScreen(
     }
 
     fun openArtist(related: RelatedArtistItem) {
-        navController.navigateSafely(Screen.ArtistDetail.createRouteForName(related.name))
+        // Artist → artist must stack a new page: single-top would reuse this destination
+        // (same route pattern) and the tap would appear to do nothing.
+        navController.navigateSafely(Screen.ArtistDetail.createRouteForName(related.name)) { launchSingleTop = false }
+    }
+
+    /** Opens a "Fans also like" playlist as a playlist page (it isn't saved, so it's transient). */
+    fun openArtistPlaylist(item: ArtistPlaylistItem) {
+        if (item.songs.isEmpty()) return
+        val playlist = com.theveloper.pixelplay.data.model.Playlist(
+            id = "${PlaylistViewModel.GENERATED_MIX_PREFIX}${item.id}",
+            name = item.title,
+            songIds = item.songs.map { it.id },
+            coverImageUri = item.coverArtUrl
+        )
+        PlaylistViewModel.registerTransientPlaylist(playlist, item.songs)
+        navController.navigateSafely(Screen.PlaylistDetail.createRoute(playlist.id))
     }
 
     fun shuffleArtist() {
@@ -709,18 +724,7 @@ fun ArtistDetailScreen(
                                                 )
                                             }
                                             FansFilterType.PLAYLISTS -> items(uiState.fansAlsoLikePlaylists, key = { it.id }) { playlistItem ->
-                                                ArtistPlaylistCard(
-                                                    item = playlistItem,
-                                                    onClick = {
-                                                        if (playlistItem.songs.isNotEmpty()) {
-                                                            playerViewModel.showAndPlaySong(
-                                                                playlistItem.songs.first(),
-                                                                playlistItem.songs.take(QUEUE_WINDOW),
-                                                                playlistItem.title
-                                                            )
-                                                        }
-                                                    }
-                                                )
+                                                ArtistPlaylistCard(item = playlistItem, onClick = { openArtistPlaylist(playlistItem) })
                                             }
                                         }
                                     }
@@ -814,6 +818,7 @@ fun ArtistDetailScreen(
                                 onReleaseClick = ::openRelease,
                                 onVideoClick = ::playVideo,
                                 onArtistClick = ::openArtist,
+                                onPlaylistClick = ::openArtistPlaylist,
                                 onPlaySongs = { song, list, label -> playerViewModel.showAndPlaySong(song, list.take(QUEUE_WINDOW), label) }
                             )
                         }
@@ -1024,6 +1029,7 @@ private fun ArtistSeeAllPage(
     onReleaseClick: (ArtistAlbumItem) -> Unit,
     onVideoClick: (TrackVideo) -> Unit,
     onArtistClick: (RelatedArtistItem) -> Unit,
+    onPlaylistClick: (ArtistPlaylistItem) -> Unit,
     onPlaySongs: (Song, List<Song>, String) -> Unit
 ) {
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
@@ -1148,12 +1154,7 @@ private fun ArtistSeeAllPage(
                                 RelatedSongCard(song = song, onClick = { onPlaySongs(song, uiState.fansAlsoLikeSongs, "Fans also like") })
                             }
                             FansFilterType.PLAYLISTS -> gridItems(uiState.fansAlsoLikePlaylists, key = { it.id }) { playlist ->
-                                ArtistPlaylistCard(
-                                    item = playlist,
-                                    onClick = {
-                                        playlist.songs.firstOrNull()?.let { onPlaySongs(it, playlist.songs, playlist.title) }
-                                    }
-                                )
+                                ArtistPlaylistCard(item = playlist, onClick = { onPlaylistClick(playlist) })
                             }
                         }
                     }

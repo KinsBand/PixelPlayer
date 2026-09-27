@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -24,6 +25,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.youtube.DownloadCoordinator
 import com.theveloper.pixelplay.presentation.screens.SettingsItem
+import com.theveloper.pixelplay.presentation.screens.SwitchSettingItem
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerDownloadViewModel
 import kotlinx.coroutines.launch
 
@@ -38,6 +40,8 @@ internal fun LikedSongsDownloadSection(
 ) {
     val scope = rememberCoroutineScope()
     val bulk by viewModel.bulkState.collectAsStateWithLifecycle()
+    val wifiOnly by viewModel.wifiOnly.collectAsStateWithLifecycle()
+    val waitingForWifi by viewModel.waitingForWifi.collectAsStateWithLifecycle()
     var pendingCount by remember { mutableIntStateOf(-1) }
     var downloadedCount by remember { mutableIntStateOf(0) }
     var confirm by remember { mutableStateOf<ConfirmRequest?>(null) }
@@ -56,6 +60,7 @@ internal fun LikedSongsDownloadSection(
                 (if (it.failed > 0) stringResource(R.string.settings_download_liked_failed_suffix, it.failed) else "") +
                 stringResource(R.string.settings_download_liked_tap_to_stop)
         }
+        waitingForWifi -> stringResource(R.string.settings_download_liked_waiting_wifi)
         pendingCount < 0 -> stringResource(R.string.settings_download_liked_checking)
         pendingCount == 0 && downloadedCount > 0 ->
             stringResource(R.string.settings_download_liked_all_done, downloadedCount)
@@ -81,6 +86,10 @@ internal fun LikedSongsDownloadSection(
                 }
             },
             onClick = {
+                if (waitingForWifi && !running) {
+                    viewModel.cancelWaitingForWifi()
+                    return@SettingsItem
+                }
                 if (running) {
                     confirm = ConfirmRequest(
                         title = context.getString(R.string.settings_download_liked_stop_title),
@@ -106,6 +115,14 @@ internal fun LikedSongsDownloadSection(
                     )
                 }
             }
+        )
+        SwitchSettingItem(
+            settingKey = "liked_downloads_wifi_only",
+            title = stringResource(R.string.settings_download_liked_wifi_only_title),
+            subtitle = stringResource(R.string.settings_download_liked_wifi_only_subtitle),
+            checked = wifiOnly,
+            onCheckedChange = { viewModel.setWifiOnly(it) },
+            leadingIcon = { Icon(Icons.Rounded.Wifi, null, tint = MaterialTheme.colorScheme.secondary) }
         )
     }
 

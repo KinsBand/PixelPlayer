@@ -210,6 +210,9 @@ class UserPreferencesRepository @Inject constructor(
             val TELEGRAM_TOPIC_DISPLAY_MODE = stringPreferencesKey("telegram_topic_display_mode")
             val FOLDERS_SOURCE = stringPreferencesKey("folders_source")
             val FOLDER_BACK_GESTURE_NAVIGATION = booleanPreferencesKey("folder_back_gesture_navigation")
+            val LIKED_DOWNLOADS_WIFI_ONLY = booleanPreferencesKey("liked_downloads_wifi_only")
+            /** "Download all liked songs" was approved but is waiting for Wi-Fi. */
+            val LIKED_DOWNLOADS_WAITING_FOR_WIFI = booleanPreferencesKey("liked_downloads_waiting_for_wifi")
             val IS_GENRE_GRID_VIEW = booleanPreferencesKey("is_genre_grid_view")
             val IS_ALBUMS_LIST_VIEW = booleanPreferencesKey("is_albums_list_view")
         }
@@ -986,11 +989,26 @@ class UserPreferencesRepository @Inject constructor(
         dataStore.edit { it[PreferencesKeys.LibraryUi.FOLDERS_SOURCE] = source.storageKey }
     }
 
-    val folderBackGestureNavigationFlow: Flow<Boolean> =
-        pref { it[PreferencesKeys.LibraryUi.FOLDER_BACK_GESTURE_NAVIGATION] ?: true }
+    /** Back steps out of a folder before leaving the tab. Always on (the toggle was removed). */
+    val folderBackGestureNavigationFlow: Flow<Boolean> = kotlinx.coroutines.flow.flowOf(true)
 
     suspend fun setFolderBackGestureNavigation(enabled: Boolean) {
         dataStore.edit { it[PreferencesKeys.LibraryUi.FOLDER_BACK_GESTURE_NAVIGATION] = enabled }
+    }
+
+    /** Bulk "download all liked songs" only runs on an unmetered (Wi-Fi) connection. */
+    val likedDownloadsWifiOnlyFlow: Flow<Boolean> =
+        pref { it[PreferencesKeys.LibraryUi.LIKED_DOWNLOADS_WIFI_ONLY] ?: false }
+
+    suspend fun setLikedDownloadsWifiOnly(enabled: Boolean) {
+        dataStore.edit { it[PreferencesKeys.LibraryUi.LIKED_DOWNLOADS_WIFI_ONLY] = enabled }
+    }
+
+    val likedDownloadsWaitingForWifiFlow: Flow<Boolean> =
+        pref { it[PreferencesKeys.LibraryUi.LIKED_DOWNLOADS_WAITING_FOR_WIFI] ?: false }
+
+    suspend fun setLikedDownloadsWaitingForWifi(waiting: Boolean) {
+        dataStore.edit { it[PreferencesKeys.LibraryUi.LIKED_DOWNLOADS_WAITING_FOR_WIFI] = waiting }
     }
 
     val isGenreGridViewFlow: Flow<Boolean> =
@@ -1418,9 +1436,8 @@ class UserPreferencesRepository @Inject constructor(
         dataStore.edit { it[PreferencesKeys.Developer.ALBUM_ART_CACHE_LIMIT_MB] = limitMb.coerceIn(50, 1500) }
     }
 
-    /** Whether tapping the player sheet background closes it. Defaults to false to avoid accidental dismissal. */
-    val tapBackgroundClosesPlayerFlow: Flow<Boolean> =
-        pref { it[PreferencesKeys.Developer.TAP_BACKGROUND_CLOSES_PLAYER] ?: false }
+    /** Tapping the player sheet background never closes it (the option was removed). */
+    val tapBackgroundClosesPlayerFlow: Flow<Boolean> = kotlinx.coroutines.flow.flowOf(false)
 
     suspend fun setTapBackgroundClosesPlayer(enabled: Boolean) {
         dataStore.edit { it[PreferencesKeys.Developer.TAP_BACKGROUND_CLOSES_PLAYER] = enabled }
