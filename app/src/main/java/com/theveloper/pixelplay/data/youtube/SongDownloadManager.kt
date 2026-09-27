@@ -40,6 +40,8 @@ sealed class DownloadProgress {
     data object Idle : DownloadProgress()
     data class Resolving(val songId: String) : DownloadProgress()
     data class Downloading(val songId: String, val percent: Int) : DownloadProgress()
+    /** Paused by the user; the bytes so far are kept and [SongDownloadManager] resumes from them. */
+    data class Paused(val songId: String, val percent: Int) : DownloadProgress()
     data class Tagging(val songId: String) : DownloadProgress()
     data class Scanning(val songId: String) : DownloadProgress()
     data class Completed(val songId: String, val filePath: String) : DownloadProgress()
@@ -93,13 +95,50 @@ class SongDownloadManager @Inject constructor(
      * Downloads an online song to local storage.
      * Pipeline: resolve stream URL -> download -> tag metadata -> scan to MediaStore
      */
-    suspend fun downloadSong(song: Song): Result<File> =
+    suspend fun downloadSong(song: Song, quality: DownloadQuality? = null): Result<File> =
         downloadLocks[(song.id.hashCode() and Int.MAX_VALUE) % downloadLocks.size].withLock {
-            downloadLocked(song)
+            downloadLocked(song, quality)
         }
 
+    /** Recent download speed (bytes/s) measured from real transfers, or 0 before the first one. */
+    @Volatile
+    private var measuredBytesPerSecond: Long = 0L
+
+    /** Rough seconds to download [bytes] now: measured speed, else a guess from the network type. */
+    fun estimateSeconds(bytes: Long): Long {
+        val speed = measuredBytesPerSecond.takeIf { it > 0 } ?: run {
+            val cm = context.getSystemService(android.net.ConnectivityManager::class.java)
+            val caps = cm?.getNetworkCapabilities(cm.activeNetwork)
+            val kbps = caps?.linkDownstreamBandwidthKbps?.takeIf { it > 0 } ?: 4_000
+            // Link bandwidth is optimistic; assume about a third of it for a single transfer.
+            kbps * 1000L / 8 / 3
+        }
+        return (bytes / speed.coerceAtLeast(1)).coerceAtLeast(1)
+    }
+
+    /** High / Medium / Low for [song] with exact (or estimated) sizes, for the download menu. */
+    suspend fun downloadOptions(song: Song): List<DownloadOption> = withContext(Dispatchers.IO) {
+        val saved = cloudSongDao.getById(song.id)
+        val videoId = resolveVideoId(song, saved) ?: return@withContext emptyList()
+        val manifest = youTubeStreamExtractor.streamManifest(videoId)
+        DownloadQuality.entries.mapNotNull { quality ->
+            val stream = quality.pick(manifest) ?: return@mapNotNull null
+            val size = stream.contentLength.takeIf { it > 0 }
+                ?: (stream.bitrate.toLong() / 8 * (song.duration / 1000).coerceAtLeast(1))
+            DownloadOption(quality, stream.codecLabel(), stream.bitrate / 1000, size)
+        }
+    }
+
+    private suspend fun resolveVideoId(song: Song, saved: com.theveloper.pixelplay.data.database.CloudSongEntity?): String? =
+        (song.youtubeId ?: saved?.youtubeId ?: if (com.theveloper.pixelplay.data.accounts.CatalogTracks.isCatalogSongId(song.id)) {
+            spotifyResolver.resolveSpotifyTrackToVideoId(
+                com.theveloper.pixelplay.data.accounts.CatalogTracks.matchKey(song.id), song.title, song.artist,
+                song.duration.coerceIn(0, Int.MAX_VALUE.toLong()).toInt(), song.creditsAndRelease.isrc
+            )
+        } else song.id.removePrefix("yt_"))?.removePrefix("yt_")
+
     // Background-priority threads: a download must never steal CPU from audio decoding/rendering.
-    private suspend fun downloadLocked(song: Song): Result<File> = withContext(com.theveloper.pixelplay.data.stream.PlaybackBandwidthGate.downloadDispatcher) {
+    private suspend fun downloadLocked(song: Song, quality: DownloadQuality?): Result<File> = withContext(com.theveloper.pixelplay.data.stream.PlaybackBandwidthGate.downloadDispatcher) {
         val songId = song.id
         var stagingFile: File? = null
         try {
@@ -113,12 +152,7 @@ class SongDownloadManager @Inject constructor(
             }
             // Step 1: Resolve stream URL
             updateProgress(songId, DownloadProgress.Resolving(songId))
-            val videoId = (song.youtubeId ?: saved?.youtubeId ?: if (com.theveloper.pixelplay.data.accounts.CatalogTracks.isCatalogSongId(song.id)) {
-                spotifyResolver.resolveSpotifyTrackToVideoId(
-                    com.theveloper.pixelplay.data.accounts.CatalogTracks.matchKey(song.id), song.title, song.artist,
-                    song.duration.coerceIn(0, Int.MAX_VALUE.toLong()).toInt(), song.creditsAndRelease.isrc
-                )
-            } else song.id.removePrefix("yt_"))?.removePrefix("yt_")
+            val videoId = resolveVideoId(song, saved)
                 ?: throw java.io.IOException("No matching audio source")
 
             // Prefer the MP4/AAC rendition because jaudiotagger can tag it; fall back to the
@@ -134,8 +168,9 @@ class SongDownloadManager @Inject constructor(
                 youTubeStreamExtractor.invalidate(videoId)
                 manifest = youTubeStreamExtractor.streamManifest(videoId, forceRefresh = true)
             }
-            val stream: YouTubeAudioStream =
-                YouTubeAudioStream.select(manifest.filter { it.container == "mp4" }, AudioQualityPreset.AUTO)
+            // A quality picked in the download menu wins; otherwise the default rule below.
+            val stream: YouTubeAudioStream = quality?.pick(manifest)
+                ?: YouTubeAudioStream.select(manifest.filter { it.container == "mp4" }, AudioQualityPreset.AUTO)
                     ?: YouTubeAudioStream.select(manifest, AudioQualityPreset.AUTO)
                     ?: run {
                         val error = "No downloadable audio stream is available"
@@ -146,12 +181,13 @@ class SongDownloadManager @Inject constructor(
 
             // Step 2: Download audio file
             updateProgress(songId, DownloadProgress.Downloading(songId, 0))
-            val sourceKey = java.security.MessageDigest.getInstance("SHA-256")
-                .digest(songId.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }.take(16)
+            val sourceKey = sourceKeyFor(songId)
             val fileName = "${sanitizeFileName(videoId)}-$sourceKey.${stream.fileExtension}"
             val outputFile = File(downloadDir, fileName)
-            // Same filesystem, genuine extension for the tagger, invisible to the library.
-            val partial = File.createTempFile(".download-", ".${stream.fileExtension}", downloadDir)
+            // Same filesystem, genuine extension for the tagger, invisible to the library. The name
+            // is fixed per song + rendition so a paused download resumes from the same bytes.
+            val partial = partialFile(sourceKey, renditionKey, stream.fileExtension)
+            if (!partial.exists()) partial.createNewFile()
             stagingFile = partial
 
             // Resumable: a failed attempt keeps the bytes already written and continues from
@@ -295,7 +331,14 @@ class SongDownloadManager @Inject constructor(
             Result.success(outputFile)
 
         } catch (e: CancellationException) {
-            _downloadProgressMap.update { it - songId }
+            if (pauseRequested.remove(songId)) {
+                // Paused: keep the partial file so resuming continues from here.
+                val percent = (_downloadProgressMap.value[songId] as? DownloadProgress.Downloading)?.percent ?: 0
+                stagingFile = null
+                _downloadProgressMap.update { it + (songId to DownloadProgress.Paused(songId, percent)) }
+            } else {
+                _downloadProgressMap.update { it - songId }
+            }
             throw e
         } catch (e: Exception) {
             Timber.tag(TAG).e(e, "Download failed for song: $songId")
@@ -322,6 +365,8 @@ class SongDownloadManager @Inject constructor(
             position = 0L
         }
         var lastEmittedPercent = -1
+        val startPosition = position
+        val startedAt = android.os.SystemClock.elapsedRealtime()
         FileOutputStream(outputFile, true).use { output ->
             val buffer = ByteArray(64 * 1024)
             while (total == null || position < total) {
@@ -370,6 +415,13 @@ class SongDownloadManager @Inject constructor(
             output.fd.sync()
         }
         if (total != null) DownloadIntegrity.requireComplete(outputFile.length(), total)
+        val elapsedMs = android.os.SystemClock.elapsedRealtime() - startedAt
+        val transferred = position - startPosition
+        // Only transfers big enough to say something about the connection.
+        if (elapsedMs > 500 && transferred > 256 * 1024) {
+            val speed = transferred * 1000 / elapsedMs
+            measuredBytesPerSecond = if (measuredBytesPerSecond == 0L) speed else (measuredBytesPerSecond * 2 + speed) / 3
+        }
     }
 
     private suspend fun readArtwork(input: java.io.InputStream): ByteArray {
@@ -472,6 +524,29 @@ class SongDownloadManager @Inject constructor(
             throw java.io.IOException("Audio metadata verification failed")
         }
     }
+
+    /** Song ids whose next cancellation is a pause (keep bytes) rather than a cancel. */
+    private val pauseRequested: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /** Call right before cancelling [songId]'s job to pause instead of cancel. */
+    fun requestPause(songId: String) {
+        pauseRequested += songId
+    }
+
+    /** Forget a paused/cancelled download: drop its progress and any bytes kept for resuming. */
+    fun discard(songId: String) {
+        pauseRequested -= songId
+        _downloadProgressMap.update { it - songId }
+        val key = sourceKeyFor(songId)
+        downloadDir.listFiles { file -> file.name.startsWith(".partial-$key-") }?.forEach { it.delete() }
+    }
+
+    private fun sourceKeyFor(songId: String): String =
+        java.security.MessageDigest.getInstance("SHA-256")
+            .digest(songId.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }.take(16)
+
+    private fun partialFile(sourceKey: String, renditionKey: String, extension: String): File =
+        File(downloadDir, ".partial-$sourceKey-${renditionKey.hashCode().toUInt().toString(16)}.$extension")
 
     fun resetProgress() {
         _downloadProgressMap.value = emptyMap()

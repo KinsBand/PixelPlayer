@@ -121,7 +121,8 @@ fun AccountsScreen(
 
     val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val minTopBarHeight = 64.dp + statusBarHeight
-    val maxTopBarHeight = 180.dp
+    // Condensed from the start: back button and title on one row with the bar colour.
+    val maxTopBarHeight = minTopBarHeight
     val minTopBarHeightPx = with(density) { minTopBarHeight.toPx() }
     val maxTopBarHeightPx = with(density) { maxTopBarHeight.toPx() }
     val topBarHeight = remember { Animatable(maxTopBarHeightPx) }
@@ -131,7 +132,7 @@ fun AccountsScreen(
         collapseFraction =
             1f - (
                 (topBarHeight.value - minTopBarHeightPx) /
-                    (maxTopBarHeightPx - minTopBarHeightPx)
+                    (maxTopBarHeightPx - minTopBarHeightPx).coerceAtLeast(1f)
                 ).coerceIn(0f, 1f)
     }
 
@@ -215,7 +216,15 @@ fun AccountsScreen(
                         syncingPlaylists = syncingPlaylists,
                         onSyncLibrary = { viewModel.sync() },
                         onSyncPlaylist = { playlistId -> viewModel.syncPlaylist(playlistId) },
-                        onPlaylistClick = { playlist -> openedPlaylist = playlist },
+                        // Straight to the playlist page; the preview dialog only stays as a
+                        // fallback for callers that have no navController.
+                        onPlaylistClick = { playlist ->
+                            if (navController != null) {
+                                navController.navigateSafely(Screen.PlaylistDetail.createRoute(playlist.id))
+                            } else {
+                                openedPlaylist = playlist
+                            }
+                        },
                         onLogout = { viewModel.logout(account.service) }
                     )
                 }

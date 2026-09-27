@@ -185,7 +185,8 @@ fun SettingsScreen(
 
     val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val minTopBarHeight = 64.dp + statusBarHeight
-    val maxTopBarHeight = 180.dp
+    // Condensed from the start: back button and title on one row with the bar colour.
+    val maxTopBarHeight = minTopBarHeight
 
     val minTopBarHeightPx = with(density) { minTopBarHeight.toPx() }
     val maxTopBarHeightPx = with(density) { maxTopBarHeight.toPx() }
@@ -251,7 +252,7 @@ fun SettingsScreen(
     val collapseFraction by remember {
         derivedStateOf {
             1f - ((topBarHeight.value - minTopBarHeightPx) /
-                (maxTopBarHeightPx - minTopBarHeightPx)).coerceIn(0f, 1f)
+                (maxTopBarHeightPx - minTopBarHeightPx).coerceAtLeast(1f)).coerceIn(0f, 1f)
         }
     }
 
@@ -400,13 +401,6 @@ fun SettingsScreen(
                 // header is collapsed; this is what people see first.
                 item(key = "search_pill") {
                     SettingsSearchPill(onClick = { isSearchActive = true })
-                }
-
-                item(key = "quick_preferences") {
-                    QuickPreferencesHeroCard(
-                        uiState = uiState,
-                        settingsViewModel = settingsViewModel
-                    )
                 }
 
                 // Ten rows in four groups. Every setting has exactly one home under
@@ -574,253 +568,6 @@ fun SettingsScreen(
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun QuickPreferencesHeroCard(
-    uiState: SettingsUiState,
-    settingsViewModel: SettingsViewModel
-) {
-    val haptic = LocalHapticFeedback.current
-
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 4.dp),
-        shape = AbsoluteSmoothCornerShape(28.dp, 60),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        tonalElevation = 2.dp,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            // Header Row: Icon badge + Title
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Tune,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Column {
-                    Text(
-                        text = stringResource(R.string.settings_quick_actions_title),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-            }
-
-            // Theme Mode: 3-option visual selector
-            val themeModes = listOf(
-                Triple(AppThemeMode.FOLLOW_SYSTEM, stringResource(R.string.settings_theme_follow_system), Icons.Rounded.BrightnessAuto),
-                Triple(AppThemeMode.LIGHT, stringResource(R.string.settings_theme_light), Icons.Rounded.LightMode),
-                Triple(AppThemeMode.DARK, stringResource(R.string.settings_theme_dark), Icons.Rounded.DarkMode)
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                themeModes.forEach { (mode, label, icon) ->
-                    val isSelected = uiState.appThemeMode == mode
-                    val containerColor = if (isSelected) {
-                        MaterialTheme.colorScheme.primaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f)
-                    }
-                    val contentColor = if (isSelected) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    }
-                    val border = if (isSelected) {
-                        BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
-                    } else {
-                        null
-                    }
-
-                    Surface(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(56.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .clickable {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                settingsViewModel.setAppThemeMode(mode)
-                            },
-                        shape = RoundedCornerShape(16.dp),
-                        color = containerColor,
-                        border = border
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(vertical = 6.dp, horizontal = 4.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = icon,
-                                contentDescription = null,
-                                tint = contentColor,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.height(3.dp))
-                            Text(
-                                text = label,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = contentColor,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-            }
-
-            HorizontalDivider(
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
-            )
-
-            // Quick Toggle Tiles (Haptics & Background Playback side-by-side)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                // 1. Haptics Tile
-                QuickToggleTile(
-                    title = stringResource(R.string.settings_haptic_feedback_title),
-                    isEnabled = uiState.hapticsEnabled,
-                    icon = Icons.Rounded.Vibration,
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        settingsViewModel.setHapticsEnabled(!uiState.hapticsEnabled)
-                    },
-                    modifier = Modifier.weight(1f)
-                )
-
-                // 2. Background Playback Tile
-                QuickToggleTile(
-                    title = stringResource(R.string.settings_keep_playing_title),
-                    isEnabled = uiState.keepPlayingInBackground,
-                    icon = Icons.Rounded.PlayCircle,
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        settingsViewModel.setKeepPlayingInBackground(!uiState.keepPlayingInBackground)
-                    },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun QuickToggleTile(
-    title: String,
-    isEnabled: Boolean,
-    icon: ImageVector,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val containerColor = if (isEnabled) {
-        MaterialTheme.colorScheme.secondaryContainer
-    } else {
-        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f)
-    }
-    val contentColor = if (isEnabled) {
-        MaterialTheme.colorScheme.onSecondaryContainer
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    val border = if (isEnabled) {
-        BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f))
-    } else {
-        BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
-    }
-
-    Surface(
-        modifier = modifier
-            .height(78.dp)
-            .clip(RoundedCornerShape(20.dp))
-            .toggleable(
-                value = isEnabled,
-                role = Role.Switch,
-                onValueChange = { onClick() }
-            ),
-        shape = RoundedCornerShape(20.dp),
-        color = containerColor,
-        border = border
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .background(if (isEnabled) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = if (isEnabled) MaterialTheme.colorScheme.primary else contentColor,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-
-                // Small status indicator dot
-                Surface(
-                    shape = CircleShape,
-                    color = if (isEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                    modifier = Modifier.size(8.dp)
-                ) {}
-            }
-
-            Column {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = if (isEnabled) stringResource(R.string.settings_label_on) else stringResource(R.string.settings_label_off),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = contentColor
-                )
             }
         }
     }
@@ -1110,8 +857,6 @@ private fun toggleBindingFor(
     "smooth_corners" -> ToggleBinding(useSmoothCorners) { settingsViewModel.setUseSmoothCorners(it) }
     "disable_blur" -> ToggleBinding(uiState.disableBlurAllOver) { settingsViewModel.setDisableBlurAllOver(it) }
     "show_scrollbar" -> ToggleBinding(uiState.showScrollbar) { settingsViewModel.setShowScrollbar(it) }
-    "folder_back_gesture" -> ToggleBinding(uiState.folderBackGestureNavigation) { settingsViewModel.setFolderBackGestureNavigation(it) }
-    "tap_bg_closes" -> ToggleBinding(uiState.tapBackgroundClosesPlayer) { settingsViewModel.setTapBackgroundClosesPlayer(it) }
     "haptic_feedback" -> ToggleBinding(uiState.hapticsEnabled) { settingsViewModel.setHapticsEnabled(it) }
     "hifi_mode" -> ToggleBinding(uiState.hiFiModeEnabled) { settingsViewModel.setHiFiModeEnabled(it) }
     "replaygain" -> ToggleBinding(uiState.replayGainEnabled) { settingsViewModel.setReplayGainEnabled(it) }

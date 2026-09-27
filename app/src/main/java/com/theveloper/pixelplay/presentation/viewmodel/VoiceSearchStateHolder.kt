@@ -144,16 +144,6 @@ class VoiceSearchStateHolder @Inject constructor(
         }
     }
 
-    /**
-     * Handles a transcript spoken into the sheet ("play Blinding Lights by The Weeknd").
-     * Strips the command words, splits "title by artist", and resolves it like any other match.
-     */
-    fun onSpokenQuery(transcript: String) {
-        val (title, artist) = parseSpokenQuery(transcript)
-        if (title.isBlank()) return
-        resolveAndShowSong(title, artist)
-    }
-
     /** The spoken request with command words removed, e.g. "play X by Y please" -> "X Y". */
     fun cleanSpokenQuery(transcript: String): String {
         val (title, artist) = parseSpokenQuery(transcript)

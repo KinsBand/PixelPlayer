@@ -40,7 +40,7 @@ import com.theveloper.pixelplay.presentation.screens.ArtistSettingsScreen
 import com.theveloper.pixelplay.presentation.screens.DailyMixScreen
 import com.theveloper.pixelplay.presentation.screens.EditTransitionScreen
 import com.theveloper.pixelplay.presentation.screens.EasterEggScreen
-import com.theveloper.pixelplay.presentation.screens.ExperimentalSettingsScreen
+import com.theveloper.pixelplay.presentation.model.SettingsCategory
 import com.theveloper.pixelplay.presentation.screens.GenreDetailScreen
 import com.theveloper.pixelplay.presentation.screens.HomeScreen
 import com.theveloper.pixelplay.presentation.screens.LibraryScreen
@@ -271,11 +271,11 @@ fun AppNavigation(
             composable(
                 Screen.Experimental.route,
             ) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    ExperimentalSettingsScreen(
-                        navController = navController,
-                        playerViewModel = playerViewModel,
-                        onNavigationIconClick = { navController.popBackStack() }
+                // The Experimental screen was folded into Player & Lyrics; old links land there.
+                LaunchedEffect(Unit) {
+                    navController.navigateSafelyReplacing(
+                        route = Screen.SettingsCategory.createRoute(SettingsCategory.LYRICS.id),
+                        patternToPop = Screen.Experimental.route
                     )
                 }
             }

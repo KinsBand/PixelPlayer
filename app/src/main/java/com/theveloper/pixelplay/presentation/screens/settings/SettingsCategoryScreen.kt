@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.gestures.animateScrollBy
@@ -139,16 +141,16 @@ fun SettingsCategoryScreen(
     val lazyListState = rememberLazyListState()
     
     val categoryTitle = stringResource(category.titleRes)
-    val isLongTitle = categoryTitle.length > 13
     
     val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val minTopBarHeight = 64.dp + statusBarHeight
-    val maxTopBarHeight = if (isLongTitle) 200.dp else 180.dp //for 2 lines use 220 and make text use \n
+    // Condensed from the start: back button and title on one row with the bar colour.
+    val maxTopBarHeight = minTopBarHeight
 
     val minTopBarHeightPx = with(density) { minTopBarHeight.toPx() }
     val maxTopBarHeightPx = with(density) { maxTopBarHeight.toPx() }
     
-    val titleMaxLines = if (isLongTitle) 2 else 1
+    val titleMaxLines = 1
 
     val topBarHeight = remember(maxTopBarHeightPx) { Animatable(maxTopBarHeightPx) }
     // Derived, not written from a LaunchedEffect. The previous version restarted a
@@ -156,7 +158,7 @@ fun SettingsCategoryScreen(
     val collapseFraction by remember {
         derivedStateOf {
             1f - ((topBarHeight.value - minTopBarHeightPx) /
-                (maxTopBarHeightPx - minTopBarHeightPx)).coerceIn(0f, 1f)
+                (maxTopBarHeightPx - minTopBarHeightPx).coerceAtLeast(1f)).coerceIn(0f, 1f)
         }
     }
 
@@ -221,6 +223,48 @@ fun SettingsCategoryScreen(
                 }
             }
         }
+    }
+
+    // Widgets: the live preview and the widget picker stay put; only the options scroll.
+    if (category == SettingsCategory.WIDGETS) {
+        val widgetsScroll = androidx.compose.foundation.rememberScrollState()
+        val widgetsHighlightScroll: (Float) -> Unit = remember(coroutineScope, widgetsScroll) {
+            { rowWindowY ->
+                coroutineScope.launch { runCatching { widgetsScroll.animateScrollBy(rowWindowY - maxTopBarHeightPx * 3) } }
+            }
+        }
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = minTopBarHeight)
+            ) {
+                WidgetsPinnedHeader(modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp))
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(widgetsScroll)
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = MiniPlayerHeight + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 16.dp)
+                ) {
+                    CompositionLocalProvider(
+                        LocalHighlightSettingKey provides highlight,
+                        LocalHighlightScrollRequest provides widgetsHighlightScroll
+                    ) {
+                        WidgetsSettingsContent()
+                    }
+                }
+            }
+            CollapsibleCommonTopBar(
+                collapseFraction = 1f,
+                headerHeight = minTopBarHeight,
+                onBackClick = onBackClick,
+                title = categoryTitle,
+                maxLines = 1,
+                actions = { WidgetResetAction() }
+            )
+        }
+        return
     }
 
     Box(

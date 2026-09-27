@@ -89,22 +89,6 @@ internal fun GeneralSettingsContent(
 
     SettingsSubsection(title = stringResource(R.string.settings_gestures_haptics_section)) {
         SwitchSettingItem(
-            title = stringResource(R.string.settings_folder_back_gesture_title),
-            subtitle = stringResource(R.string.settings_folder_back_gesture_subtitle),
-            checked = uiState.folderBackGestureNavigation,
-            onCheckedChange = { settingsViewModel.setFolderBackGestureNavigation(it) },
-            leadingIcon = { Icon(painterResource(R.drawable.rounded_touch_app_24), null, tint = MaterialTheme.colorScheme.secondary) },
-            settingKey = "folder_back_gesture"
-        )
-        SwitchSettingItem(
-            title = stringResource(R.string.settings_tap_bg_closes_title),
-            subtitle = stringResource(R.string.settings_tap_bg_closes_subtitle),
-            checked = uiState.tapBackgroundClosesPlayer,
-            onCheckedChange = { settingsViewModel.setTapBackgroundClosesPlayer(it) },
-            leadingIcon = { Icon(painterResource(R.drawable.rounded_touch_app_24), null, tint = MaterialTheme.colorScheme.secondary) },
-            settingKey = "tap_bg_closes"
-        )
-        SwitchSettingItem(
             title = stringResource(R.string.settings_haptic_feedback_title),
             subtitle = stringResource(R.string.settings_haptic_feedback_subtitle),
             checked = uiState.hapticsEnabled,

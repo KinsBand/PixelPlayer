@@ -3,7 +3,9 @@ package com.theveloper.pixelplay.presentation.viewmodel
 import androidx.lifecycle.ViewModel
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.youtube.DownloadCoordinator
+import com.theveloper.pixelplay.data.youtube.DownloadOption
 import com.theveloper.pixelplay.data.youtube.DownloadProgress
+import com.theveloper.pixelplay.data.youtube.DownloadQuality
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.StateFlow
 import javax.inject.Inject
@@ -18,10 +20,19 @@ class PlayerDownloadViewModel @Inject constructor(
     val bulkState: StateFlow<DownloadCoordinator.BulkDownloadState?> = coordinator.bulkState
 
     fun isOnlineSong(song: Song): Boolean = coordinator.isOnlineSong(song)
-    fun download(song: Song) = coordinator.download(song)
+    fun download(song: Song, quality: DownloadQuality? = null) = coordinator.download(song, quality)
+    suspend fun downloadOptions(song: Song): List<DownloadOption> = coordinator.downloadOptions(song)
+    fun estimateSeconds(bytes: Long): Long = coordinator.estimateSeconds(bytes)
+    fun togglePause(songId: String) = coordinator.togglePause(songId)
+    fun cancelDownload(songId: String) = coordinator.cancel(songId)
 
     suspend fun likedSongsToDownloadCount(): Int = coordinator.likedSongsToDownload().size
     suspend fun likedSongsDownloadedCount(): Int = coordinator.likedSongsDownloadedCount()
-    fun downloadAllLiked() = coordinator.downloadAllLiked()
+    fun downloadAllLiked() = coordinator.requestDownloadAllLiked()
     fun cancelBulk() = coordinator.cancelBulk()
+
+    val wifiOnly: StateFlow<Boolean> = coordinator.wifiOnly
+    val waitingForWifi: StateFlow<Boolean> = coordinator.waitingForWifi
+    fun setWifiOnly(enabled: Boolean) = coordinator.setWifiOnly(enabled)
+    fun cancelWaitingForWifi() = coordinator.cancelWaitingForWifi()
 }

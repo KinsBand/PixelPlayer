@@ -7,6 +7,15 @@ import androidx.compose.material.icons.outlined.ClearAll
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material.icons.rounded.Album
+import androidx.compose.material.icons.rounded.HighQuality
+import androidx.compose.material.icons.rounded.SwipeDown
+import androidx.compose.material.icons.rounded.SwipeUp
+import androidx.compose.material.icons.rounded.Opacity
+import androidx.compose.material.icons.rounded.Rectangle
+import androidx.compose.material.icons.rounded.PlayCircleOutline
+import androidx.compose.material.icons.rounded.LinearScale
+import androidx.compose.material.icons.rounded.HourglassBottom
+import androidx.compose.material.icons.rounded.BlurOn
 import androidx.compose.material.icons.rounded.AutoAwesomeMotion
 import androidx.compose.material.icons.rounded.FormatSize
 import androidx.compose.material.icons.rounded.ScreenRotation
@@ -41,8 +50,10 @@ import com.theveloper.pixelplay.presentation.components.rememberLyricsDisplayPre
 import com.theveloper.pixelplay.presentation.components.IMMERSIVE_TIMEOUT_OFF
 import com.theveloper.pixelplay.presentation.components.subcomps.SkillTreeBranch
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import com.theveloper.pixelplay.presentation.navigation.Screen
 import com.theveloper.pixelplay.presentation.screens.SettingsItem
+import com.theveloper.pixelplay.presentation.screens.SliderSettingsItem
 import com.theveloper.pixelplay.presentation.screens.SwitchSettingItem
 import com.theveloper.pixelplay.presentation.screens.ThemeSelectorItem
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
@@ -214,8 +225,8 @@ internal fun LyricsSettingsContent(
 
         SwitchSettingItem(
             settingKey = "lyrics_song_structure",
-            title = "Song structure",
-            subtitle = "Show Intro, Verse, Chorus… under the song title",
+            title = stringResource(R.string.settings_lyrics_song_structure_title),
+            subtitle = stringResource(R.string.settings_lyrics_song_structure_subtitle),
             checked = lyricsDisplayPrefs.showSongStructure,
             onCheckedChange = { enabled ->
                 scope.launch {
@@ -226,30 +237,8 @@ internal fun LyricsSettingsContent(
         )
     }
 
-    // The experimental player screen used to be linked from both here and Developer.
-    // This is now its only entry point, at the bottom of Player & Lyrics.
-    if (navController != null) {
-        SettingsSubsection(
-            title = stringResource(R.string.settings_advanced_section),
-            addBottomSpace = false
-        ) {
-            SettingsItem(
-                settingKey = "lyrics_experimental",
-                title = stringResource(R.string.settings_player_tweaks_title),
-                subtitle = stringResource(R.string.settings_player_tweaks_subtitle),
-                onClick = { navController.navigate(Screen.Experimental.route) },
-                leadingIcon = { Icon(Icons.Rounded.AutoAwesomeMotion, null, tint = MaterialTheme.colorScheme.secondary) },
-                trailingIcon = {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowForwardIos,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(end = 4.dp)
-                    )
-                }
-            )
-        }
-    }
+    // What used to be the separate Experimental screen: short, plain toggles.
+    PlayerTweaksSection(settingsViewModel = settingsViewModel, uiState = uiState)
 
     SettingsConfirmSheet(
         request = if (!showClearLyricsDialog) {
@@ -266,3 +255,130 @@ internal fun LyricsSettingsContent(
     )
 }
 
+/** Lyrics animation, how the full player loads its content, and album art resolution. */
+@Composable
+private fun PlayerTweaksSection(settingsViewModel: SettingsViewModel, uiState: SettingsUiState) {
+    val tweaks = uiState.fullPlayerLoadingTweaks
+    val anyDelay = tweaks.delayAll || tweaks.delayAlbumCarousel || tweaks.delaySongMetadata ||
+        tweaks.delayProgressBar || tweaks.delayControls
+    SettingsSubsection(title = stringResource(R.string.settings_player_tweaks_title), addBottomSpace = false) {
+        SwitchSettingItem(
+            settingKey = "animated_lyrics",
+            title = stringResource(R.string.settings_tweak_animated_lyrics),
+            subtitle = "",
+            checked = uiState.useAnimatedLyrics,
+            onCheckedChange = settingsViewModel::setUseAnimatedLyrics,
+            leadingIcon = { Icon(Icons.Rounded.AutoAwesomeMotion, null, tint = MaterialTheme.colorScheme.secondary) }
+        )
+        if (uiState.useAnimatedLyrics) {
+            SwitchSettingItem(
+                settingKey = "animated_lyrics_blur",
+                title = stringResource(R.string.settings_tweak_lyrics_blur),
+                subtitle = "",
+                checked = uiState.animatedLyricsBlurEnabled,
+                onCheckedChange = settingsViewModel::setAnimatedLyricsBlurEnabled,
+                leadingIcon = { Icon(Icons.Rounded.BlurOn, null, tint = MaterialTheme.colorScheme.secondary) }
+            )
+            if (uiState.animatedLyricsBlurEnabled) {
+                SliderSettingsItem(
+                    label = stringResource(R.string.settings_tweak_blur_strength),
+                    value = uiState.animatedLyricsBlurStrength,
+                    valueRange = 0.1f..2.0f,
+                    steps = 10,
+                    onValueChange = settingsViewModel::setAnimatedLyricsBlurStrength,
+                    valueText = { "%.1fx".format(it) },
+                    settingKey = "animated_lyrics_blur_strength"
+                )
+            }
+        }
+        SwitchSettingItem(
+            settingKey = "player_load_after_open",
+            title = stringResource(R.string.settings_tweak_load_after_open),
+            subtitle = "",
+            checked = tweaks.delayAll,
+            onCheckedChange = settingsViewModel::setDelayAllFullPlayerContent,
+            leadingIcon = { Icon(Icons.Rounded.HourglassBottom, null, tint = MaterialTheme.colorScheme.secondary) }
+        )
+        if (!tweaks.delayAll) {
+            SwitchSettingItem(
+                title = "Load album art later", subtitle = "", checked = tweaks.delayAlbumCarousel,
+                onCheckedChange = settingsViewModel::setDelayAlbumCarousel,
+                leadingIcon = { Icon(Icons.Rounded.Album, null, tint = MaterialTheme.colorScheme.secondary) }
+            )
+            SwitchSettingItem(
+                title = "Load song info later", subtitle = "", checked = tweaks.delaySongMetadata,
+                onCheckedChange = settingsViewModel::setDelaySongMetadata,
+                leadingIcon = { Icon(Icons.Rounded.TextFields, null, tint = MaterialTheme.colorScheme.secondary) }
+            )
+            SwitchSettingItem(
+                title = "Load progress bar later", subtitle = "", checked = tweaks.delayProgressBar,
+                onCheckedChange = settingsViewModel::setDelayProgressBar,
+                leadingIcon = { Icon(Icons.Rounded.LinearScale, null, tint = MaterialTheme.colorScheme.secondary) }
+            )
+            SwitchSettingItem(
+                title = "Load controls later", subtitle = "", checked = tweaks.delayControls,
+                onCheckedChange = settingsViewModel::setDelayControls,
+                leadingIcon = { Icon(Icons.Rounded.PlayCircleOutline, null, tint = MaterialTheme.colorScheme.secondary) }
+            )
+        }
+        SwitchSettingItem(
+            settingKey = "player_placeholders",
+            title = stringResource(R.string.settings_tweak_placeholders),
+            subtitle = "",
+            checked = tweaks.showPlaceholders,
+            onCheckedChange = settingsViewModel::setFullPlayerPlaceholders,
+            leadingIcon = { Icon(Icons.Rounded.Rectangle, null, tint = MaterialTheme.colorScheme.secondary) }
+        )
+        if (tweaks.showPlaceholders) {
+            SwitchSettingItem(
+                title = "Transparent placeholders", subtitle = "", checked = tweaks.transparentPlaceholders,
+                onCheckedChange = settingsViewModel::setTransparentPlaceholders,
+                leadingIcon = { Icon(Icons.Rounded.Opacity, null, tint = MaterialTheme.colorScheme.secondary) }
+            )
+            if (anyDelay) {
+                com.theveloper.pixelplay.presentation.screens.SettingsSegmentedSelectorItem(
+                    title = "Show content",
+                    options = listOf(false, true),
+                    selectedOption = tweaks.switchOnDragRelease,
+                    optionLabel = { onRelease: Boolean -> if (onRelease) "On release" else "While opening" },
+                    onOptionSelected = settingsViewModel::setFullPlayerSwitchOnDragRelease,
+                    leadingIcon = { Icon(Icons.Rounded.SwipeUp, null, tint = MaterialTheme.colorScheme.secondary) }
+                )
+                if (!tweaks.switchOnDragRelease) {
+                    SliderSettingsItem(
+                        label = "Show at",
+                        value = tweaks.contentAppearThresholdPercent.toFloat(),
+                        valueRange = 0f..100f,
+                        onValueChange = { settingsViewModel.setFullPlayerAppearThreshold(it.roundToInt()) },
+                        valueText = { "${it.roundToInt()}%" }
+                    )
+                }
+                SwitchSettingItem(
+                    title = "Placeholders when closing", subtitle = "", checked = tweaks.applyPlaceholdersOnClose,
+                    onCheckedChange = settingsViewModel::setFullPlayerPlaceholdersOnClose,
+                    leadingIcon = { Icon(Icons.Rounded.SwipeDown, null, tint = MaterialTheme.colorScheme.secondary) }
+                )
+                if (tweaks.applyPlaceholdersOnClose && !tweaks.switchOnDragRelease) {
+                    SliderSettingsItem(
+                        label = "Hide at",
+                        value = tweaks.contentCloseThresholdPercent.toFloat(),
+                        valueRange = 0f..100f,
+                        onValueChange = { settingsViewModel.setFullPlayerCloseThreshold(it.roundToInt()) },
+                        valueText = { "${it.roundToInt()}%" }
+                    )
+                }
+            }
+        }
+        com.theveloper.pixelplay.presentation.screens.SettingsSegmentedSelectorItem(
+            title = stringResource(R.string.settings_tweak_album_art_quality),
+            options = com.theveloper.pixelplay.data.preferences.AlbumArtQuality.entries.toList(),
+            selectedOption = uiState.albumArtQuality,
+            optionLabel = { quality: com.theveloper.pixelplay.data.preferences.AlbumArtQuality ->
+                quality.label.substringBefore(" ")
+            },
+            onOptionSelected = settingsViewModel::setAlbumArtQuality,
+            leadingIcon = { Icon(Icons.Rounded.HighQuality, null, tint = MaterialTheme.colorScheme.secondary) },
+            settingKey = "album_art_quality"
+        )
+    }
+}

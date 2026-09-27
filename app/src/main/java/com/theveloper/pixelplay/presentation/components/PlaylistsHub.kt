@@ -26,6 +26,13 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.PersonAdd
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
@@ -159,7 +166,11 @@ fun FriendsDropdownCard(
 ) {
     val friends by viewModel.friends.collectAsStateWithLifecycle()
     val notice by viewModel.notice.collectAsStateWithLifecycle()
+    val following by viewModel.following.collectAsStateWithLifecycle()
+    val favoriteIds by playerViewModel.favoriteSongIds.collectAsStateWithLifecycle()
     var expanded by rememberSaveable { mutableStateOf(false) }
+    // The song whose action sheet is open, with the friend who played it.
+    var actionFor by remember { mutableStateOf<Pair<String, FriendTrack>?>(null) }
     var historyFor by rememberSaveable { mutableStateOf<String?>(null) }
     var adding by remember { mutableStateOf(false) }
     // Poll friend activity only while the list or a history sheet is on screen (and the app is started).
@@ -171,17 +182,28 @@ fun FriendsDropdownCard(
         playerViewModel.updateSearchQuery(listOf(track.title, track.artist).filter { it.isNotBlank() }.joinToString(" "))
         navController?.navigateToTopLevelSafely(Screen.Search.route)
     }
-    // Play / Play next / Add to queue straight from a friend's song; search only when it can't be played.
+    // Actions on a friend's song; search only when it can't be played.
     val onTrackAction: (FriendTrack, FriendTrackAction) -> Unit = { track, action ->
         val song = viewModel.songFor(track)
         when {
+            action == FriendTrackAction.ARTIST -> {
+                track.artist.takeIf { it.isNotBlank() }?.let { navController?.navigateSafely(Screen.ArtistDetail.createRouteForName(it)) }
+            }
             song == null || action == FriendTrackAction.SEARCH -> search(track)
             action == FriendTrackAction.PLAY -> playerViewModel.playSongs(listOf(song), song, "Friends")
             action == FriendTrackAction.NEXT -> playerViewModel.addSongNextToQueue(song)
             action == FriendTrackAction.QUEUE -> playerViewModel.addSongToQueue(song)
+            action == FriendTrackAction.LIKE -> playerViewModel.toggleFavoriteSpecificSong(song, removing = song.id in favoriteIds)
         }
     }
     val canPlay: (FriendTrack) -> Boolean = { viewModel.songFor(it) != null }
+    val openTrack: (FriendUi, FriendTrack) -> Unit = { friend, track ->
+        if (canPlay(track)) {
+            actionFor = friend.id to track
+        } else {
+            search(track)
+        }
+    }
 
     Card(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
@@ -200,6 +222,10 @@ fun FriendsDropdownCard(
                         live > 1 -> "$live listening now"
                         else -> "No one's listening right now"
                     }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    following?.let { session ->
+                        Text("Following ${session.friendName}", style = MaterialTheme.typography.labelMedium,
+                            color = SpotifyGreen, fontWeight = FontWeight.SemiBold)
+                    }
                 }
                 ActiveFriendsPill(live, friends.size)
                 Spacer(Modifier.width(4.dp))
@@ -216,8 +242,7 @@ fun FriendsDropdownCard(
                         FriendSection(
                             friend = friend,
                             onRename = { viewModel.rename(friend.id, it) },
-                            onTrackAction = onTrackAction,
-                            canPlay = canPlay,
+                            onTrackClick = { track -> openTrack(friend, track) },
                             onExpand = { viewModel.gatherPlaylists(friend) },
                             onOpenPlaylist = { playlist ->
                                 val id = playlist.playlistId
@@ -237,10 +262,36 @@ fun FriendsDropdownCard(
         val friend = friends.find { it.id == id }
         if (friend != null) {
             val history by remember(id) { viewModel.history(id) }.collectAsStateWithLifecycle(emptyList())
-            FriendHistorySheet(friend, history, canPlay = canPlay,
-                onTrackAction = { track, action -> if (action == FriendTrackAction.SEARCH) historyFor = null; onTrackAction(track, action) },
-                onDismiss = { historyFor = null })
+            FriendHistorySheet(
+                friend = friend,
+                history = history,
+                isFollowing = following?.friendId == friend.id,
+                canPlay = canPlay,
+                onPlay = { track -> onTrackAction(track, FriendTrackAction.PLAY) },
+                onMore = { track -> openTrack(friend, track) },
+                onFollow = { viewModel.toggleFollow(friend) },
+                onShuffle = {
+                    val songs = history.mapNotNull(viewModel::songFor).distinctBy { it.id }.shuffled()
+                    songs.firstOrNull()?.let { playerViewModel.playSongs(songs, it, "${friend.name}'s history") }
+                },
+                onDismiss = { historyFor = null },
+            )
         }
+    }
+    actionFor?.let { (friendId, track) ->
+        val friend = friends.find { it.id == friendId }
+        val song = remember(track) { viewModel.songFor(track) }
+        FriendTrackSheet(
+            track = track,
+            friend = friend,
+            isLiked = song != null && song.id in favoriteIds,
+            onAction = { action ->
+                actionFor = null
+                if (action == FriendTrackAction.SEARCH || action == FriendTrackAction.ARTIST) historyFor = null
+                onTrackAction(track, action)
+            },
+            onDismiss = { actionFor = null },
+        )
     }
     if (adding) AddFriendPlaylistDialog(onAdd = { name, link, done -> viewModel.addPlaylist(name, link, done) }, onDismiss = { adding = false })
     notice?.let {
@@ -265,8 +316,7 @@ private fun ActiveFriendsPill(live: Int, total: Int) {
 private fun FriendSection(
     friend: FriendUi,
     onRename: (String) -> Unit,
-    onTrackAction: (FriendTrack, FriendTrackAction) -> Unit,
-    canPlay: (FriendTrack) -> Boolean,
+    onTrackClick: (FriendTrack) -> Unit,
     onExpand: () -> Unit,
     onOpenPlaylist: (FriendPlaylistUi) -> Unit,
     onHistory: () -> Unit,
@@ -305,8 +355,8 @@ private fun FriendSection(
                         fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Icon(Icons.Rounded.KeyboardArrowDown, null, Modifier.size(18.dp).rotate(chevron), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Text("  —  ", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                FriendTrackLabel(friend, onTrackAction, canPlay, Modifier.weight(1f))
+                Spacer(Modifier.width(10.dp))
+                FriendTrackLabel(friend, onTrackClick, Modifier.weight(1f))
             }
         }
         // History only shows with the friend's playlists open, at the bottom of that section.
@@ -330,8 +380,8 @@ private fun FriendSection(
 }
 
 @Composable
-private fun FriendAvatar(friend: FriendUi) {
-    Box(Modifier.size(38.dp)) {
+private fun FriendAvatar(friend: FriendUi, size: androidx.compose.ui.unit.Dp = 38.dp, showPresence: Boolean = true) {
+    Box(Modifier.size(size)) {
         if (friend.avatarUrl != null) {
             SmartImage(model = friend.avatarUrl, contentDescription = null, modifier = Modifier.fillMaxSize(), shape = CircleShape)
         } else {
@@ -339,7 +389,7 @@ private fun FriendAvatar(friend: FriendUi) {
                 Text(friend.name.take(1).uppercase(), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
             }
         }
-        val dot = when (friend.presence) {
+        val dot = if (!showPresence) null else when (friend.presence) {
             FriendPresence.LISTENING_NOW -> SpotifyGreen
             FriendPresence.RECENT -> MaterialTheme.colorScheme.tertiary
             else -> null
@@ -350,9 +400,8 @@ private fun FriendAvatar(friend: FriendUi) {
 }
 
 @Composable
-private fun FriendTrackLabel(friend: FriendUi, onTrackAction: (FriendTrack, FriendTrackAction) -> Unit, canPlay: (FriendTrack) -> Boolean, modifier: Modifier) {
+private fun FriendTrackLabel(friend: FriendUi, onTrackClick: (FriendTrack) -> Unit, modifier: Modifier) {
     val track = friend.track
-    var menu by remember(friend.id) { mutableStateOf(false) }
     if (track == null) {
         Text(if (friend.presence == FriendPresence.HIDDEN) "Activity hidden" else "No recent activity", modifier,
             style = MaterialTheme.typography.bodyMedium, fontStyle = FontStyle.Italic, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
@@ -360,9 +409,8 @@ private fun FriendTrackLabel(friend: FriendUi, onTrackAction: (FriendTrack, Frie
     }
     val live = friend.presence == FriendPresence.LISTENING_NOW
     val song = listOf(track.title, track.artist).filter { it.isNotBlank() }.joinToString(" · ")
-    Box(modifier) {
-    Row(Modifier.clip(RoundedCornerShape(6.dp))
-        .clickable { if (canPlay(track)) menu = true else onTrackAction(track, FriendTrackAction.SEARCH) }
+    Row(modifier.clip(RoundedCornerShape(6.dp))
+        .clickable { onTrackClick(track) }
         .padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         if (live) {
             PlayingEqIcon(Modifier.size(width = 14.dp, height = 12.dp), color = SpotifyGreen, isPlaying = true, phaseDurationMillis = 2400)
@@ -376,24 +424,93 @@ private fun FriendTrackLabel(friend: FriendUi, onTrackAction: (FriendTrack, Frie
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), maxLines = 1)
         }
     }
-    FriendTrackMenu(menu, track, onDismiss = { menu = false }, onAction = { onTrackAction(track, it) })
+}
+
+internal enum class FriendTrackAction { PLAY, NEXT, QUEUE, LIKE, ARTIST, SEARCH }
+
+/**
+ * Actions for one of a friend's songs, in the app's own sheet style: the song and who played
+ * it on top, Play / Play next / Add to queue as big tiles, then like, artist and search.
+ */
+@Composable
+private fun FriendTrackSheet(
+    track: FriendTrack,
+    friend: FriendUi?,
+    isLiked: Boolean,
+    onAction: (FriendTrackAction) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SmartImage(model = track.coverUrl, contentDescription = null, modifier = Modifier.size(64.dp), shape = RoundedCornerShape(14.dp))
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(track.title, style = MaterialTheme.typography.titleLarge.copy(fontFamily = GoogleSansRounded),
+                        fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (track.artist.isNotBlank()) {
+                        Text(track.artist, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    if (friend != null) {
+                        Spacer(Modifier.height(6.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            FriendAvatar(friend, size = 18.dp, showPresence = false)
+                            Spacer(Modifier.width(6.dp))
+                            val live = friend.presence == FriendPresence.LISTENING_NOW && friend.track?.key == track.key
+                            Text(if (live) "${friend.name} is listening now" else "${friend.name} · ${agoLabel(track.playedAt)}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (live) SpotifyGreen else MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                        }
+                    }
+                }
+                IconButton(onClick = { onAction(FriendTrackAction.LIKE) }) {
+                    Icon(if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                        if (isLiked) "Unlike" else "Like",
+                        tint = if (isLiked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                FriendActionTile(Icons.Rounded.PlayArrow, "Play", Modifier.weight(1f), primary = true) { onAction(FriendTrackAction.PLAY) }
+                FriendActionTile(Icons.AutoMirrored.Rounded.PlaylistPlay, "Play next", Modifier.weight(1f)) { onAction(FriendTrackAction.NEXT) }
+                FriendActionTile(Icons.AutoMirrored.Rounded.QueueMusic, "Add to queue", Modifier.weight(1f)) { onAction(FriendTrackAction.QUEUE) }
+            }
+            Spacer(Modifier.height(12.dp))
+            Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
+                Column {
+                    if (track.artist.isNotBlank()) {
+                        FriendActionRow(Icons.Rounded.Person, "Go to ${track.artist}") { onAction(FriendTrackAction.ARTIST) }
+                        HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    }
+                    FriendActionRow(Icons.Rounded.Search, "Search in PixelPlayer") { onAction(FriendTrackAction.SEARCH) }
+                }
+            }
+        }
     }
 }
 
-internal enum class FriendTrackAction { PLAY, NEXT, QUEUE, SEARCH }
-
-/** Play / Play next / Add to queue for one of a friend's songs. */
 @Composable
-private fun FriendTrackMenu(expanded: Boolean, track: FriendTrack, onDismiss: () -> Unit, onAction: (FriendTrackAction) -> Unit) {
-    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
-        Text(track.title, Modifier.padding(horizontal = 16.dp, vertical = 6.dp).widthIn(max = 240.dp),
-            style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        DropdownMenuItem(text = { Text("Play") }, leadingIcon = { Icon(Icons.Rounded.PlayArrow, null) },
-            onClick = { onDismiss(); onAction(FriendTrackAction.PLAY) })
-        DropdownMenuItem(text = { Text("Play next") }, leadingIcon = { Icon(Icons.AutoMirrored.Rounded.PlaylistPlay, null) },
-            onClick = { onDismiss(); onAction(FriendTrackAction.NEXT) })
-        DropdownMenuItem(text = { Text("Add to queue") }, leadingIcon = { Icon(Icons.AutoMirrored.Rounded.QueueMusic, null) },
-            onClick = { onDismiss(); onAction(FriendTrackAction.QUEUE) })
+private fun FriendActionTile(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, modifier: Modifier,
+    primary: Boolean = false, onClick: () -> Unit) {
+    Surface(onClick = onClick, modifier = modifier.height(76.dp), shape = RoundedCornerShape(20.dp),
+        color = if (primary) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = if (primary) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            Icon(icon, null, Modifier.size(24.dp))
+            Spacer(Modifier.height(4.dp))
+            Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        }
+    }
+}
+
+@Composable
+private fun FriendActionRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(16.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -417,23 +534,75 @@ private fun FriendPlaylistCard(playlist: FriendPlaylistUi, onClick: () -> Unit) 
 
 // ---- History bottom sheet ---------------------------------------------------------------------
 
+/**
+ * A friend's last 7 days: who they are and what they're doing now, Shuffle (their whole week)
+ * and Follow (their new songs play next as they start them), then every play by day. Tap a
+ * song to play it; ⋮ or a long press for more.
+ */
 @Composable
-private fun FriendHistorySheet(friend: FriendUi, history: List<FriendTrack>, canPlay: (FriendTrack) -> Boolean,
-    onTrackAction: (FriendTrack, FriendTrackAction) -> Unit, onDismiss: () -> Unit) {
+private fun FriendHistorySheet(
+    friend: FriendUi,
+    history: List<FriendTrack>,
+    isFollowing: Boolean,
+    canPlay: (FriendTrack) -> Boolean,
+    onPlay: (FriendTrack) -> Unit,
+    onMore: (FriendTrack) -> Unit,
+    onFollow: () -> Unit,
+    onShuffle: () -> Unit,
+    onDismiss: () -> Unit,
+) {
     val zone = remember { ZoneId.systemDefault() }
     val days = remember(history) {
         history.sortedByDescending { it.playedAt }.groupBy { Instant.ofEpochMilli(it.playedAt).atZone(zone).toLocalDate() }
     }
     val timeFormat = remember { DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT) }
     val live = friend.presence == FriendPresence.LISTENING_NOW
+    val newest = remember(history) { history.maxByOrNull { it.playedAt } }
+    val playableCount = remember(history) { history.count(canPlay) }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-            Text("${friend.name}'s week", style = MaterialTheme.typography.headlineSmall.copy(fontFamily = GoogleSansRounded), fontWeight = FontWeight.Bold)
-            Text("${history.size} plays · last 7 days · newest first", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                FriendAvatar(friend, size = 52.dp)
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(friend.name, style = MaterialTheme.typography.headlineSmall.copy(fontFamily = GoogleSansRounded),
+                        fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val status = when {
+                        live && friend.track != null -> "Listening to ${friend.track.title}"
+                        newest != null -> "Last played ${agoLabel(newest.playedAt)}"
+                        else -> "No plays seen yet"
+                    }
+                    Text(status, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        color = if (live) SpotifyGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = if (live) FontWeight.SemiBold else FontWeight.Normal)
+                    Text("${history.size} ${if (history.size == 1) "play" else "plays"} this week",
+                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(onClick = onShuffle, enabled = playableCount > 0, modifier = Modifier.weight(1f).height(48.dp)) {
+                    Icon(Icons.Rounded.Shuffle, null, Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Shuffle")
+                }
+                val followColors = if (isFollowing) ButtonDefaults.filledTonalButtonColors(
+                    containerColor = SpotifyGreen.copy(alpha = 0.18f), contentColor = MaterialTheme.colorScheme.onSurface)
+                else ButtonDefaults.filledTonalButtonColors()
+                FilledTonalButton(onClick = onFollow, colors = followColors, modifier = Modifier.weight(1f).height(48.dp)) {
+                    Icon(if (isFollowing) Icons.Rounded.Check else Icons.Rounded.PersonAdd, null, Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (isFollowing) "Following" else "Follow")
+                }
+            }
+            AnimatedVisibility(isFollowing) {
+                Text("Songs ${friend.name} starts will play next.",
+                    Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             Spacer(Modifier.height(8.dp))
         }
         if (history.isEmpty()) {
-            Text("Nothing yet. PixelPlayer builds this history from what it sees your friend play, so it fills in over the week.",
+            Text("Nothing yet. This fills in as PixelPlayer sees ${friend.name} play songs.",
                 Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 32.dp),
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.navigationBarsPadding().height(16.dp))
@@ -443,31 +612,42 @@ private fun FriendHistorySheet(friend: FriendUi, history: List<FriendTrack>, can
             days.forEach { (day, tracks) ->
                 stickyHeader(key = "day:$day") {
                     Surface(color = BottomSheetDefaults.ContainerColor, modifier = Modifier.fillMaxWidth()) {
-                        Text(dayLabel(day), Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                            style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        Text(dayLabel(day), Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 8.dp),
+                            style = MaterialTheme.typography.titleMedium.copy(fontFamily = GoogleSansRounded),
+                            fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     }
                 }
                 items(tracks, key = { "${it.playedAt}:${it.key}" }) { track ->
-                    val isNow = live && track == history.maxByOrNull { it.playedAt }
-                    var menu by remember(track.key, track.playedAt) { mutableStateOf(false) }
-                    Box {
-                    FriendTrackMenu(menu, track, onDismiss = { menu = false }, onAction = { onTrackAction(track, it) })
+                    val isNow = live && track == newest
+                    val playable = canPlay(track)
                     Row(Modifier.fillMaxWidth()
-                        .clickable { if (canPlay(track)) menu = true else onTrackAction(track, FriendTrackAction.SEARCH) }
-                        .padding(horizontal = 20.dp, vertical = 8.dp),
+                        .combinedClickable(
+                            onClick = { if (playable) onPlay(track) else onMore(track) },
+                            onLongClick = { onMore(track) },
+                        )
+                        .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
                         verticalAlignment = Alignment.CenterVertically) {
-                        Text(Instant.ofEpochMilli(track.playedAt).atZone(zone).toLocalTime().format(timeFormat),
-                            Modifier.width(64.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        SmartImage(model = track.coverUrl, contentDescription = null, modifier = Modifier.size(44.dp), shape = RoundedCornerShape(10.dp))
-                        Spacer(Modifier.width(12.dp))
+                        Box(contentAlignment = Alignment.Center) {
+                            SmartImage(model = track.coverUrl, contentDescription = null, modifier = Modifier.size(56.dp), shape = RoundedCornerShape(12.dp))
+                            if (isNow) {
+                                Box(Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.35f)), contentAlignment = Alignment.Center) {
+                                    PlayingEqIcon(Modifier.size(width = 18.dp, height = 16.dp), color = SpotifyGreen, isPlaying = true, phaseDurationMillis = 2400)
+                                }
+                            }
+                        }
+                        Spacer(Modifier.width(16.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(track.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            Text(track.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 color = if (isNow) SpotifyGreen else MaterialTheme.colorScheme.onSurface)
-                            Text(track.artist, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            val time = if (isNow) "Now" else Instant.ofEpochMilli(track.playedAt).atZone(zone).toLocalTime().format(timeFormat)
+                            Text(listOf(track.artist, time).filter { it.isNotBlank() }.joinToString(" • "),
+                                style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        if (isNow) PlayingEqIcon(Modifier.size(width = 16.dp, height = 14.dp), color = SpotifyGreen, isPlaying = true, phaseDurationMillis = 2400)
-                    }
+                        IconButton(onClick = { onMore(track) }) {
+                            Icon(Icons.Rounded.MoreVert, "More options", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                 }
             }

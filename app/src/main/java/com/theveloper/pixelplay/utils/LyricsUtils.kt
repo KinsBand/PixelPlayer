@@ -1232,6 +1232,8 @@ fun ProviderText(
  * @param nextTime The end time at which these bubbles disappear.
  * @param modifier Modifier applied to this layout.
  * @param onClick Optional callback when clicked, e.g. to seek to this section.
+ * @param positionOffsetMs The lyrics sync offset, so the break (and its trace) lines up with
+ *   the lyrics after a sync adjustment, exactly like the highlighted line does.
  */
 @Composable
 fun BubblesLine(
@@ -1240,9 +1242,11 @@ fun BubblesLine(
     color: Color,
     nextTime: Int,
     modifier: Modifier = Modifier,
-    onClick: (() -> Unit)? = null
+    onClick: (() -> Unit)? = null,
+    positionOffsetMs: Int = 0,
 ) {
-    val position by positionFlow.collectAsStateWithLifecycle(initialValue = 0L)
+    val rawPosition by positionFlow.collectAsStateWithLifecycle(initialValue = 0L)
+    val position = (rawPosition + positionOffsetMs).coerceAtLeast(0L)
     val isCurrent = position in time.toLong()..<nextTime.toLong()
     // How far through the break we are (0..1), smoothed per frame between position updates.
     // Breaks with no known end (the outro) don't get a trace.
@@ -1299,8 +1303,8 @@ fun MusicNoteBubbles(
     onClick: (() -> Unit)? = null,
     /**
      * How much of the break has passed (0..1), or null for no trace. The pill's outline is drawn
-     * from its left middle, up over the top and down under the bottom at the same time, meeting
-     * at the right middle exactly when the singing comes back.
+     * from its top middle, left and right at the same time and down both sides, meeting at the
+     * bottom middle exactly when the singing comes back.
      */
     breakProgress: (() -> Float)? = null,
 ) {
@@ -1435,24 +1439,9 @@ private fun Modifier.breakTrace(
         val t = inset
         val r = size.width - inset
         val b = size.height - inset
-        val cy = size.height / 2f
         val rad = minOf(corner.toPx() - inset / 2f, (b - t) / 2f).coerceAtLeast(0f)
-        val top = Path().apply {
-            moveTo(l, cy)
-            lineTo(l, t + rad)
-            arcTo(Rect(l, t, l + 2 * rad, t + 2 * rad), 180f, 90f, false)
-            lineTo(r - rad, t)
-            arcTo(Rect(r - 2 * rad, t, r, t + 2 * rad), 270f, 90f, false)
-            lineTo(r, cy)
-        }
-        val bottom = Path().apply {
-            moveTo(l, cy)
-            lineTo(l, b - rad)
-            arcTo(Rect(l, b - 2 * rad, l + 2 * rad, b), 180f, -90f, false)
-            lineTo(r - rad, b)
-            arcTo(Rect(r - 2 * rad, b - 2 * rad, r, b), 90f, -90f, false)
-            lineTo(r, cy)
-        }
+        // Named after the old halves: "top" now runs left, "bottom" runs right.
+        val (top, bottom) = splitOutlineFromTop(l, t, r, b, rad)
         val mTop = PathMeasure().apply { setPath(top, false) }
         val mBottom = PathMeasure().apply { setPath(bottom, false) }
         val segTop = Path()

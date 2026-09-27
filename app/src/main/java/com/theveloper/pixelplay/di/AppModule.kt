@@ -76,7 +76,7 @@ object AppModule {
     // MusicBrainz requires a descriptive User-Agent with contact info;
     // other APIs are fine with the generic one.
     private const val DEFAULT_USER_AGENT = "PixelPlayer/1.0 (Android; Music Player)"
-    private const val MUSICBRAINZ_USER_AGENT = "PixelPlay/1.0 ( https://github.com/theovilardo/PixelPlayer )"
+    private const val MUSICBRAINZ_USER_AGENT = "PixelPlay/1.0 ( https://github.com/KinsBand/PixelPlayer )"
     private const val BROWSER_USER_AGENT =
         "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
 

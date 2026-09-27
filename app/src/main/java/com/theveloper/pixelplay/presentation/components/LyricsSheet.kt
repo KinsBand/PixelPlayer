@@ -1975,6 +1975,7 @@ fun SyncedLyricsList(
 
                         BubblesLine(
                             positionFlow = playbackPositionFlow,
+                            positionOffsetMs = lyricsSyncOffset,
                             time = 0,
                             color = accentColor,
                             nextTime = introEndTime,
@@ -2037,6 +2038,7 @@ fun SyncedLyricsList(
                     } else {
                         BubblesLine(
                             positionFlow = playbackPositionFlow,
+                            positionOffsetMs = lyricsSyncOffset,
                             time = line.time,
                             color = accentColor,
                             nextTime = nextTime,
@@ -2065,6 +2067,7 @@ fun SyncedLyricsList(
 
                         BubblesLine(
                             positionFlow = playbackPositionFlow,
+                            positionOffsetMs = lyricsSyncOffset,
                             time = lastLineEndTime.toInt(),
                             color = accentColor,
                             nextTime = Int.MAX_VALUE,

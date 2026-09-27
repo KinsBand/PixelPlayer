@@ -158,7 +158,7 @@ class SongStructureRepository private constructor(context: Context) {
             connectTimeout = 5_000
             readTimeout = 6_000
             setRequestProperty("Accept", "application/json")
-            setRequestProperty("User-Agent", "PixelPlayer (https://github.com/theovilardo/PixelPlayer)")
+            setRequestProperty("User-Agent", "PixelPlayer (https://github.com/KinsBand/PixelPlayer)")
         }
         return try {
             if (conn.responseCode !in 200..299) null else conn.inputStream.bufferedReader().use { it.readText() }

@@ -130,6 +130,7 @@ import androidx.compose.ui.unit.coerceAtLeast
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.rounded.Cloud
+import androidx.compose.material.icons.rounded.HeartBroken
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.SmartDisplay
 import androidx.compose.foundation.selection.selectable
@@ -3080,7 +3081,8 @@ private fun BottomToggleRow(
                 inactiveColor = inactiveBg,
                 inactiveContentColor = inactiveContentColor,
                 onClick = onDislike,
-                iconId = R.drawable.rounded_heart_broken_24,
+                // Same broken heart as "Unlike" in playlist select mode.
+                painter = androidx.compose.ui.graphics.vector.rememberVectorPainter(androidx.compose.material.icons.Icons.Rounded.HeartBroken),
                 contentDesc = "Mix feedback"
             )
             ToggleSegmentButton(

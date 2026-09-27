@@ -21,7 +21,7 @@ import com.theveloper.pixelplay.R
  * Settings pages.
  *
  * The root shows ten rows (see SettingsScreen): General, Appearance, Player & Lyrics,
- * Widgets & Island, Playback, Library, Accounts & Services, AI, Backup and About.
+ * Widgets, Playback, Library, Accounts & Services, AI, Backup and About.
  *
  * [NOW_PLAYING] and [NAVIGATION] are no longer pages of their own. Their settings were
  * folded into [LYRICS] ("Player & Lyrics"), [APPEARANCE] and [GENERAL]. The constants and

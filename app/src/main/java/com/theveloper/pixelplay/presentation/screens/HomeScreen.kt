@@ -402,15 +402,17 @@ fun HomeScreen(
                                         filterPool = mixFilterPool,
                                         isPlaying = isPlaying,
                                         currentSongId = currentSong?.id,
-                                        onPlayMix = { playerViewModel.startContinuousMix(com.theveloper.pixelplay.data.MixFlavor.NORMAL, yourMixSongs) },
+                                        // The mix button mixes: shuffled every time rather than starting from song one.
+                                        onPlayMix = { playerViewModel.startContinuousMix(com.theveloper.pixelplay.data.MixFlavor.NORMAL, yourMixSongs.shuffled()) },
                                         onOpenDailyMixScreen = {
                                             navController.navigateSafely(Screen.DailyMixScreen.route)
                                         },
                                         onPlayGeneratedMix = { mix: GeneratedMix ->
-                                            val first = mix.songs.firstOrNull()
+                                            val shuffled = mix.songs.shuffled()
+                                            val first = shuffled.firstOrNull()
                                             if (first != null) {
                                                 playerViewModel.playSongs(
-                                                    songsToPlay = mix.songs,
+                                                    songsToPlay = shuffled,
                                                     startSong = first,
                                                     queueName = mix.title
                                                 )
@@ -438,10 +440,11 @@ fun HomeScreen(
                                         onTileClick = { tile ->
                                             when (tile) {
                                                 is SpeedDialTile.MixTile -> {
-                                                    val first = tile.mix.songs.firstOrNull()
+                                                    val shuffled = tile.mix.songs.shuffled()
+                                                    val first = shuffled.firstOrNull()
                                                     if (first != null) {
                                                         playerViewModel.playSongs(
-                                                            songsToPlay = tile.mix.songs,
+                                                            songsToPlay = shuffled,
                                                             startSong = first,
                                                             queueName = tile.mix.title
                                                         )

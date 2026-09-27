@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - KinsBand build
+
+### Fixed
+- **Artist page:** "Fans also like" artists now open (artist → artist navigation reused the same page), playlists open as a playlist page, and songs start quickly (catalog songs are matched to audio in parallel instead of one by one).
+- **Home:** the mix button and generated mixes now shuffle instead of always starting from the first song.
+- **Voice search:** plain dictation only fills the search bar; the song card is reserved for Hum & Sing and Listen.
+
+### Changed
+- **Accounts:** tapping a connected playlist opens it directly (no preview dialog).
+- **Friends:** the dash between a friend's name and their song is gone.
+- **Player:** the "not for this mix" button uses the same broken-heart icon as playlist select mode.
+- **Settings:** removed the quick-preferences card, the folder back-gesture toggle (now always on), "tap background closes player", and the unused home collage options. Camera island settings moved to Appearance. "History in queue" now shows or hides the queue's History button; the queue always starts at the playing song.
+- **About:** removed the maintainer, spotlight and contributor lists; GitHub links point to KinsBand/PixelPlayer.
+
+### Added
+- **Friends:** a new song sheet (Play / Play next / Add to queue tiles, like, go to artist, search). The history sheet is redesigned with **Shuffle** (the friend's whole week) and **Follow** (each new song they start plays next; stops by itself after 15 minutes of silence).
+- **Downloads:** tapping download in the player opens a quality menu under the button (High = Opus, Medium = AAC 128, Low) with the size in MB and an estimated time; long-press downloads High.
+- **Playlists:** friend playlists show the friend's avatar and name on the details line; blank covers fall back to the collage.
+- **Widgets:** the selected widget's big live preview and a row of widget names stay fixed at the top; options scroll below with Appearance first; on/off options are icon toggles; reset moved to the top bar.
+- **Settings:** the Experimental screen is merged into Player & Lyrics as short toggles; utility screens open with the condensed bar (back button and title on one row).
+- **Downloads:** "Download on Wi-Fi only" for downloading all liked songs. It waits for Wi-Fi, asks with a notification before starting, shows one progress notification with Cancel, and pauses if Wi-Fi drops.
+
 ## [0.7.5-beta] - 2026-06-13
 
 ### Added

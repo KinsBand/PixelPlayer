@@ -202,6 +202,8 @@ class MainActivity : ComponentActivity() {
     lateinit var songDownloadManager: SongDownloadManager
     @Inject
     lateinit var voiceSearchStateHolder: VoiceSearchStateHolder
+    @Inject
+    lateinit var friendFollowController: com.theveloper.pixelplay.data.social.FriendFollowController
     // For handling shortcut navigation - using StateFlow so composables can observe changes
     private val _pendingPlaylistNavigation = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     private val _pendingShuffleAll = kotlinx.coroutines.flow.MutableStateFlow(false)
@@ -254,6 +256,19 @@ class MainActivity : ComponentActivity() {
                 syncManager.rebuildDatabase()
                 delay(1_500L)
                 playerViewModel.prepareBenchmarkPlayerFromLibrary()
+            }
+        }
+
+        // Following a friend: each new song they start plays next (or starts playback if
+        // nothing is playing). Not tied to STARTED, so it keeps going in the background.
+        lifecycleScope.launch {
+            friendFollowController.newSongs.collect { song ->
+                val name = friendFollowController.session.value?.friendName ?: "Friend"
+                if (playerViewModel.stablePlayerState.value.currentSong == null) {
+                    playerViewModel.playSongs(listOf(song), song, "Following $name")
+                } else {
+                    playerViewModel.addSongNextToQueue(song)
+                }
             }
         }
 
@@ -325,6 +340,7 @@ class MainActivity : ComponentActivity() {
                             when (progress) {
                                 is DownloadProgress.Resolving,
                                 is DownloadProgress.Downloading,
+                                is DownloadProgress.Paused,
                                 is DownloadProgress.Tagging,
                                 is DownloadProgress.Scanning -> true
                                 else -> false
@@ -337,7 +353,8 @@ class MainActivity : ComponentActivity() {
 
             CompositionLocalProvider(
                 LocalShowScrollbar provides showScrollbar,
-                LocalDownloadingSongIds provides downloadingSongIds
+                LocalDownloadingSongIds provides downloadingSongIds,
+                com.theveloper.pixelplay.presentation.components.LocalDownloadProgressMap provides songDownloadManager.downloadProgressMap
             ) {
                 PixelPlayTheme(
                     darkTheme = useDarkTheme
@@ -837,8 +854,9 @@ class MainActivity : ComponentActivity() {
             onPartialTranscript = { playerViewModel.updateSearchQuery(it) },
             onFinalTranscript = { transcript ->
                 val cleaned = voiceSearchStateHolder.cleanSpokenQuery(transcript)
+                // Dictation is text only: it fills the search bar. The song card (cover, live
+                // lyrics, like, queue) is reserved for Hum & Sing and Listen matches.
                 playerViewModel.updateSearchQuery(cleaned.ifBlank { transcript })
-                voiceSearchStateHolder.onSpokenQuery(transcript)
             }
         )
         // The transcript is typed into the Search tab's search bar, so opening voice search

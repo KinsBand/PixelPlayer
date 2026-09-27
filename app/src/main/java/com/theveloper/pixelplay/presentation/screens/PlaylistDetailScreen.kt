@@ -221,6 +221,12 @@ fun PlaylistDetailScreen(
     val isSystemPlaylist = PlaylistViewModel.isSystemPlaylistId(currentPlaylist?.id)
     val isLikedPlaylist = playlistId == PlaylistViewModel.LIKED_PLAYLIST_ID
     val isConnectedPlaylist = currentPlaylist?.source == "SPOTIFY" || currentPlaylist?.source == "YOUTUBE_MUSIC"
+    // A friend's playlist shows who it belongs to (avatar + name) on the details line.
+    val friendOwner = currentPlaylist?.friendId?.let { friendId ->
+        val friendsViewModel: com.theveloper.pixelplay.presentation.viewmodel.FriendsViewModel = hiltViewModel()
+        val friends by friendsViewModel.friends.collectAsStateWithLifecycle()
+        friends.find { it.id == friendId }
+    }
     // YouTube Music playlists can be edited: changes are saved in the app and pushed to the account.
     val isEditableConnectedPlaylist = currentPlaylist?.source == "YOUTUBE_MUSIC"
     val isReadOnlyPlaylist = isFolderPlaylist || isGeneratedMix || isSystemPlaylist ||
@@ -437,6 +443,8 @@ fun PlaylistDetailScreen(
                                 songs = songsInPlaylist,
                                 isLikedPlaylist = isLikedPlaylist,
                                 isConnectedPlaylist = isConnectedPlaylist,
+                                ownerName = friendOwner?.name ?: currentPlaylist.ownerName.takeIf { currentPlaylist.friendId != null && it.isNotBlank() },
+                                ownerAvatarUrl = friendOwner?.avatarUrl,
                                 accent = animatedAccent,
                                 surfaceColor = surfaceColor,
                                 fallbackName = fallbackPlaylistName,
@@ -1341,7 +1349,7 @@ private suspend fun extractAverageColor(context: android.content.Context, model:
 
 /**
  * YouTube Music–style header: big centred cover on a gradient taken from the cover, title,
- * "songs · duration" line, then Download · Play · More. No owner, description or extra icons.
+ * "[friend ·] songs · duration" line, then Download · Shuffle · More.
  */
 @Composable
 private fun PlaylistHeroHeader(
@@ -1349,6 +1357,9 @@ private fun PlaylistHeroHeader(
     songs: List<Song>,
     isLikedPlaylist: Boolean,
     isConnectedPlaylist: Boolean,
+    /** Set for a friend's playlist: shown with [ownerAvatarUrl] before the song count. */
+    ownerName: String?,
+    ownerAvatarUrl: String?,
     accent: Color,
     surfaceColor: Color,
     fallbackName: String,
@@ -1409,7 +1420,8 @@ private fun PlaylistHeroHeader(
                             modifier = Modifier.size(coverSize * 0.5f)
                         )
                     }
-                    playlist.coverImageUri != null -> SmartImage(
+                    // A blank cover (some connected playlists report "") falls through to the collage.
+                    !playlist.coverImageUri.isNullOrBlank() -> SmartImage(
                         model = playlist.coverImageUri,
                         contentDescription = null,
                         modifier = Modifier.fillMaxSize(),
@@ -1436,7 +1448,46 @@ private fun PlaylistHeroHeader(
                 modifier = Modifier.padding(horizontal = 24.dp)
             )
             Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.padding(horizontal = 24.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (ownerName != null) {
+                    if (ownerAvatarUrl != null) {
+                        SmartImage(
+                            model = ownerAvatarUrl,
+                            contentDescription = null,
+                            modifier = Modifier.size(22.dp),
+                            shape = CircleShape
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier.size(22.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                ownerName.take(1).uppercase(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = ownerName,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontFamily = GoogleSansRounded),
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    Text(
+                        text = "  ·  ",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Text(
                     text = stringResource(
                         R.string.playlist_song_duration_line,

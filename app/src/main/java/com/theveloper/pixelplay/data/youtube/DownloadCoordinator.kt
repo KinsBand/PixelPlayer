@@ -6,6 +6,7 @@ import com.theveloper.pixelplay.data.model.DownloadState
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.model.TrackSource
 import com.theveloper.pixelplay.data.preferences.PlaylistPreferencesRepository
+import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
 import com.theveloper.pixelplay.data.repository.MusicRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -22,9 +23,11 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -48,6 +51,7 @@ class DownloadCoordinator @Inject constructor(
     private val cloudSongDao: CloudSongDao,
     private val musicRepository: MusicRepository,
     private val playlistPreferencesRepository: PlaylistPreferencesRepository,
+    private val userPreferencesRepository: UserPreferencesRepository,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -80,6 +84,107 @@ class DownloadCoordinator @Inject constructor(
     val bulkState: StateFlow<BulkDownloadState?> = _bulkState.asStateFlow()
     private var bulkJob: Job? = null
 
+    /** "Download all liked songs" only runs on Wi-Fi (unmetered) when this is on. */
+    val wifiOnly: StateFlow<Boolean> = userPreferencesRepository.likedDownloadsWifiOnlyFlow
+        .stateIn(scope, SharingStarted.Eagerly, false)
+
+    /** An approved bulk download is waiting for Wi-Fi. */
+    val waitingForWifi: StateFlow<Boolean> = userPreferencesRepository.likedDownloadsWaitingForWifiFlow
+        .stateIn(scope, SharingStarted.Eagerly, false)
+
+    private val connectivity = context.getSystemService(android.net.ConnectivityManager::class.java)
+    @Volatile private var onUnmetered: Boolean? = null
+    @Volatile private var started = false
+
+    private fun isOnUnmetered(): Boolean {
+        val caps = connectivity?.getNetworkCapabilities(connectivity.activeNetwork) ?: return false
+        return caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+    }
+
+    /**
+     * Watches the connection (called once from the Application). Joining Wi-Fi while a
+     * Wi-Fi-only bulk download is waiting asks for approval with a notification; leaving Wi-Fi
+     * mid-run pauses it until the next time.
+     */
+    fun start() {
+        if (started) return
+        started = true
+        connectivity?.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onCapabilitiesChanged(network: android.net.Network, caps: android.net.NetworkCapabilities) {
+                onConnectionChanged(caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED))
+            }
+
+            override fun onLost(network: android.net.Network) = onConnectionChanged(false)
+        })
+    }
+
+    private fun onConnectionChanged(unmetered: Boolean) {
+        val previous = onUnmetered
+        onUnmetered = unmetered
+        if (previous == unmetered) return
+        scope.launch {
+            if (unmetered) {
+                if (bulkJob?.isActive == true) return@launch
+                if (!userPreferencesRepository.likedDownloadsWaitingForWifiFlow.first()) return@launch
+                val pending = likedSongsToDownload().size
+                if (pending == 0) userPreferencesRepository.setLikedDownloadsWaitingForWifi(false)
+                else notifications.showWifiApproval(pending)
+            } else if (previous == true) {
+                notifications.cancelWifiApproval()
+                if (bulkJob?.isActive == true && userPreferencesRepository.likedDownloadsWifiOnlyFlow.first()) {
+                    cancelBulk()
+                    userPreferencesRepository.setLikedDownloadsWaitingForWifi(true)
+                    notifications.showBulkFinished("Paused until you're back on Wi-Fi")
+                }
+            }
+        }
+    }
+
+    fun setWifiOnly(enabled: Boolean) {
+        scope.launch {
+            userPreferencesRepository.setLikedDownloadsWifiOnly(enabled)
+            // Already approved and only waiting for Wi-Fi: nothing to wait for any more.
+            if (!enabled && userPreferencesRepository.likedDownloadsWaitingForWifiFlow.first()) {
+                approveWaitingBulkDownload()
+            }
+        }
+    }
+
+    /**
+     * The Settings "Download all liked songs" confirmation. Starts now, or (Wi-Fi only and not
+     * on Wi-Fi) remembers the approval and asks again when Wi-Fi connects.
+     */
+    fun requestDownloadAllLiked() {
+        scope.launch {
+            if (userPreferencesRepository.likedDownloadsWifiOnlyFlow.first() && !isOnUnmetered()) {
+                userPreferencesRepository.setLikedDownloadsWaitingForWifi(true)
+                announce("Liked songs will download when you're on Wi-Fi")
+            } else {
+                downloadAllLiked()
+            }
+        }
+    }
+
+    /** "Download" on the Wi-Fi notification. */
+    fun approveWaitingBulkDownload() {
+        notifications.cancelWifiApproval()
+        scope.launch {
+            userPreferencesRepository.setLikedDownloadsWaitingForWifi(false)
+            downloadAllLiked()
+        }
+    }
+
+    /** "Not now" (or swiped away): keep waiting and ask again next time Wi-Fi connects. */
+    fun postponeWaitingBulkDownload() {
+        notifications.cancelWifiApproval()
+    }
+
+    /** Settings: stop waiting for Wi-Fi. */
+    fun cancelWaitingForWifi() {
+        notifications.cancelWifiApproval()
+        scope.launch { userPreferencesRepository.setLikedDownloadsWaitingForWifi(false) }
+    }
+
     fun isOnlineSong(song: Song): Boolean =
         song.youtubeId != null || song.id.startsWith("yt_") || song.id.startsWith("spotify_") ||
             song.contentUriString.startsWith("youtube://") || song.contentUriString.startsWith("spotify://") ||
@@ -88,25 +193,74 @@ class DownloadCoordinator @Inject constructor(
     fun isDownloaded(song: Song): Boolean =
         song.downloadState == DownloadState.DOWNLOADED || song.id in downloadedIds.value
 
+    /** High / Medium / Low with sizes, for the full player's download menu. */
+    suspend fun downloadOptions(song: Song): List<DownloadOption> = songDownloadManager.downloadOptions(song)
+
+    fun estimateSeconds(bytes: Long): Long = songDownloadManager.estimateSeconds(bytes)
+
+    /** Running single-song downloads, so they can be paused or cancelled. */
+    private val songJobs = java.util.concurrent.ConcurrentHashMap<String, Job>()
+    /** What was asked for, so a paused download resumes with the same song and quality. */
+    private val songRequests = java.util.concurrent.ConcurrentHashMap<String, Pair<Song, DownloadQuality?>>()
+
     /** Starts (or joins) a download for [song]. Safe to call repeatedly. */
-    fun download(song: Song) {
+    fun download(song: Song, quality: DownloadQuality? = null) {
         if (!isOnlineSong(song)) {
             announce("This song is already on your device")
             return
         }
-        scope.launch {
-            val ok = downloadWithNotification(song, notifyUser = true)
+        if (songJobs[song.id]?.isActive == true) return
+        songRequests[song.id] = song to quality
+        val job = scope.launch {
+            val ok = downloadWithNotification(song, notifyUser = true, quality = quality)
+            if (ok) songRequests.remove(song.id)
             // Keep the liked-downloads playlist current once the user has created it.
             if (ok && playlistPreferencesRepository.getPlaylistsOnce().any { it.id == LIKED_DOWNLOADS_PLAYLIST_ID }) {
                 syncLikedDownloadsPlaylist()
             }
         }
+        songJobs[song.id] = job
+        job.invokeOnCompletion { songJobs.remove(song.id, job) }
     }
 
-    private suspend fun downloadWithNotification(song: Song, notifyUser: Boolean): Boolean {
+    fun isPaused(songId: String): Boolean = progress.value[songId] is DownloadProgress.Paused
+
+    /** Pause keeps the bytes downloaded so far; [resume] continues from them. */
+    fun pause(songId: String) {
+        val job = songJobs[songId] ?: return
+        songDownloadManager.requestPause(songId)
+        job.cancel()
+    }
+
+    fun resume(songId: String) {
+        val (song, quality) = songRequests[songId] ?: return
+        download(song, quality)
+    }
+
+    fun togglePause(songId: String) = if (isPaused(songId)) resume(songId) else pause(songId)
+
+    /** Stops the download and throws away what was downloaded so far. */
+    fun cancel(songId: String) {
+        songJobs[songId]?.cancel()
+        songRequests.remove(songId)
+        songDownloadManager.discard(songId)
+        notifications.cancelForSong(songId)
+    }
+
+    /**
+     * @param songNotification Per-song notification; off for the bulk run, which has one
+     *   notification for the whole batch.
+     */
+    private suspend fun downloadWithNotification(
+        song: Song,
+        notifyUser: Boolean,
+        songNotification: Boolean = true,
+        quality: DownloadQuality? = null,
+    ): Boolean {
         try { musicRepository.saveCloudSong(song) } catch (e: CancellationException) { throw e }
         catch (e: Exception) { Timber.tag(TAG).w(e, "Could not persist cloud song %s", song.id) }
 
+        if (!songNotification) return songDownloadManager.downloadSong(song).isSuccess
         val notifId = notifications.showResolving(song.title, song.id)
         val progressJob = scope.launch {
             var lastPercent = -1
@@ -114,12 +268,12 @@ class DownloadCoordinator @Inject constructor(
                 val p = map[song.id] as? DownloadProgress.Downloading ?: return@collect
                 if (p.percent != lastPercent) {
                     lastPercent = p.percent
-                    notifications.showProgress(song.title, p.percent, notifId)
+                    notifications.showProgress(song.title, p.percent, notifId, song.id)
                 }
             }
         }
         return try {
-            val result = songDownloadManager.downloadSong(song)
+            val result = songDownloadManager.downloadSong(song, quality)
             result.fold(
                 onSuccess = {
                     notifications.showCompleted(song.title, notifId)
@@ -134,7 +288,9 @@ class DownloadCoordinator @Inject constructor(
                 }
             )
         } catch (e: CancellationException) {
-            notifications.cancel(notifId)
+            val paused = songDownloadManager.downloadProgressMap.value[song.id] as? DownloadProgress.Paused
+            if (paused != null) notifications.showPaused(song.title, paused.percent, notifId, song.id)
+            else notifications.cancel(notifId)
             throw e
         } finally {
             progressJob.cancel()
@@ -161,17 +317,21 @@ class DownloadCoordinator @Inject constructor(
             val pending = likedSongsToDownload()
             _bulkState.value = BulkDownloadState(total = pending.size, running = pending.isNotEmpty())
             if (pending.isNotEmpty()) {
+                notifications.showBulkProgress(0, pending.size, 0)
                 val gate = Semaphore(BULK_PARALLELISM)
                 coroutineScope {
                     pending.map { song ->
                         async {
                             gate.withPermit {
-                                val ok = downloadWithNotification(song, notifyUser = false)
-                                _bulkState.update { state ->
-                                    state?.copy(
-                                        completed = state.completed + if (ok) 1 else 0,
-                                        failed = state.failed + if (ok) 0 else 1
+                                val ok = downloadWithNotification(song, notifyUser = false, songNotification = false)
+                                val state = _bulkState.updateAndGet { current ->
+                                    current?.copy(
+                                        completed = current.completed + if (ok) 1 else 0,
+                                        failed = current.failed + if (ok) 0 else 1
                                     )
+                                }
+                                if (state != null) {
+                                    notifications.showBulkProgress(state.completed + state.failed, state.total, state.failed)
                                 }
                             }
                         }
@@ -181,19 +341,20 @@ class DownloadCoordinator @Inject constructor(
             syncLikedDownloadsPlaylist()
             val final = _bulkState.value
             _bulkState.value = final?.copy(running = false)
-            announce(
-                when {
-                    final == null || final.total == 0 -> "All liked songs are already downloaded"
-                    final.failed == 0 -> "Downloaded ${final.completed} liked songs"
-                    else -> "Downloaded ${final.completed} liked songs, ${final.failed} failed"
-                }
-            )
+            val summary = when {
+                final == null || final.total == 0 -> "All liked songs are already downloaded"
+                final.failed == 0 -> "Downloaded ${final.completed} liked songs"
+                else -> "Downloaded ${final.completed} liked songs, ${final.failed} failed"
+            }
+            if (final != null && final.total > 0) notifications.showBulkFinished(summary) else notifications.cancelBulk()
+            announce(summary)
         }
     }
 
     fun cancelBulk() {
         bulkJob?.cancel()
         _bulkState.update { it?.copy(running = false) }
+        notifications.cancelBulk()
     }
 
     /**

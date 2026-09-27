@@ -309,18 +309,19 @@ fun QueueBottomSheet(
         }
     }
 
-    // Read show queue history preference
+    // "Show queue history" now only shows or hides the History button below; the queue
+    // itself always starts at the playing song.
     val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
     val showQueueHistory = settingsState.showQueueHistory
     val heardSongs by viewModel.heardSongs.collectAsStateWithLifecycle()
     val ambientSuggestionsEnabled by viewModel.ambientSuggestionsEnabled.collectAsStateWithLifecycle()
     val setListenEnabled = rememberListenAction()
 
-    // Offset to convert display indices to queue indices when history is hidden.
-    val queueIndexOffset = if (showQueueHistory || currentSongIndex < 0) 0 else currentSongIndex
+    // Offset to convert display indices to queue indices (songs before the current one are
+    // never listed; they're in the History section instead).
+    val queueIndexOffset = if (currentSongIndex < 0) 0 else currentSongIndex
 
-    // Show full queue including history (Apple Music style) OR only from current song.
-    // Use subList when possible to avoid copying large queues.
+    // Only from the current song. Use subList when possible to avoid copying large queues.
     val displaySongs = remember(queue, queueIndexOffset) {
         if (queueIndexOffset == 0) {
             queue
@@ -346,7 +347,8 @@ fun QueueBottomSheet(
     // Why the mix picked each of its songs, and which are discoveries (sparkle unless liked).
     val mixInsights by viewModel.mixSongInsights.collectAsStateWithLifecycle()
     val likedSongIds by viewModel.favoriteSongIds.collectAsStateWithLifecycle()
-    val historySongs = remember(playHistory, displaySongs, currentSongDisplayIndex, currentSongId) {
+    val historySongs = remember(playHistory, displaySongs, currentSongDisplayIndex, currentSongId, showQueueHistory) {
+        if (!showQueueHistory) return@remember emptyList<Song>()
         val shownAbove = displaySongs.take((currentSongDisplayIndex + 1).coerceAtLeast(0))
             .mapTo(HashSet()) { it.id }
         playHistory.filterNot { it.id in shownAbove || it.id == currentSongId }

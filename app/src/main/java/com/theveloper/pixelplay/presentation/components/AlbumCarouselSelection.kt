@@ -295,9 +295,9 @@ fun AlbumCarouselSection(
                     }
 
                     if (isSongDownloading) {
-                        AmbientDownloadCoverOverlay(
-                            isDownloading = true,
-                            shape = RoundedCornerShape(corner),
+                        DownloadTraceCoverOverlay(
+                            songId = song.id,
+                            corner = corner,
                             modifier = Modifier.fillMaxSize()
                         )
                     }
