@@ -47,6 +47,16 @@ object AlbumArtUtils {
     // Extraction/re-encode are the only large transient allocations here. Two permits keep
     // parallel Coil fetches useful while bounding peak memory; cache hits never take a permit.
     private val artworkWorkPermits = java.util.concurrent.Semaphore(2)
+
+    /**
+     * Marks a cache hit for LRU trimming. Rewriting the timestamp on every hit cost a
+     * filesystem metadata write per cover shown; once a day is precise enough for eviction.
+     */
+    internal fun touchIfStale(file: File, now: Long = System.currentTimeMillis()) {
+        if (now - file.lastModified() > CACHE_TOUCH_INTERVAL_MS) file.setLastModified(now)
+    }
+
+    private const val CACHE_TOUCH_INTERVAL_MS = 24L * 60 * 60 * 1000
     private const val ARTWORK_HEADROOM_BYTES = 40L * 1024 * 1024
     private val cleanupScheduled = java.util.concurrent.atomic.AtomicBoolean(false)
     private val commonArtworkFileNames = listOf(
@@ -118,7 +128,7 @@ object AlbumArtUtils {
 
         val hasCachedArtwork = cachedFile.exists() && cachedFile.length() > 0
         if (hasCachedArtwork) {
-            cachedFile.setLastModified(System.currentTimeMillis())
+            touchIfStale(cachedFile)
         }
 
         return resolveAlbumArtUriForLibraryScan(
@@ -136,7 +146,7 @@ object AlbumArtUtils {
         val cachedFile = getCachedAlbumArtFile(appContext, songId)
         if (!cachedFile.exists()) return null
 
-        cachedFile.setLastModified(System.currentTimeMillis())
+        touchIfStale(cachedFile)
         return shareableCacheUri(appContext, cachedFile)
     }
 
@@ -173,7 +183,7 @@ object AlbumArtUtils {
 
         if (!forceRefresh) {
             if (cachedFile.exists() && cachedFile.length() > 0) {
-                cachedFile.setLastModified(System.currentTimeMillis())
+                touchIfStale(cachedFile)
                 PerformanceMetrics.increment(PerformanceMetrics.Counters.ARTWORK_CACHE_HIT)
                 scheduleOversizedArtworkShrink(cachedFile)
                 return cachedFile

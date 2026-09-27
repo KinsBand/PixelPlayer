@@ -25,6 +25,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import coil.annotation.ExperimentalCoilApi
+import coil.imageLoader
+import com.theveloper.pixelplay.data.metadata.ArtworkUrls
 import coil.compose.SubcomposeAsyncImage
 import coil.compose.SubcomposeAsyncImageContent
 import coil.memory.MemoryCache
@@ -81,7 +83,10 @@ fun OptimizedAlbumArt(
             is ImageRequest -> uri.placeholderMemoryCacheKey
                 ?: uri.memoryCacheKey
                 ?: memoryCacheKey?.let { MemoryCache.Key(it) }
-            else -> memoryCacheKey?.let { MemoryCache.Key(it) }
+            // Show the cover a list row already decoded on the first frame, then crossfade to
+            // this larger request. The request's own key can't help: it isn't cached yet.
+            else -> smallerArtworkInMemory(context.imageLoader.memoryCache, uri)
+                ?: memoryCacheKey?.let { MemoryCache.Key(it) }
         }
     }
     val requestModel = remember(context, uri, requestTargetSize) {
@@ -228,6 +233,33 @@ internal fun safeAlbumArtTargetSize(targetSize: Size): Size {
     } else {
         targetSize
     }
+}
+
+/**
+ * Memory-cache keys under which list, grid and mini-player rows store [model]'s cover. Those
+ * rows use Coil's automatic keys, which are the URL after [ArtworkUrls.forDisplay] maps it to
+ * a shared size variant (or the plain URL when it is not rewritten).
+ */
+internal fun smallerArtworkKeyCandidates(model: Any?): List<String> {
+    val url = when (model) {
+        is String -> model
+        is Uri -> model.toString()
+        else -> null
+    }?.takeIf { it.isNotBlank() } ?: return emptyList()
+    return listOf(
+        ArtworkUrls.forDisplay(url, SmartImageListTargetSize.pxOr(128), SmartImageListTargetSize.pxOr(128)),
+        ArtworkUrls.forDisplay(url, 300, 300),
+        url
+    ).distinct()
+}
+
+private fun Size.pxOr(fallback: Int): Int = (width as? Dimension.Pixels)?.px ?: fallback
+
+private fun smallerArtworkInMemory(memoryCache: MemoryCache?, model: Any?): MemoryCache.Key? {
+    val cache = memoryCache ?: return null
+    return smallerArtworkKeyCandidates(model).asSequence()
+        .map { MemoryCache.Key(it) }
+        .firstOrNull { cache[it] != null }
 }
 
 internal fun albumArtMemoryCacheKey(model: Any?, targetSize: Size): String? {

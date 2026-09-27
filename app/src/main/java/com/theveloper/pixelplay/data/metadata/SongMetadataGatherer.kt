@@ -23,8 +23,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import timber.log.Timber
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -53,7 +51,8 @@ import kotlin.math.abs
 class SongMetadataGatherer @Inject constructor(
     @ApplicationContext private val context: Context,
     private val lastFm: LastFmRepository,
-    private val metadataStore: SongMetadataStore
+    private val metadataStore: SongMetadataStore,
+    okHttpClient: okhttp3.OkHttpClient
 ) {
     /** What was found for one song. Any field may be null. */
     data class Gathered(
@@ -481,20 +480,25 @@ class SongMetadataGatherer @Inject constructor(
 
     private fun getJson(url: String): JSONObject? = getJsonWithCode(url).second
 
+    /**
+     * Shares the app's connection pool, so Deezer / iTunes lookups reuse warm HTTP/2
+     * connections instead of a new TLS handshake per request, and honour offline mode.
+     */
+    private val http = okHttpClient.newBuilder()
+        .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
+
     private fun getJsonWithCode(url: String): Pair<Int, JSONObject?> {
-        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 3_000
-            readTimeout = 4_000
-            setRequestProperty("Accept", "application/json")
-        }
+        val request = okhttp3.Request.Builder().url(url).header("Accept", "application/json").build()
         return try {
-            val code = conn.responseCode
-            if (code !in 200..299) code to null
-            else code to conn.inputStream.bufferedReader().use { JSONObject(it.readText()) }.takeIf { !it.has("error") }
+            http.newCall(request).execute().use { response ->
+                val code = response.code
+                if (code !in 200..299) code to null
+                else code to JSONObject(response.body.string()).takeIf { !it.has("error") }
+            }
         } catch (e: Exception) {
             -1 to null
-        } finally {
-            conn.disconnect()
         }
     }
 

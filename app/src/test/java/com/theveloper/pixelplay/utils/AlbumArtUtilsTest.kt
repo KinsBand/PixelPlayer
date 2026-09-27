@@ -57,4 +57,19 @@ class AlbumArtUtilsTest {
         assertThat(resolved).isNull()
         root.deleteRecursively()
     }
+
+    @Test
+    fun touchIfStale_writesTheTimestampAtMostDaily() {
+        val file = createTempDirectory("album-art-touch").toFile().resolve("art.jpg").apply { writeBytes(byteArrayOf(1)) }
+        val day = 24L * 60 * 60 * 1000
+        val base = 1_700_000_000_000L
+        file.setLastModified(base)
+
+        AlbumArtUtils.touchIfStale(file, now = base + day / 2)
+        assertThat(file.lastModified()).isEqualTo(base)
+
+        AlbumArtUtils.touchIfStale(file, now = base + 2 * day)
+        assertThat(file.lastModified()).isEqualTo(base + 2 * day)
+        file.parentFile?.deleteRecursively()
+    }
 }
