@@ -12,6 +12,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.isUnspecified
 import com.theveloper.pixelplay.data.database.EnrichmentDao
 import com.theveloper.pixelplay.data.database.TrackAnalysisEntity
 import com.theveloper.pixelplay.data.lyrics.SongSectionKind
