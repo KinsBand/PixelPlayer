@@ -136,6 +136,7 @@ fun MashupScreen(
                     onDismissRequest = { mashupViewModel.closeSongPicker() },
                     sheetState = sheetState
                 ) {
+                    com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
                     SongPickerSheet(
                         songs = mashupUiState.allSongs,
                         onSongSelected = { song ->

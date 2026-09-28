@@ -468,6 +468,7 @@ fun ThemeSelectorItem(
             containerColor = MaterialTheme.colorScheme.surface,
             contentColor = MaterialTheme.colorScheme.onSurface
         ) {
+            com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
             Column(modifier = Modifier.padding(bottom = 28.dp)) {
                 Text(
                     text = label,

@@ -441,6 +441,7 @@ private fun FriendTrackSheet(
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 SmartImage(model = track.coverUrl, contentDescription = null, modifier = Modifier.size(64.dp), shape = RoundedCornerShape(14.dp))
@@ -546,6 +547,7 @@ private fun FriendHistorySheet(
     val newest = remember(history) { history.maxByOrNull { it.playedAt } }
     val playableCount = remember(history) { history.count(canPlay) }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 FriendAvatar(friend, size = 52.dp)

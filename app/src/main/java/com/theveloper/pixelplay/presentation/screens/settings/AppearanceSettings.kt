@@ -6,6 +6,7 @@ import androidx.compose.material.icons.outlined.Style
 import androidx.compose.material.icons.rounded.Animation
 import androidx.compose.material.icons.rounded.BlurOff
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.UnfoldMore
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -30,13 +31,16 @@ import com.theveloper.pixelplay.presentation.screens.SwitchSettingItem
 import com.theveloper.pixelplay.presentation.screens.ThemeSelectorItem
 import com.theveloper.pixelplay.presentation.viewmodel.SettingsUiState
 import com.theveloper.pixelplay.presentation.viewmodel.SettingsViewModel
+import com.theveloper.pixelplay.utils.setHideNavigationBar
+import com.theveloper.pixelplay.utils.setHideStatusBar
+import kotlinx.coroutines.launch
 
 /**
- * Appearance: how the app looks — theme and effects, the navigation bar, and the
- * camera-cutout island.
+ * Appearance: how the app looks — theme and effects, the navigation bar, full screen (hiding
+ * the status / gesture bars) and the camera-cutout island.
  *
- * Language and full-screen mode moved to General (they change behaviour, not looks), and
- * the player's own look moved to Player & Lyrics.
+ * Language moved to General (it changes behaviour, not looks), and the player's own look moved
+ * to Player & Lyrics.
  */
 @Composable
 internal fun AppearanceSettingsContent(
@@ -128,7 +132,37 @@ internal fun AppearanceSettingsContent(
         )
     }
 
+    FullScreenSettingsSection()
+
     CameraIslandSettingsSection()
+}
+
+/** Full screen: hide the status bar and / or the gesture bar while the app is open. */
+@Composable
+internal fun FullScreenSettingsSection() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val systemBarsPrefs = com.theveloper.pixelplay.utils.rememberSystemBarsPrefs()
+    // Hide the system bars while the app is open. They stay hidden: anything that brings them
+    // back (the back gesture, a dialog, returning to the app) hides them again.
+    SettingsSubsection(title = stringResource(R.string.settings_full_screen_section)) {
+        SwitchSettingItem(
+            title = stringResource(R.string.settings_hide_status_bar_title),
+            subtitle = stringResource(R.string.settings_hide_status_bar_subtitle),
+            checked = systemBarsPrefs.hideStatusBar,
+            onCheckedChange = { hide -> scope.launch { context.setHideStatusBar(hide) } },
+            leadingIcon = { Icon(Icons.Rounded.Fullscreen, null, tint = MaterialTheme.colorScheme.secondary) },
+            settingKey = "hide_status_bar"
+        )
+        SwitchSettingItem(
+            title = stringResource(R.string.settings_hide_gesture_bar_title),
+            subtitle = stringResource(R.string.settings_hide_gesture_bar_subtitle),
+            checked = systemBarsPrefs.hideNavigationBar,
+            onCheckedChange = { hide -> scope.launch { context.setHideNavigationBar(hide) } },
+            leadingIcon = { Icon(Icons.Rounded.Fullscreen, null, tint = MaterialTheme.colorScheme.secondary) },
+            settingKey = "hide_navigation_bar"
+        )
+    }
 }
 
 /** The camera-cutout island. App-wide, so it lives with the rest of the app's look. */

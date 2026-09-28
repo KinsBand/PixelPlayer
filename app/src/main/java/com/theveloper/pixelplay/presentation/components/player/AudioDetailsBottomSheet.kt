@@ -120,6 +120,7 @@ fun AudioDetailsBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState
     ) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         AudioDetailsSheetContent(
             song = song,
             audioMimeType = audioMimeType ?: scanned?.mimeType,

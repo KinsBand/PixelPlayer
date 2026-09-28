@@ -167,6 +167,7 @@ fun LyricsMoreBottomSheet(
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         contentWindowInsets = { WindowInsets(top = 0, bottom = 0) }
     ) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Column(
             modifier = Modifier
                 .fillMaxWidth()

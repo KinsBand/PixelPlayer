@@ -51,6 +51,7 @@ fun ArtistAnalyticsBottomSheet(
             )
         }
     ) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Column(
             modifier = Modifier
                 .fillMaxWidth()

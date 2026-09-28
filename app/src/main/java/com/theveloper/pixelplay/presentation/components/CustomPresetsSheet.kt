@@ -59,6 +59,7 @@ fun CustomPresetsSheet(
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surface
     ) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Column(
             modifier = Modifier
                 .fillMaxWidth()

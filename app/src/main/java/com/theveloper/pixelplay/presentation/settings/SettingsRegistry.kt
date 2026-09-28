@@ -638,14 +638,14 @@ object SettingsRegistry {
         // Added 2026-09-23: settings that were on screen but missing from search.
         SettingEntry(
             key = "hide_status_bar",
-            categoryId = "general",
+            categoryId = "appearance",
             titleRes = R.string.settings_hide_status_bar_title,
             descriptionRes = R.string.settings_hide_status_bar_subtitle,
             keywords = listOf("full screen", "fullscreen", "status bar", "immersive", "hide", "clock", "notifications")
         ),
         SettingEntry(
             key = "hide_navigation_bar",
-            categoryId = "general",
+            categoryId = "appearance",
             titleRes = R.string.settings_hide_gesture_bar_title,
             descriptionRes = R.string.settings_hide_gesture_bar_subtitle,
             keywords = listOf("full screen", "fullscreen", "gesture bar", "navigation bar", "system bar", "hide", "immersive")

@@ -43,6 +43,7 @@ fun StreamingProviderSheet(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         dragHandle = { BottomSheetDefaults.DragHandle() }
     ) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Column(
             modifier = Modifier
                 .fillMaxWidth()

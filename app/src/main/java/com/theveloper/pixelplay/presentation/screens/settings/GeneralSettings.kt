@@ -3,11 +3,9 @@ package com.theveloper.pixelplay.presentation.screens.settings
 import android.app.Activity
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Language
-import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -20,14 +18,10 @@ import com.theveloper.pixelplay.presentation.screens.SwitchSettingItem
 import com.theveloper.pixelplay.presentation.screens.ThemeSelectorItem
 import com.theveloper.pixelplay.presentation.viewmodel.SettingsUiState
 import com.theveloper.pixelplay.presentation.viewmodel.SettingsViewModel
-import com.theveloper.pixelplay.utils.rememberSystemBarsPrefs
-import com.theveloper.pixelplay.utils.setHideNavigationBar
-import com.theveloper.pixelplay.utils.setHideStatusBar
-import kotlinx.coroutines.launch
 
 /**
  * General: how the app behaves, independent of how it looks — language, which screen it
- * opens on, gestures and haptics, and full-screen mode.
+ * opens on, and gestures and haptics. Full-screen mode lives in Appearance.
  *
  * Collects what used to be split between Appearance (language, full screen) and the old
  * Navigation page (starting tab, library layout, gestures, haptics).
@@ -38,8 +32,6 @@ internal fun GeneralSettingsContent(
     uiState: SettingsUiState
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val systemBarsPrefs = rememberSystemBarsPrefs()
 
     SettingsSubsection(title = stringResource(R.string.settings_language_section)) {
         ThemeSelectorItem(
@@ -87,7 +79,7 @@ internal fun GeneralSettingsContent(
         )
     }
 
-    SettingsSubsection(title = stringResource(R.string.settings_gestures_haptics_section)) {
+    SettingsSubsection(title = stringResource(R.string.settings_gestures_haptics_section), addBottomSpace = false) {
         SwitchSettingItem(
             title = stringResource(R.string.settings_haptic_feedback_title),
             subtitle = stringResource(R.string.settings_haptic_feedback_subtitle),
@@ -95,27 +87,6 @@ internal fun GeneralSettingsContent(
             onCheckedChange = { settingsViewModel.setHapticsEnabled(it) },
             leadingIcon = { Icon(painterResource(R.drawable.rounded_touch_app_24), null, tint = MaterialTheme.colorScheme.secondary) },
             settingKey = "haptic_feedback"
-        )
-    }
-
-    // Hide the system bars while the app is open. Swiping in from the edge shows them
-    // briefly; they hide again on their own.
-    SettingsSubsection(title = stringResource(R.string.settings_full_screen_section), addBottomSpace = false) {
-        SwitchSettingItem(
-            title = stringResource(R.string.settings_hide_status_bar_title),
-            subtitle = stringResource(R.string.settings_hide_status_bar_subtitle),
-            checked = systemBarsPrefs.hideStatusBar,
-            onCheckedChange = { hide -> scope.launch { context.setHideStatusBar(hide) } },
-            leadingIcon = { Icon(Icons.Rounded.Fullscreen, null, tint = MaterialTheme.colorScheme.secondary) },
-            settingKey = "hide_status_bar"
-        )
-        SwitchSettingItem(
-            title = stringResource(R.string.settings_hide_gesture_bar_title),
-            subtitle = stringResource(R.string.settings_hide_gesture_bar_subtitle),
-            checked = systemBarsPrefs.hideNavigationBar,
-            onCheckedChange = { hide -> scope.launch { context.setHideNavigationBar(hide) } },
-            leadingIcon = { Icon(Icons.Rounded.Fullscreen, null, tint = MaterialTheme.colorScheme.secondary) },
-            settingKey = "hide_navigation_bar"
         )
     }
 }

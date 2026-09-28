@@ -45,6 +45,7 @@ fun TrackStreamBreakdownDialog(
             )
         }
     ) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Column(
             modifier = Modifier
                 .fillMaxWidth()

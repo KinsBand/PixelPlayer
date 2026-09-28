@@ -113,6 +113,7 @@ fun PlaylistBottomSheet(
         sheetState = sheetState,
         contentWindowInsets = { BottomSheetDefaults.modalWindowInsets } // Manejo de insets como el teclado
     ) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Box(modifier = Modifier.fillMaxSize()) {
 
             Column {

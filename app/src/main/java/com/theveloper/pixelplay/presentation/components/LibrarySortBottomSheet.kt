@@ -102,6 +102,7 @@ fun LibrarySortBottomSheet(
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 8.dp
     ) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Column(
             modifier = Modifier
                 .fillMaxWidth()

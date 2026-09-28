@@ -85,6 +85,7 @@ fun SongActionSheet(
         containerColor = colors.surfaceContainerLow,
         contentColor = colors.onSurface
     ) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Column(
             modifier = Modifier
                 .fillMaxWidth()

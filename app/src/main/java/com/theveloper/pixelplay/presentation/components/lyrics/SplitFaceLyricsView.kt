@@ -506,11 +506,12 @@ private fun CentreDivider(
                 }
             )
     ) {
-        // Lines are 20 % of the width each, so the gaps either side are ~30 % minus the button.
-        val lineWidth = maxWidth * 0.2f
+        // With section pills the lines shrink to 10 % each, so a label like "Pre-chorus" fits in
+        // the gap either side (at 20 % "Chorus" was cut to "Cho…"); without pills they're 20 %.
+        val lineWidth = maxWidth * (if (sectionChip != null) 0.1f else 0.2f)
         val centreBlock = if (hasPlayPause) 52.dp else 22.dp
         val gap = (maxWidth - lineWidth * 2 - centreBlock) / 2
-        val chipMax = (gap - 20.dp).coerceAtLeast(48.dp)
+        val chipMax = (gap - 16.dp).coerceAtLeast(48.dp)
 
         Row(
             modifier = Modifier.align(Alignment.Center),

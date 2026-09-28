@@ -367,6 +367,7 @@ fun SongInfoBottomSheet(
         },
         sheetState = sheetState,
     ) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Box(
             modifier = Modifier
                 .fillMaxWidth(),

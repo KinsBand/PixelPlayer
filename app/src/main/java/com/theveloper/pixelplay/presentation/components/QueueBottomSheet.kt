@@ -110,6 +110,7 @@ import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.derivedStateOf
@@ -183,6 +184,9 @@ import kotlinx.coroutines.launch
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
@@ -360,6 +364,24 @@ fun QueueBottomSheet(
         isHistoryExpanded -> historySongs.size + 1
         else -> 1
     }
+    // Landscape: a sidebar. The left half is fixed (header, the playing song with its mix chips,
+    // the History button, then as many upcoming songs as fit); the queue carries on in the right
+    // half, which scrolls, with the toolbar at its bottom.
+    val isLandscape = LocalConfiguration.current.orientation ==
+        android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    var leftSlotsAreaPx by remember { mutableIntStateOf(0) }
+    var leftSlotRowPx by remember { mutableIntStateOf(0) }
+    val queueDensity = LocalDensity.current
+    val leftSlotSpacingPx = with(queueDensity) { 8.dp.roundToPx() }
+    val leftSlotRowEstimatePx = with(queueDensity) { 72.dp.roundToPx() }
+    val leftQueueSlots = if (!isLandscape || leftSlotsAreaPx <= 0) 0 else {
+        val rowPx = if (leftSlotRowPx > 0) leftSlotRowPx else leftSlotRowEstimatePx
+        ((leftSlotsAreaPx + leftSlotSpacingPx) / (rowPx + leftSlotSpacingPx)).coerceAtLeast(0)
+    }
+    val leftSlotStart = if (currentSongDisplayIndex >= 0) currentSongDisplayIndex + 1 else 0
+    val leftSlotEnd = (leftSlotStart + leftQueueSlots).coerceIn(leftSlotStart.coerceAtMost(displaySongCount), displaySongCount)
+    // First display index the scrolling list shows (0 in portrait: it shows everything).
+    val listStartIndex = if (isLandscape) leftSlotEnd.coerceAtLeast(0) else 0
     val currentSongListIndex = currentSongDisplayIndex + historyListOffset
 
     // Opening/closing the history adds/removes rows ABOVE the History button. Keep the button
@@ -369,6 +391,14 @@ fun QueueBottomSheet(
         historyAnchorPx = listState.layoutInfo.visibleItemsInfo
             .firstOrNull { it.key == "play_history_header" }?.offset
         isHistoryExpanded = open
+        // Landscape: the button is on the left and the history rows open at the top of the
+        // right half, so bring them into view.
+        if (isLandscape && open) {
+            queueCoroutineScope.launch {
+                withFrameNanos { }
+                runCatching { listState.animateScrollToItem(0) }
+            }
+        }
     }
     LaunchedEffect(isHistoryExpanded) {
         val anchor = historyAnchorPx ?: return@LaunchedEffect
@@ -563,7 +593,7 @@ fun QueueBottomSheet(
     var isFirstScrollByCurrentSongId by remember(currentSongId) { mutableStateOf(true) }
 
     LaunchedEffect(currentSongId) {
-        if (!isReordering && !reorderHandleInUse && currentSongDisplayIndex >= 0 && currentSongDisplayIndex < displaySongCount) {
+        if (!isLandscape && !isReordering && !reorderHandleInUse && currentSongDisplayIndex >= 0 && currentSongDisplayIndex < displaySongCount) {
             val firstVisible = listState.firstVisibleItemIndex
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
             
@@ -834,11 +864,12 @@ fun QueueBottomSheet(
         Box(
             modifier = Modifier.fillMaxSize()
         ) {
-            Column {
-                val headerTopPadding = WindowInsets.statusBars
-                    .asPaddingValues()
-                    .calculateTopPadding() + 10.dp
+            val headerTopPadding = WindowInsets.statusBars
+                .asPaddingValues()
+                .calculateTopPadding() + 10.dp
 
+            // Header ("Next up", tracks lined up, Listen, source) and the live mix strip.
+            val headerBlock: @Composable () -> Unit = {
                 QueueHeaderSection(
                     isPlaying = isPlaying,
                     queueSourceName = currentQueueSourceName,
@@ -850,7 +881,9 @@ fun QueueBottomSheet(
                     onPlayPause = { viewModel.playPause() },
                     onNext = { viewModel.nextSong() },
                     onLocateCurrentSong = {
-                        if (currentSongDisplayIndex in 0..<displaySongCount) {
+                        if (isLandscape) {
+                            queueCoroutineScope.launch { listState.animateScrollToItem(0) }
+                        } else if (currentSongDisplayIndex in 0..<displaySongCount) {
                             queueCoroutineScope.launch {
                                 val firstVisible = listState.firstVisibleItemIndex
                                 if (abs(currentSongListIndex - firstVisible) > 20) {
@@ -880,6 +913,11 @@ fun QueueBottomSheet(
                     )
                 }
 
+            }
+
+            // The scrolling queue list (portrait: everything; landscape: what the left half
+            // doesn't show).
+            val queueListBlock: @Composable (Modifier) -> Unit = { listModifier ->
                 if (displaySongCount == 0 && heardSongs.isEmpty()) {
                     Box(
                         modifier         = Modifier
@@ -902,9 +940,7 @@ fun QueueBottomSheet(
                     )
                     val listBottomEdge = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 16.dp + 70.dp + 28.dp
                     Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
+                        modifier = listModifier
                             .clip(queueListShape)
                             // Rows blur and fade under the header (top) and the floating
                             // toolbar (bottom) instead of being cut off.
@@ -993,7 +1029,8 @@ fun QueueBottomSheet(
                                 }
                             }
 
-                            if (historySongs.isNotEmpty()) {
+                            // Landscape: the History button lives in the fixed left half.
+                            if (historySongs.isNotEmpty() && !isLandscape) {
                                 // One key for both states. The history rows sit above it (oldest at
                                 // the top, newest right above the button) so opening grows upwards.
                                 item(key = "play_history_header", contentType = "history_header") {
@@ -1010,11 +1047,13 @@ fun QueueBottomSheet(
                                     )
                                 }
                             }
+                            // Landscape: the songs already shown in the left half are skipped.
                             items(
-                                count = displaySongCount,
-                                key = { index -> activeKeyAt(index) },
+                                count = (displaySongCount - listStartIndex).coerceAtLeast(0),
+                                key = { rowIndex -> activeKeyAt(rowIndex + listStartIndex) },
                                 contentType = { "queue_song" }
-                            ) { index ->
+                            ) { rowIndex ->
+                                val index = rowIndex + listStartIndex
                                 val queueIndex = activeQueueIndexAt(index)
                                 if (queueIndex !in activeSongSource.indices) return@items
                                 val itemStableKey = activeKeyAt(index)
@@ -1173,6 +1212,127 @@ fun QueueBottomSheet(
                 }
             }
 
+            // A queue row without reordering, for the fixed left half in landscape.
+            val staticQueueRow: @Composable (Int, Modifier) -> Unit = { index, rowModifier ->
+                val queueIndex = activeQueueIndexAt(index)
+                val song = activeSongSource.getOrNull(queueIndex)
+                if (song != null) {
+                    QueuePlaylistSongItem(
+                        modifier = rowModifier.fillMaxWidth(),
+                        onClick = { onPlaySong(song, queueIndex) },
+                        song = song,
+                        mixReason = mixInsights[song.id]?.reason?.takeIf { index > currentSongDisplayIndex },
+                        isDiscovery = mixInsights[song.id]?.discovery == true &&
+                            !song.isFavorite && song.id !in likedSongIds,
+                        isCurrentSong = index == currentSongDisplayIndex,
+                        isPlaying = isPlaying && isVisible,
+                        isDragging = false,
+                        onRemoveClick = { onRemoveSong(song.id) },
+                        isReorderModeEnabled = false,
+                        isDragHandleVisible = false,
+                        isRemoveButtonVisible = false,
+                        enableSwipeToDismiss = index > currentSongDisplayIndex,
+                        swipeStateIdentity = activeKeyAt(index),
+                        onDismissSong = { onRemoveSong(song.id) },
+                        isFromPlaylist = true,
+                        onMoreOptionsClick = { onSongInfoClick(song) },
+                        dragHandle = {}
+                    )
+                }
+            }
+
+            if (!isLandscape) {
+                Column {
+                    headerBlock()
+                    queueListBlock(
+                        Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                    )
+                }
+            } else {
+                Row(modifier = Modifier.fillMaxSize()) {
+                    // Left half, fixed: header, the playing song + mix chips, History, then the
+                    // next songs until the half is full.
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                    ) {
+                        headerBlock()
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .padding(
+                                    start = 8.dp,
+                                    end = 4.dp,
+                                    bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 12.dp
+                                )
+                                .clip(RoundedCornerShape(26.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                .padding(top = 8.dp, bottom = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (currentSongDisplayIndex in 0 until displaySongCount) {
+                                key(activeKeyAt(currentSongDisplayIndex)) {
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        staticQueueRow(currentSongDisplayIndex, Modifier)
+                                        QueueMixChipsRow(
+                                            viewModel = viewModel,
+                                            cardTopGap = QueueMixChipsTopTrim,
+                                            modifier = Modifier.trimVertical(top = QueueMixChipsTopTrim, bottom = 4.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            if (historySongs.isNotEmpty()) {
+                                QueueHistoryToggle(
+                                    expanded = isHistoryExpanded,
+                                    count = historySongs.size,
+                                    onOpen = { toggleHistory(true) },
+                                    onClose = { toggleHistory(false) },
+                                    onClear = {
+                                        viewModel.clearPlayHistory()
+                                        isHistoryExpanded = false
+                                    }
+                                )
+                            }
+                            // As many upcoming songs as fit; the rest continue on the right.
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                                    .clipToBounds()
+                                    .onSizeChanged { leftSlotsAreaPx = it.height }
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    for (index in leftSlotStart until leftSlotEnd) {
+                                        key(activeKeyAt(index)) {
+                                            staticQueueRow(
+                                                index,
+                                                if (index == leftSlotStart) {
+                                                    Modifier.onSizeChanged { leftSlotRowPx = it.height }
+                                                } else Modifier
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Right half: the rest of the queue over the full height, scrolling.
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .padding(top = headerTopPadding, start = 4.dp)
+                    ) {
+                        queueListBlock(Modifier.fillMaxSize())
+                    }
+                }
+            }
+
             Box(
                 modifier = Modifier.fillMaxSize()
             ) {
@@ -1184,12 +1344,21 @@ fun QueueBottomSheet(
                 )
 
                 val navigationBarHeight = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                var toolbarWidthPx by remember { mutableIntStateOf(0) }
+                val toolbarWidthDp = with(LocalDensity.current) { toolbarWidthPx.toDp() }
 
                 Row(
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
+                        // Landscape: fixed at the bottom of the right half, centred in it.
+                        .align(if (isLandscape) Alignment.BottomEnd else Alignment.BottomCenter)
+                        .then(
+                            if (isLandscape) {
+                                Modifier.offset(x = -(LocalConfiguration.current.screenWidthDp.dp / 4) + (toolbarWidthDp / 2))
+                            } else Modifier
+                        )
                         .padding(bottom = fabSpacing + navigationBarHeight)
                         .height(70.dp)
+                        .onSizeChanged { toolbarWidthPx = it.width }
                         .then(directSheetDragModifier),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
@@ -1278,7 +1447,8 @@ fun QueueBottomSheet(
                                 isFabExpanded = !isFabExpanded
                             }
                             .zIndex(30f),
-                        contentAlignment = Alignment.BottomCenter
+                        // Landscape: the menu opens in the right half, above its toolbar.
+                        contentAlignment = if (isLandscape) Alignment.BottomEnd else Alignment.BottomCenter
                     ) {
                         // Options: a row of actions (Locate, Clear, Save as playlist) above a
                         // full-width prompt row with a back button. The prompt row takes the
@@ -1300,7 +1470,10 @@ fun QueueBottomSheet(
                                 isFabExpanded = false
                                 queueCoroutineScope.launch {
                                     val firstVisible = listState.firstVisibleItemIndex
-                                    if (Math.abs(currentSongListIndex - firstVisible) > 20) {
+                                    if (isLandscape) {
+                                        // The playing song is pinned in the left half.
+                                        listState.animateScrollToItem(0)
+                                    } else if (Math.abs(currentSongListIndex - firstVisible) > 20) {
                                         listState.scrollToItem(currentSongListIndex)
                                     } else {
                                         listState.animateScrollToItem(currentSongListIndex)
@@ -1341,7 +1514,7 @@ fun QueueBottomSheet(
                                 }
                             },
                             modifier = Modifier
-                                .fillMaxWidth()
+                                .fillMaxWidth(if (isLandscape) 0.5f else 1f)
                                 .padding(start = 16.dp, end = 16.dp, bottom = optionsBottom)
                         )
                     }
@@ -1356,7 +1529,17 @@ fun QueueBottomSheet(
             AnimatedVisibility(
                 visible = queueUndoBarState.isVisible,
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
+                    // Landscape: centred in the right half, where the list and toolbar are.
+                    .then(
+                        if (isLandscape) {
+                            Modifier
+                                .align(Alignment.BottomEnd)
+                                .fillMaxWidth(0.5f)
+                                .wrapContentWidth(Alignment.CenterHorizontally)
+                        } else {
+                            Modifier.align(Alignment.BottomCenter)
+                        }
+                    )
                     .padding(
                         bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 96.dp
                     )

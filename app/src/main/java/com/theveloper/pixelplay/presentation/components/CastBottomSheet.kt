@@ -481,6 +481,7 @@ fun CastBottomSheet(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         tonalElevation = 12.dp
     ) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         // AQUÍ APLICAMOS EL FIX: Anulamos la fábrica de overscroll para todo lo que esté aquí adentro
         CompositionLocalProvider(
             LocalOverscrollFactory provides null
@@ -2761,6 +2762,7 @@ private fun BluetoothDeviceSettingsSheet(
         containerColor = colors.surfaceContainerLow,
         dragHandle = { BottomSheetDefaults.DragHandle() },
     ) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
