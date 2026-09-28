@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Full screen:** with "Hide status bar" / "Hide gesture bar" on, the bars no longer come back and stay after the back gesture (e.g. on Pixel) or a screen transition; any time they reappear they're hidden again straight away. The two switches moved from General to Appearance.
 - **Streaming:** on weak mobile data, online songs no longer play for a moment, stop for a long time and then fail with a playback error. The local stream proxy passed audio on to the player only in 1 MB bursts, so the player ran dry, timed out and reopened while the abandoned downloads kept competing for the connection. Audio now reaches the player as it arrives, a stalled connection is replaced within 10 s from the same byte, abandoned downloads stop, and the player waits for the proxy instead of timing out after 8 s.
 - **Streaming:** when the connection can't keep up, playback no longer stops every second: after repeated buffering it waits for a few more seconds of audio before resuming. The next song is only prepared once the playing song has what it needs.
 - **Streaming:** first plays of online songs no longer fail and fall back to slow extraction when the fast manifest request takes more than 200 ms (the winning manifest was being discarded).
@@ -27,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Lyrics:** face-to-face mode sideways puts the two readers' halves side by side (the left one turned 180°), each with its section pill at the top and the minimised song bar at the bottom, and a play / pause button on the centre line.
 - **Lyrics:** face-to-face mode has a small play / pause button where the dot on the centre line was.
 - **Queue:** sideways, the queue is a sidebar: the left half stays put with Next up, tracks lined up, Listen, the playing song with its mix buttons, History and as many next songs as fit; the queue carries on in the right half, which scrolls over the full height, with the toolbar at its bottom.
+- **Queue:** sideways, the queue's options menu and the "removed · Undo" bar open in the right half with the toolbar instead of across the seam.
 - **Player:** sideways, the Song / Video switch sits above the album cover (the cover shrinks a little to make room), and the button beside Lyrics opens the song options instead of repeating the queue button.
 - **Lyrics:** the top song card can collapse into a compact Now / Next bar (swipe up or the chevron; swipe down or the arrow to expand). Tapping Next skips to that song straight away, and when a song ends the bar slides left as the queue moves on.
 - **Lyrics:** a + button (toolbar, and next to the arrow in immersive) opens Search to add a song. Tapping a song there opens a small Play / Next / Soon / Queue sheet; picking one goes straight back to the lyrics with a short "Playing next ✓" style confirmation. Other buttons on song cards work as before.

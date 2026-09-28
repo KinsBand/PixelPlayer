@@ -1447,7 +1447,8 @@ fun QueueBottomSheet(
                                 isFabExpanded = !isFabExpanded
                             }
                             .zIndex(30f),
-                        contentAlignment = Alignment.BottomCenter
+                        // Landscape: the menu opens in the right half, above its toolbar.
+                        contentAlignment = if (isLandscape) Alignment.BottomEnd else Alignment.BottomCenter
                     ) {
                         // Options: a row of actions (Locate, Clear, Save as playlist) above a
                         // full-width prompt row with a back button. The prompt row takes the
@@ -1513,7 +1514,7 @@ fun QueueBottomSheet(
                                 }
                             },
                             modifier = Modifier
-                                .fillMaxWidth()
+                                .fillMaxWidth(if (isLandscape) 0.5f else 1f)
                                 .padding(start = 16.dp, end = 16.dp, bottom = optionsBottom)
                         )
                     }
@@ -1528,7 +1529,17 @@ fun QueueBottomSheet(
             AnimatedVisibility(
                 visible = queueUndoBarState.isVisible,
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
+                    // Landscape: centred in the right half, where the list and toolbar are.
+                    .then(
+                        if (isLandscape) {
+                            Modifier
+                                .align(Alignment.BottomEnd)
+                                .fillMaxWidth(0.5f)
+                                .wrapContentWidth(Alignment.CenterHorizontally)
+                        } else {
+                            Modifier.align(Alignment.BottomCenter)
+                        }
+                    )
                     .padding(
                         bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 96.dp
                     )
