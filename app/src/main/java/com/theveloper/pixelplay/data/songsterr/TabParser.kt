@@ -88,6 +88,9 @@ object TabParser {
         DrumArticulation(56, "Cowbell", 56, DrumGlyph.TRIANGLE, 0.5f),
     ).associateBy { it.id }
 
+    /** Every named kit piece, in kit order (bass drums, snares, toms, hi-hats, cymbals, percussion). */
+    val drumArticulations: List<DrumArticulation> get() = ARTICULATIONS.values.toList()
+
     fun drumArticulation(id: Int): DrumArticulation = ARTICULATIONS[id]
         ?: DrumArticulation(id, "Percussion $id", if (id in 27..87) id else 38, DrumGlyph.HEAD, 1.5f)
 

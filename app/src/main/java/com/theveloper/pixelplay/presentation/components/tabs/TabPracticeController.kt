@@ -89,6 +89,11 @@ class TabPracticeController(context: Context) {
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences("songsterr_tabs", Context.MODE_PRIVATE)
 
+    init {
+        // Start loading the recorded instruments (if downloaded) before the first Synth play.
+        com.theveloper.pixelplay.data.soundfont.SoundFontStore.prepare(appContext)
+    }
+
     // ── Song and part ──
     var title by mutableStateOf("")
         private set
@@ -165,6 +170,12 @@ class TabPracticeController(context: Context) {
      * General MIDI synth. Saved in prefs `real_strings`.
      */
     var realStrings by mutableStateOf(prefs.getBoolean("real_strings", true))
+        private set
+    /**
+     * SYNTH plays every part on recorded instruments (the downloaded SoundFont) instead of
+     * Android's General MIDI synth and the modelled strings. Saved in prefs `sampled_sounds`.
+     */
+    var sampledSounds by mutableStateOf(prefs.getBoolean("sampled_sounds", true))
         private set
     /** Parts (track index) with a note sounding right now, for the live speaker animation. */
     var soundingParts by mutableStateOf<Set<Int>>(emptySet())
@@ -692,6 +703,21 @@ class TabPracticeController(context: Context) {
         restartSynthIfPlaying()
     }
 
+    fun toggleSampledSounds() {
+        sampledSounds = !sampledSounds
+        prefs.edit().putBoolean("sampled_sounds", sampledSounds).apply()
+        restartSynthIfPlaying()
+    }
+
+    /** Recorded instruments are available and switched on. */
+    val usesSampledSounds: Boolean
+        get() = sampledSounds && com.theveloper.pixelplay.data.soundfont.SoundFontStore.fontOrNull() != null
+
+    /** The instrument sounds finished downloading / loading: switch a playing Synth over. */
+    fun onSampledSoundsReady() {
+        if (sampledSounds) restartSynthIfPlaying()
+    }
+
     fun toggleMetronome() {
         metronome = !metronome
         restartSynthIfPlaying()
@@ -1118,11 +1144,26 @@ class TabPracticeController(context: Context) {
             ),
             partList,
         )
-        var result = buildFile(realStrings)
-        // Guitar / bass on modelled strings; if the audio track can't open, fall back to MIDI.
-        val score = result.strings
-        val strings = if (score != null) StringSynthPlayer.create(score) else null
-        if (score != null && strings == null) result = buildFile(false)
+        // Recorded instruments (downloaded SoundFont): every part is rendered from samples, guitars
+        // and basses with their full articulation; the MIDI player only keeps time (muted).
+        val font = if (sampledSounds) com.theveloper.pixelplay.data.soundfont.SoundFontStore.fontOrNull() else null
+        var result: TabMidi.Result
+        var strings: StringSynthPlayer? = null
+        var sampled = false
+        if (font != null) {
+            result = buildFile(true)
+            strings = StringSynthPlayer.createSampled(font, result.bytes, result.strings)
+            sampled = strings != null
+        } else {
+            result = buildFile(realStrings)
+        }
+        if (!sampled) {
+            if (font != null) result = buildFile(realStrings)
+            // Guitar / bass on modelled strings; if the audio track can't open, fall back to MIDI.
+            val score = result.strings
+            strings = if (score != null) StringSynthPlayer.create(score) else null
+            if (score != null && strings == null) result = buildFile(false)
+        }
         val file = File(appContext.cacheDir, "tab_synth.mid")
         runCatching {
             file.writeBytes(result.bytes)
@@ -1136,6 +1177,7 @@ class TabPracticeController(context: Context) {
             mp.setDataSource(file.absolutePath)
             mp.setOnCompletionListener { onSynthComplete() }
             mp.prepare()
+            if (sampled) mp.setVolume(0f, 0f)
             strings?.prime()
             mp.start()
             strings?.start()

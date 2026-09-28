@@ -40,6 +40,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.SheetState
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material3.Switch
+import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.ui.text.style.TextOverflow
 import com.theveloper.pixelplay.data.songsterr.SongsterrJson
@@ -318,7 +320,7 @@ fun TabPracticePanel(
                     }
                 }
                 PracticeSheet.SHARE -> ShareSheet(controller, onBackgroundColor) { sheet = null }
-                PracticeSheet.HELP -> NotationHelp(controller, onBackgroundColor)
+                PracticeSheet.HELP -> NotationHelpSheet(controller, onBackgroundColor, accentColor, onAccentColor)
                 PracticeSheet.DRUMS -> DrumKitSheet(controller, onBackgroundColor, accentColor, onAccentColor)
             }
         }
@@ -1029,72 +1031,8 @@ private fun RowScope.ShareButton(label: String, icon: ImageVector, onBg: Color, 
     }
 }
 
-/** Legend of what each symbol means, for the loaded part. */
-@Composable
-private fun ColumnScope.NotationHelp(controller: TabPracticeController, onBg: Color) {
-    Text("Notation Help", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = onBg)
-    val ready = controller.state as? TabUiState.Ready ?: return
-    if (ready.track.isDrums) {
-        // Every kit piece this part uses, at its staff position.
-        val used = ready.track.measures.asSequence()
-            .flatMap { it.beats.asSequence() }
-            .flatMap { it.notes.asSequence() }
-            .groupBy { it.fret }
-            .map { (id, notes) -> Triple(id, notes.groupingBy { it.staffPos }.eachCount().maxByOrNull { it.value }?.key ?: 0f, notes.first().drumGlyph) }
-            .sortedBy { it.second }
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            used.forEach { (id, pos, glyph) -> DrumLegendItem(TabParser.drumArticulation(id).name, pos, glyph, onBg) }
-        }
-    } else {
-        val rows = listOf(
-            "5" to "Fret on that string", "(5)" to "Tied or ghost note", "x" to "Dead (muted) note",
-            "H / P" to "Hammer-on / pull-off", "/  \\" to "Slide up / down", "<12>" to "Natural harmonic",
-            "P.H." to "Pinch harmonic", "↑ full" to "Bend (¼, ½, full…)", "~~" to "Vibrato",
-            "P.M. - - -" to "Palm mute", "let ring" to "Let the notes ring", ">" to "Accent",
-            "⊓ / V" to "Down / up pick", "T" to "Tapping", "×2" to "Play the bars between repeat signs twice",
-        )
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            rows.forEach { (sym, meaning) ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(sym, modifier = Modifier.width(96.dp), color = onBg, fontWeight = FontWeight.Bold)
-                    Text(meaning, color = onBg.copy(alpha = 0.75f), fontSize = 13.sp)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DrumLegendItem(name: String, pos: Float, glyph: TabParser.DrumGlyph, onBg: Color) {
-    val density = LocalDensity.current
-    val painter = remember { AndroidScorePainter() }
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(78.dp)) {
-        Text(name, color = onBg, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.height(48.dp))
-        Canvas(Modifier.width(78.dp).height(96.dp)) {
-            val gap = 9.dp.toPx()
-            val top = 30.dp.toPx()
-            val ink = onBg.toArgb()
-            for (i in 0 until 5) drawLine(onBg.copy(alpha = 0.5f), Offset(0f, top + i * gap), Offset(size.width, top + i * gap), 1.dp.toPx())
-            drawIntoCanvas { c ->
-                painter.canvas = c.nativeCanvas
-                val y = top + pos * gap
-                if (pos <= -1f) {
-                    var l = -1
-                    while (l >= pos) { painter.line(size.width / 2 - gap, top + l * gap, size.width / 2 + gap, top + l * gap, 1.dp.toPx(), ink); l-- }
-                }
-                if (pos >= 5f) {
-                    var l = 5
-                    while (l <= pos) { painter.line(size.width / 2 - gap, top + l * gap, size.width / 2 + gap, top + l * gap, 1.dp.toPx(), ink); l++ }
-                }
-                legendHead(painter, glyph, size.width / 2, y, gap, ink)
-                painter.canvas = null
-            }
-        }
-    }
-}
-
 /** Same noteheads as the score. */
-private fun legendHead(p: ScorePainter, glyph: TabParser.DrumGlyph, x: Float, y: Float, u: Float, color: Int) {
+internal fun legendHead(p: ScorePainter, glyph: TabParser.DrumGlyph, x: Float, y: Float, u: Float, color: Int) {
     val st = 0.13f * u
     val xh = u * 0.46f
     fun cross() {
@@ -1147,7 +1085,9 @@ fun TabOptionsSection(
                 OptionPill("Back to tab", contentColor, itemBackgroundColor, Modifier.weight(1f)) { controller.pdfUri = null }
             }
         }
-        Row(
+        InstrumentSoundsOption(controller, contentColor, accentColor, itemBackgroundColor)
+        // The modelled strings are the fallback when recorded sounds are off or not downloaded.
+        if (!controller.usesSampledSounds) Row(
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(18.dp))
@@ -1279,4 +1219,59 @@ private fun TimingButton(label: String, contentColor: Color, onClick: () -> Unit
         Modifier.size(40.dp).clip(CircleShape).background(contentColor.copy(alpha = 0.1f)).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { Text(label, color = contentColor, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
+}
+
+/** "Real instrument sounds": download the recorded instruments, then switch them on or off. */
+@Composable
+private fun InstrumentSoundsOption(
+    controller: TabPracticeController,
+    contentColor: Color,
+    accentColor: Color,
+    itemBackgroundColor: Color,
+) {
+    val context = LocalContext.current
+    val state by com.theveloper.pixelplay.data.soundfont.SoundFontStore.state.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(state) {
+        if (state == com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Ready &&
+            com.theveloper.pixelplay.data.soundfont.SoundFontStore.load(context) != null
+        ) controller.onSampledSoundsReady()
+    }
+    val ready = state == com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Ready
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(itemBackgroundColor)
+            .clickable {
+                if (ready) controller.toggleSampledSounds()
+                else com.theveloper.pixelplay.data.soundfont.SoundFontStore.download(context)
+            }
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Real instrument sounds", color = contentColor, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            val sub = when (val st = state) {
+                com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Ready ->
+                    "SYNTH plays recorded guitars, basses, drums and keys, with bends, slides, harmonics and palm mutes"
+                is com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Downloading ->
+                    "Downloading… ${(st.progress * 100).toInt()}%"
+                is com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Failed -> "${st.message}. Tap to try again"
+                com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Missing ->
+                    "Tap to download recorded instruments (${com.theveloper.pixelplay.data.soundfont.SoundFontStore.SIZE_BYTES / 1_000_000} MB, once)"
+            }
+            Text(sub, color = contentColor.copy(alpha = 0.6f), fontSize = 12.sp)
+        }
+        Spacer(Modifier.width(12.dp))
+        when (state) {
+            com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Ready -> Switch(
+                checked = controller.sampledSounds,
+                onCheckedChange = { controller.toggleSampledSounds() },
+                colors = SwitchDefaults.colors(checkedTrackColor = accentColor),
+            )
+            is com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Downloading ->
+                CircularProgressIndicator(modifier = Modifier.size(24.dp), color = accentColor, strokeWidth = 3.dp)
+            else -> Icon(androidx.compose.material.icons.Icons.Rounded.CloudDownload, contentDescription = null, tint = accentColor)
+        }
+    }
 }

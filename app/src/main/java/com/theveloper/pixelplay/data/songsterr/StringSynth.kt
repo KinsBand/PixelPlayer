@@ -441,10 +441,11 @@ class StringScoreBuilder(private val pitchShift: Int) {
 /**
  * Renders a [StringScore] in real time. Call [render] from the audio thread only.
  */
-class StringSynthEngine(private val score: StringScore, private val sr: Int = StringSynth.SAMPLE_RATE) {
+class StringSynthEngine(private val score: StringScore, private val sr: Int = StringSynth.SAMPLE_RATE) :
+    com.theveloper.pixelplay.data.soundfont.ScorePcmSource {
 
     /** Score time of the next rendered frame (ms). Shifted by [nudge] to follow the MIDI player. */
-    @Volatile var shiftMs: Double = 0.0
+    @Volatile override var shiftMs: Double = 0.0
     private var frame: Long = 0
 
     private val block = 32
@@ -455,7 +456,7 @@ class StringSynthEngine(private val score: StringScore, private val sr: Int = St
     private var limEnv = 0f
 
     /** Frames rendered so far. */
-    val framesRendered: Long get() = frame
+    override val framesRendered: Long get() = frame
 
     /** Score ms at output frame [f] (with the current shift). */
     fun scoreMsAt(f: Long): Double = f * 1000.0 / sr + shiftMs
@@ -466,7 +467,7 @@ class StringSynthEngine(private val score: StringScore, private val sr: Int = St
     }
 
     /** Fills [out] with interleaved stereo 16-bit frames. */
-    fun render(out: ShortArray, frames: Int) {
+    override fun render(out: ShortArray, frames: Int) {
         var done = 0
         while (done < frames) {
             val n = min(block, frames - done)

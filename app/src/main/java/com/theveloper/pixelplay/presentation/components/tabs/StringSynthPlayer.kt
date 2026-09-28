@@ -8,6 +8,10 @@ import android.media.MediaPlayer
 import android.os.Build
 import android.os.Process
 import android.util.Log
+import com.theveloper.pixelplay.data.soundfont.MidiEvents
+import com.theveloper.pixelplay.data.soundfont.SampledScoreEngine
+import com.theveloper.pixelplay.data.soundfont.ScorePcmSource
+import com.theveloper.pixelplay.data.soundfont.SoundFont
 import com.theveloper.pixelplay.data.songsterr.StringScore
 import com.theveloper.pixelplay.data.songsterr.StringSynth
 import com.theveloper.pixelplay.data.songsterr.StringSynthEngine
@@ -15,8 +19,11 @@ import kotlin.math.abs
 import kotlin.math.max
 
 /**
- * Streams [StringSynthEngine] (the modelled guitar / bass strings) to an [AudioTrack] next to
- * the MIDI [MediaPlayer] that plays the drums, keys, clicks and count-in.
+ * Streams a [ScorePcmSource] to an [AudioTrack] next to the MIDI [MediaPlayer]:
+ *  - [StringSynthEngine]: the modelled guitar / bass strings, while the MIDI player plays the
+ *    drums, keys, clicks and count-in; or
+ *  - [SampledScoreEngine]: every part on recorded SoundFont instruments (the MIDI player is then
+ *    muted and only serves as the clock).
  *
  * The MIDI player stays the master clock (the cursor follows it). Every frame [follow] compares
  * what the strings are playing *now* (AudioTrack timestamp) with what the MIDI player is
@@ -24,10 +31,9 @@ import kotlin.math.max
  * together within a few ms. A nudge only moves when future notes start; notes already ringing
  * are untouched, so nothing clicks.
  */
-internal class StringSynthPlayer(score: StringScore) {
+internal class StringSynthPlayer(private val engine: ScorePcmSource) {
 
     private val sr = StringSynth.SAMPLE_RATE
-    private val engine = StringSynthEngine(score, sr)
     private val track: AudioTrack
     private val chunkFrames = 256
     private val chunk = ShortArray(chunkFrames * 2)
@@ -166,8 +172,16 @@ internal class StringSynthPlayer(score: StringScore) {
         }
 
         fun create(score: StringScore): StringSynthPlayer? =
-            runCatching { StringSynthPlayer(score) }
+            runCatching { StringSynthPlayer(StringSynthEngine(score, StringSynth.SAMPLE_RATE)) }
                 .onFailure { Log.w(TAG, "String synth unavailable: ${it.message}") }
+                .getOrNull()
+
+        /** Every part on recorded instruments: the MIDI file's parts plus guitar / bass [strings]. */
+        fun createSampled(font: SoundFont, midiFile: ByteArray, strings: StringScore?): StringSynthPlayer? =
+            runCatching {
+                StringSynthPlayer(SampledScoreEngine(font, MidiEvents.parse(midiFile), strings, StringSynth.SAMPLE_RATE))
+            }
+                .onFailure { Log.w(TAG, "Sampled synth unavailable: ${it.message}") }
                 .getOrNull()
     }
 }
