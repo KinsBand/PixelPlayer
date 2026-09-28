@@ -367,7 +367,11 @@ fun FullPlayerContent(
     androidx.activity.compose.BackHandler(enabled = videoFullscreen) { videoFullscreen = false }
     DisposableEffect(videoFullscreen, hostActivity) {
         val activity = hostActivity
-        if (videoFullscreen && activity != null) {
+        // Captured now: by the time onDispose runs for a full-screen exit, videoFullscreen has
+        // already flipped to false, so reading it there skipped the restore and left the app
+        // locked in landscape until it was restarted.
+        val enteredFullscreen = videoFullscreen && activity != null
+        if (enteredFullscreen && activity != null) {
             if (orientationBeforeFullscreen == null) orientationBeforeFullscreen = activity.requestedOrientation
             activity.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             hideSystemBarsForVideo(activity)
@@ -375,7 +379,7 @@ fun FullPlayerContent(
         onDispose {
             // A config-change recreation keeps full screen on (the flag is saved); only a real
             // exit gives the orientation and the user's bar setting back.
-            if (videoFullscreen && activity != null && !activity.isChangingConfigurations) {
+            if (enteredFullscreen && activity != null && !activity.isChangingConfigurations) {
                 activity.requestedOrientation = orientationBeforeFullscreen
                     ?: android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                 orientationBeforeFullscreen = null
