@@ -185,6 +185,20 @@ internal fun LyricsSettingsContent(
             }
         }
 
+        // Landscape lyrics sheet: which half holds the lyrics.
+        SwitchSettingItem(
+            settingKey = "lyrics_landscape_lyrics_left",
+            title = stringResource(R.string.settings_lyrics_landscape_lyrics_left_title),
+            subtitle = stringResource(R.string.settings_lyrics_landscape_lyrics_left_subtitle),
+            checked = lyricsDisplayPrefs.landscapeLyricsOnLeft,
+            onCheckedChange = { enabled ->
+                scope.launch {
+                    context.editLyricsDisplayPrefs { it[LyricsDisplayPrefKeys.LANDSCAPE_LYRICS_ON_LEFT] = enabled }
+                }
+            },
+            leadingIcon = { Icon(Icons.Rounded.ScreenRotation, null, tint = MaterialTheme.colorScheme.secondary) }
+        )
+
         // Expressive typography: next to Immersive lyrics. Its choices hang off it while it's on.
         SwitchSettingItem(
             settingKey = "lyrics_expressive_typography",

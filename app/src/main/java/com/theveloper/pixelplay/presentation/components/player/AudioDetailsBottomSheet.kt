@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material3.Badge
@@ -41,6 +42,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -70,6 +72,7 @@ import com.theveloper.pixelplay.presentation.components.SkeletonSongRow
 import com.theveloper.pixelplay.presentation.components.SmartImage
 import com.theveloper.pixelplay.presentation.viewmodel.AudioDetailsViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.AudioScanState
+import com.theveloper.pixelplay.presentation.viewmodel.OnlineVersionsState
 import com.theveloper.pixelplay.presentation.viewmodel.SongVersion
 import com.theveloper.pixelplay.presentation.viewmodel.SongVersionsState
 import com.theveloper.pixelplay.ui.theme.MotionTokens
@@ -82,7 +85,8 @@ private const val UnknownValue = "—"
 
 /**
  * Audio details for the current track: a "Versions" toggle that reveals other versions of the
- * song from the library (original first), and a 2×2 grid of quality cards
+ * song from the library (original first) followed by every version found online, and a 2×2 grid
+ * of quality cards
  * (sample rate, bitrate, format, bit depth).
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -99,6 +103,7 @@ fun AudioDetailsBottomSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
     val versionsState by viewModel.versions.collectAsStateWithLifecycle()
+    val onlineVersionsState by viewModel.onlineVersions.collectAsStateWithLifecycle()
     val scanState by viewModel.scanState.collectAsStateWithLifecycle()
     val scanned = (scanState as? AudioScanState.Done)?.result
 
@@ -124,6 +129,9 @@ fun AudioDetailsBottomSheet(
             scanState = scanState,
             onScan = { viewModel.scanSong(song) },
             versionsState = versionsState,
+            onlineVersionsState = onlineVersionsState,
+            onVersionsShown = { viewModel.loadOnline(song) },
+            onRetryOnline = { viewModel.loadOnline(song, force = true) },
             onVersionClick = { version ->
                 if (version.song.id != song.id) onPlayVersion(version.song)
                 hideThenDismiss()
@@ -142,10 +150,17 @@ private fun AudioDetailsSheetContent(
     scanState: AudioScanState,
     onScan: () -> Unit,
     versionsState: SongVersionsState,
+    onlineVersionsState: OnlineVersionsState,
+    onVersionsShown: () -> Unit,
+    onRetryOnline: () -> Unit,
     onVersionClick: (SongVersion) -> Unit
 ) {
     val reduceMotion = rememberReduceMotion()
     var versionsExpanded by rememberSaveable(song.id) { mutableStateOf(false) }
+    // The online search only runs once the user actually looks at the versions.
+    LaunchedEffect(versionsExpanded, song.id) {
+        if (versionsExpanded) onVersionsShown()
+    }
 
     Column(
         modifier = Modifier
@@ -198,12 +213,21 @@ private fun AudioDetailsSheetContent(
                 ) + fadeOut(tween(collapseDuration, easing = MotionTokens.EmphasizedAccelerate))
             }
         ) {
-            VersionsList(
-                currentSongId = song.id,
-                state = versionsState,
-                reduceMotion = reduceMotion,
-                onVersionClick = onVersionClick
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                VersionsList(
+                    currentSongId = song.id,
+                    state = versionsState,
+                    reduceMotion = reduceMotion,
+                    onVersionClick = onVersionClick
+                )
+                OnlineVersionsList(
+                    currentSongId = song.id,
+                    state = onlineVersionsState,
+                    reduceMotion = reduceMotion,
+                    onRetry = onRetryOnline,
+                    onVersionClick = onVersionClick
+                )
+            }
         }
 
         AudioQualityGrid(
@@ -300,7 +324,7 @@ private fun VersionsList(
                 }
                 if (state.versions.size <= 1) {
                     Text(
-                        text = "No other versions in your library",
+                        text = "No other versions in your library · searching online below",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
@@ -312,13 +336,102 @@ private fun VersionsList(
 }
 
 @Composable
+private fun OnlineVersionsList(
+    currentSongId: String,
+    state: OnlineVersionsState,
+    reduceMotion: Boolean,
+    onRetry: () -> Unit,
+    onVersionClick: (SongVersion) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(
+                animationSpec = if (reduceMotion) snap() else {
+                    tween(MotionTokens.DurationMedium2, easing = MotionTokens.Emphasized)
+                }
+            ),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+                .semantics(mergeDescendants = true) {},
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Cloud,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "Online versions",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            if (state is OnlineVersionsState.Loaded && state.versions.isNotEmpty()) {
+                Spacer(Modifier.width(8.dp))
+                Badge(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                ) { Text(state.versions.size.toString()) }
+            }
+        }
+        when (state) {
+            OnlineVersionsState.Idle, OnlineVersionsState.Loading -> {
+                repeat(3) { SkeletonSongRow() }
+            }
+            OnlineVersionsState.Failed -> {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Couldn't search online",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = onRetry) { Text("Retry") }
+                }
+            }
+            is OnlineVersionsState.Loaded -> {
+                if (state.versions.isEmpty()) {
+                    Text(
+                        text = "No other versions found online",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
+                } else {
+                    state.versions.forEach { version ->
+                        VersionRow(
+                            version = version,
+                            isPlaying = version.song.id == currentSongId,
+                            showArtist = true,
+                            onClick = { onVersionClick(version) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun VersionRow(
     version: SongVersion,
     isPlaying: Boolean,
+    showArtist: Boolean = false,
     onClick: () -> Unit
 ) {
     val song = version.song
     val subtitle = buildList {
+        if (showArtist && song.artist.isNotBlank()) add(song.artist)
+        version.tag?.takeIf { showArtist }?.let { add(it) }
         if (song.album.isNotBlank()) add(song.album)
         if (song.year > 0) add(song.year.toString())
     }.joinToString(" · ")

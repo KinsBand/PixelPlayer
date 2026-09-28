@@ -174,6 +174,8 @@ private class RelayoutTracker { var key: Any? = UnsetRelayoutKey }
 private const val MAX_LYRIC_FONT_SP = 40f
 /** Largest lyric size (sp) in each face-to-face half. */
 private const val MAX_SPLIT_LYRIC_FONT_SP = 28f
+/** Landscape: the lyrics half has no header above it, just a little air. */
+private val LANDSCAPE_LYRICS_TOP_PADDING = 28.dp
 
 internal data class LyricsSheetColors(
     val container: Color,
@@ -421,6 +423,9 @@ fun LyricsSheet(
 
     val stablePlayerState by stablePlayerStateFlow.collectAsStateWithLifecycle()
     val sheetColors = remember(colorScheme) { lyricsSheetColors(colorScheme) }
+    // Sideways: song + controls on one half, lyrics on the other (and face-to-face goes side by side).
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     val backgroundColor = sheetColors.controlContainer
     val onBackgroundColor = sheetColors.controlContent
     val containerColor = sheetColors.container
@@ -668,17 +673,6 @@ fun LyricsSheet(
         label = "fontScale"
     )
     
-    // Immersive enlarges the text; the user's size (up to Extra large) multiplies with it, so cap
-    // the result: a single word must still fit a narrow phone without clipping.
-    val immersiveScaleCap = remember(lyricsTextStyle.fontSize) {
-        val base = lyricsTextStyle.fontSize
-        if (base.isSp && base.value > 0f) (MAX_LYRIC_FONT_SP / base.value).coerceAtLeast(1f) else fontScale
-    }
-    val effectiveFontScale = fontScale.coerceAtMost(immersiveScaleCap)
-    val scaledTextStyle = lyricsTextStyle.copy(
-        fontSize = lyricsTextStyle.fontSize * effectiveFontScale,
-        lineHeight = lyricsTextStyle.lineHeight * effectiveFontScale
-    )
 
     /** Any touch: restarts the auto-hide timer. In manual mode it doesn't unhide the controls. */
     fun resetImmersiveTimer() {
@@ -690,6 +684,19 @@ fun LyricsSheet(
     fun showControlsNow() {
         lastInteractionTime = System.currentTimeMillis()
         immersiveMode = false
+    }
+
+    /**
+     * Leaves face-to-face mode from the split view itself (tap the song playing now): turns the
+     * setting off and brings the normal screen back. The shortcut next to the "show controls"
+     * arrow turns it on again.
+     */
+    fun exitFaceToFace() {
+        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+        showControlsNow()
+        coroutineScope.launch {
+            context.editLyricsDisplayPrefs { it[LyricsDisplayPrefKeys.SPLIT_FACE_VIEW] = false }
+        }
     }
 
     // Swipe-down-to-hide for the controls.
@@ -711,17 +718,8 @@ fun LyricsSheet(
         performanceView == PerformanceView.Lyrics &&
         !lyrics?.synced.isNullOrEmpty()
     val splitActiveState = rememberUpdatedState(splitActive)
+    val isLandscapeState = rememberUpdatedState(isLandscape)
     var swipeFromTopHalf by remember { mutableStateOf(false) }
-    // Face-to-face halves are short: the user's typography applies, enlarged a little but capped
-    // lower than full screen so the previous / current / next lines still fit in each half.
-    val splitScale = remember(lyricsTextStyle.fontSize) {
-        val base = lyricsTextStyle.fontSize
-        if (base.isSp && base.value > 0f) 1.15f.coerceAtMost((MAX_SPLIT_LYRIC_FONT_SP / base.value).coerceAtLeast(0.85f)) else 1.15f
-    }
-    val splitTextStyle = lyricsTextStyle.copy(
-        fontSize = lyricsTextStyle.fontSize * splitScale,
-        lineHeight = lyricsTextStyle.lineHeight * splitScale
-    )
 
     // Song structure (Intro, Verse, Chorus…): found once per song and saved with it, then
     // shown under the header (or beside the divider in face-to-face mode).
@@ -742,6 +740,51 @@ fun LyricsSheet(
     // Kept while the strip animates out, so it doesn't empty mid-exit.
     var lastSongStructure by remember { mutableStateOf<SongStructure?>(null) }
     LaunchedEffect(songStructure) { songStructure?.let { lastSongStructure = it } }
+
+    // Adaptive expressive typography: each song's own typographic voice (see LyricExpression.kt).
+    // It sets the whole song's size, line height, tracking and weight here, each word's look in
+    // the lines, and how words and lines move.
+    val expressionProfile by com.theveloper.pixelplay.presentation.components.lyrics.rememberSongExpressionProfile(
+        song = currentSong,
+        lyrics = lyrics,
+        structure = songStructure,
+        durationMs = stablePlayerState.totalDuration,
+        enabled = lyricsDisplayPrefs.expressiveTypography && lyricsDisplayPrefs.adaptiveTypography
+    )
+    // "Remove animations" in system settings: words and lines stop lifting and bouncing.
+    val systemAnimationsOff = remember(context) {
+        android.provider.Settings.Global.getFloat(
+            context.contentResolver,
+            android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f
+        ) == 0f
+    }
+    val voicedTextStyle = remember(lyricsTextStyle, expressionProfile) {
+        expressionProfile?.applyTo(lyricsTextStyle) ?: lyricsTextStyle
+    }
+
+    // Immersive enlarges the text; the user's size (up to Extra large) multiplies with it, so cap
+    // the result: a single word must still fit a narrow phone without clipping.
+    val immersiveScaleCap = remember(voicedTextStyle.fontSize) {
+        val base = voicedTextStyle.fontSize
+        if (base.isSp && base.value > 0f) (MAX_LYRIC_FONT_SP / base.value).coerceAtLeast(1f) else 1.4f
+    }
+    val effectiveFontScale = fontScale.coerceAtMost(immersiveScaleCap)
+    val scaledTextStyle = voicedTextStyle.copy(
+        fontSize = voicedTextStyle.fontSize * effectiveFontScale,
+        lineHeight = voicedTextStyle.lineHeight * effectiveFontScale
+    )
+
+    // Face-to-face halves are short: the user's typography applies, enlarged a little but capped
+    // lower than full screen so the previous / current / next lines still fit in each half.
+    val splitScale = remember(voicedTextStyle.fontSize) {
+        val base = voicedTextStyle.fontSize
+        if (base.isSp && base.value > 0f) 1.15f.coerceAtMost((MAX_SPLIT_LYRIC_FONT_SP / base.value).coerceAtLeast(0.85f)) else 1.15f
+    }
+    val splitTextStyle = voicedTextStyle.copy(
+        fontSize = voicedTextStyle.fontSize * splitScale,
+        lineHeight = voicedTextStyle.lineHeight * splitScale
+    )
     val structureTopExtra by animateDpAsState(
         targetValue = if (songStructure != null && lyricsDisplayPrefs.showSongStructure) 44.dp else 0.dp,
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
@@ -781,8 +824,8 @@ fun LyricsSheet(
         label = "lyricsTopPadding"
     )
     // Re-centres the current line when typography or the header changes (not every frame).
-    val lyricsRelayoutKey = remember(lyricsTextStyle, headerCollapsed, songStructure != null) {
-        Triple(lyricsTextStyle, headerCollapsed, songStructure != null)
+    val lyricsRelayoutKey = remember(voicedTextStyle, headerCollapsed, songStructure != null) {
+        Triple(voicedTextStyle, headerCollapsed, songStructure != null)
     }
 
     // The song structure strip under the header (both header forms share it).
@@ -953,17 +996,12 @@ fun LyricsSheet(
 
     
 
-    // Adaptive expressive typography: each song's own typographic voice (see LyricExpression.kt).
-    val expressionProfile by com.theveloper.pixelplay.presentation.components.lyrics.rememberSongExpressionProfile(
-        song = currentSong,
-        lyrics = lyrics,
-        structure = songStructure,
-        durationMs = stablePlayerState.totalDuration,
-        enabled = lyricsDisplayPrefs.expressiveTypography && lyricsDisplayPrefs.adaptiveTypography
-    )
-
     CompositionLocalProvider(
-        com.theveloper.pixelplay.presentation.components.lyrics.LocalLyricExpression provides expressionProfile
+        com.theveloper.pixelplay.presentation.components.lyrics.LocalLyricExpression provides expressionProfile,
+        com.theveloper.pixelplay.presentation.components.lyrics.LocalLyricMotion provides when {
+            systemAnimationsOff -> com.theveloper.pixelplay.presentation.components.lyrics.LyricMotion.Still
+            else -> expressionProfile?.motion ?: com.theveloper.pixelplay.presentation.components.lyrics.LyricMotion.Default
+        }
     ) {
         Scaffold(
             modifier = modifier
@@ -989,9 +1027,13 @@ fun LyricsSheet(
                             isSwipeActive = true
                             hasTriggeredAction = false
                             dragOffset = 0f
-                            // In the split view the top half is read from the other side of the
-                            // phone, so left/right are reversed for that person.
-                            swipeFromTopHalf = splitActiveState.value && startOffset.y < size.height / 2f
+                            // In the split view the top half (the left half in landscape) is read
+                            // from the other side of the phone, so left/right are reversed for them.
+                            swipeFromTopHalf = splitActiveState.value && if (isLandscapeState.value) {
+                                startOffset.x < size.width / 2f
+                            } else {
+                                startOffset.y < size.height / 2f
+                            }
                             resetImmersiveTimer()
                             coroutineScope.launch {
                                 swipeProgress.snapTo(0f)
@@ -1095,20 +1137,16 @@ fun LyricsSheet(
                     }
                 }
 
-                // Lyrics Content (Weight 1)
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.Start)
-                        .weight(1f)
-                        .fillMaxWidth()
-                ) {
+                // Header, lyrics and controls are slots so the two layouts share them: portrait
+                // stacks them (header over the lyrics, controls underneath); landscape puts the
+                // song + controls on one half and the lyrics on the other (side chosen in settings).
+                val headerBlock: @Composable (Modifier) -> Unit = { headerModifier ->
                     // Track Info Header (Fixed at top). Expanded = the full card (cover, title, artist,
                     // visualiser); collapsed = the compact Now / Next bar. Either way the song
                     // structure strip stays attached underneath. Its measured height drives the lyric
                     // lists' top padding, so collapsing hands the space to the lyrics.
                     Box(
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
+                        modifier = headerModifier
                             .zIndex(2f)
                             .onSizeChanged { headerHeightPx = it.height }
                     ) {
@@ -1205,7 +1243,9 @@ fun LyricsSheet(
                             }
                         }
                     }
+                }
 
+                val lyricsBlock: @Composable BoxScope.(lyricsTop: Dp) -> Unit = { lyricsTop ->
                     when (performanceView) {
                         PerformanceView.Lyrics -> {
                             AnimatedContent(
@@ -1230,7 +1270,7 @@ fun LyricsSheet(
                                     null -> {
                                         LazyColumn(
                                             modifier = Modifier.fillMaxSize(),
-                                            contentPadding = PaddingValues(top = (lyricsTopPadding - 20.dp).coerceAtLeast(0.dp), bottom = 24.dp, start = 24.dp, end = 24.dp)
+                                            contentPadding = PaddingValues(top = (lyricsTop - 20.dp).coerceAtLeast(0.dp), bottom = 24.dp, start = 24.dp, end = 24.dp)
                                         ) {
                                             item(key = "loader_or_empty") {
                                                 Box(
@@ -1298,7 +1338,7 @@ fun LyricsSheet(
                                                 modifier = Modifier
                                                     .fillMaxSize()
                                                     .padding(horizontal = 24.dp),
-                                                contentPadding = PaddingValues(top = lyricsTopPadding, bottom = 100.dp),
+                                                contentPadding = PaddingValues(top = lyricsTop, bottom = 100.dp),
                                                 lines = synced,
                                                 listState = syncedListState,
                                                 playbackPositionFlow = playbackPositionFlow,
@@ -1363,7 +1403,7 @@ fun LyricsSheet(
                                                 contentPadding = PaddingValues(
                                                     start = 24.dp,
                                                     end = 24.dp,
-                                                    top = lyricsTopPadding,
+                                                    top = lyricsTop,
                                                     bottom = 24.dp
                                                 )
                                             ) {
@@ -1373,7 +1413,7 @@ fun LyricsSheet(
                                                 ) { _, line ->
                                                     PlainLyricsLine(
                                                         line = line,
-                                                        style = lyricsTextStyle,
+                                                        style = voicedTextStyle,
                                                         lyricsAlignment = lyricsAlignment,
                                                         showTranslation = if (hasTranslatedLyrics) showLyricsTranslation else true,
                                                         showRomanization = if (hasRomanizedLyrics) showLyricsRomanization else true,
@@ -1430,7 +1470,7 @@ fun LyricsSheet(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(lyricsTopPadding.coerceAtLeast(56.dp))
+                            .height(lyricsTop.coerceAtLeast(56.dp))
                             .align(Alignment.TopCenter)
                             .background(
                                 brush = Brush.verticalGradient(
@@ -1462,7 +1502,7 @@ fun LyricsSheet(
                             modifier = Modifier
                                 .align(Alignment.TopCenter)
                                 .zIndex(3f)
-                                .padding(top = (lyricsTopPadding - 28.dp).coerceAtLeast(8.dp))
+                                .padding(top = (lyricsTop - 28.dp).coerceAtLeast(8.dp))
                         )
                     }
 
@@ -1507,6 +1547,7 @@ fun LyricsSheet(
                     }
                 }
 
+                val controlsBlock: @Composable ColumnScope.(compactControls: Boolean) -> Unit = { compactControls ->
                 // Controls Section (Auto-hide in immersive mode)
                 AnimatedVisibility(
                     visible = !immersiveMode,
@@ -1611,7 +1652,7 @@ fun LyricsSheet(
 
                         Box(
                             modifier = Modifier
-                                .size(78.dp)
+                                .size(if (compactControls) 60.dp else 78.dp)
                                 .clip(RoundedCornerShape(playPauseCornerRadius))
                                 .background(playPauseColor)
                                 .clickable {
@@ -1671,7 +1712,7 @@ fun LyricsSheet(
                         )
                         Box(
                             modifier = Modifier
-                                .size(58.dp)
+                                .size(if (compactControls) 48.dp else 58.dp)
                                 .graphicsLayer {
                                     scaleX = skipScale
                                     scaleY = skipScale
@@ -1697,7 +1738,7 @@ fun LyricsSheet(
                         }
                     }
                 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(if (compactControls) 8.dp else 16.dp))
 
                     // Floating Toolbar
                     LyricsFloatingToolbar(
@@ -1742,6 +1783,58 @@ fun LyricsSheet(
                         )
                     }
                  }
+                }
+                }
+
+                if (!isLandscape) {
+                    // Lyrics Content (Weight 1)
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.Start)
+                            .weight(1f)
+                            .fillMaxWidth()
+                    ) {
+                        headerBlock(Modifier.align(Alignment.TopStart))
+                        this.lyricsBlock(lyricsTopPadding)
+                    }
+                    this.controlsBlock(false)
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                    ) {
+                        // Song side: the header (expanded or minimised, with the structure strip)
+                        // at the top, the controls shrunk to this half's width at the bottom.
+                        val songPane: @Composable RowScope.() -> Unit = {
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                            ) {
+                                headerBlock(Modifier)
+                                Spacer(modifier = Modifier.weight(1f))
+                                this.controlsBlock(true)
+                            }
+                        }
+                        // Lyrics side: the whole height and width of its half.
+                        val lyricsPane: @Composable RowScope.() -> Unit = {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                            ) {
+                                this.lyricsBlock(LANDSCAPE_LYRICS_TOP_PADDING)
+                            }
+                        }
+                        if (lyricsDisplayPrefs.landscapeLyricsOnLeft) {
+                            this.lyricsPane()
+                            this.songPane()
+                        } else {
+                            this.songPane()
+                            this.lyricsPane()
+                        }
+                    }
                 }
             }
 
@@ -1897,7 +1990,7 @@ fun LyricsSheet(
                             )
                         },
                         onBackgroundTap = { resetImmersiveTimer() },
-                        relayoutKey = lyricsTextStyle,
+                        relayoutKey = voicedTextStyle,
                         // Only the part playing now, beside the centre divider: left of it for the
                         // person at the bottom, right of it (turned) for the person at the top.
                         sectionChip = if (chipStructure == null) null else { chipMaxWidth ->
@@ -1911,36 +2004,49 @@ fun LyricsSheet(
                                     maxWidth = chipMaxWidth
                                 )
                         },
+                        // The minimised song bar (never the full card here). Tapping the song
+                        // playing now leaves face-to-face mode; the Next half still skips to it.
                         headerPill = { pillModifier ->
-                            AnimatedContent(
-                                targetState = currentSong,
-                                transitionSpec = {
-                                    (fadeIn(animationSpec = tween(300)) +
-                                        scaleIn(initialScale = 0.9f, animationSpec = tween(300)))
-                                        .togetherWith(fadeOut(animationSpec = tween(300)))
+                            CollapsedNowNextBar(
+                                currentSong = currentSong,
+                                nextSong = nextUpSong,
+                                isPlaying = isPlaying,
+                                backgroundColor = backgroundColor,
+                                contentColor = onBackgroundColor,
+                                nextContainerColor = sheetColors.surfaceSecondary,
+                                nextContentColor = sheetColors.onSurfaceSecondary,
+                                accentColor = accentColor,
+                                onExpand = {},
+                                showExpand = false,
+                                onNowClick = { exitFaceToFace() },
+                                nowClickLabel = "Leave face-to-face lyrics",
+                                onNextClick = {
+                                    resetImmersiveTimer()
+                                    onPlayNextUpNow()
                                 },
-                                modifier = pillModifier.wrapContentWidth(),
-                                label = "splitHeaderAnimation"
-                            ) { song ->
-                                LyricsTrackInfo(
-                                    song = song,
-                                    modifier = Modifier
-                                        .padding(horizontal = 18.dp, vertical = 4.dp)
-                                        .background(color = backgroundColor, shape = CircleShape)
-                                        .wrapContentWidth()
-                                        .animateContentSize(),
-                                    backgroundColor = backgroundColor,
-                                    contentColor = onBackgroundColor,
-                                    isPlaying = isPlaying
-                                )
-                            }
+                                nextAlpha = { chromeIdleAlpha },
+                                modifier = pillModifier.padding(horizontal = 18.dp, vertical = 4.dp)
+                            )
                         },
+                        isPlaying = isPlaying,
+                        onPlayPause = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onPlayPause()
+                        },
+                        playPauseContainer = playPauseColor,
+                        playPauseContent = onPlayPauseColor,
+                        landscape = isLandscape,
                         modifier = Modifier
                             .fillMaxSize()
                             .background(containerColor)
                     )
                 }
             }
+
+           // Landscape: the arrow and its shortcuts sit centred under the song half, not on the seam.
+           val overlayShiftX = if (isLandscape) {
+               (configuration.screenWidthDp.dp / 4) * (if (lyricsDisplayPrefs.landscapeLyricsOnLeft) 1f else -1f)
+           } else 0.dp
 
            // Swipe up from the bottom edge while the controls are hidden to bring them back
            // (works in both timed and manual immersive).
@@ -1980,6 +2086,7 @@ fun LyricsSheet(
                 exit = fadeOut() + slideOutVertically { it / 2 },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
+                    .offset(x = overlayShiftX)
                     .padding(bottom = 32.dp)
             ) {
                 FilledIconButton(
@@ -2011,7 +2118,7 @@ fun LyricsSheet(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     // Arrow is 48 dp wide and centred: 24 dp half-width + 10 dp gap + 18 dp half of this.
-                    .offset(x = 52.dp)
+                    .offset(x = overlayShiftX + 52.dp)
                     .padding(bottom = 38.dp)
             ) {
                 FilledTonalIconButton(
@@ -2045,7 +2152,7 @@ fun LyricsSheet(
                    exit = fadeOut() + scaleOut(targetScale = 0.6f) + slideOutVertically { it / 2 },
                    modifier = Modifier
                        .align(Alignment.BottomCenter)
-                       .offset(x = (-52).dp)
+                       .offset(x = overlayShiftX - 52.dp)
                        .padding(bottom = 38.dp)
                ) {
                    FilledTonalIconButton(
@@ -2573,6 +2680,43 @@ fun LyricLineRow(
     )
     val emphasisProvider: () -> Float = { lineEmphasis }
 
+    // Line → line: the new current line rises into place and lands with a small spring pop
+    // (bounce and speed follow the song's motion), while the line it replaces eases back.
+    val lineMotion = com.theveloper.pixelplay.presentation.components.lyrics.LocalLyricMotion.current
+    val arrival = remember { Animatable(0f) }
+    LaunchedEffect(isCurrentLine) {
+        if (isCurrentLine) {
+            arrival.animateTo(
+                1f,
+                spring(dampingRatio = lineMotion.lineDamping, stiffness = lineMotion.lineStiffness)
+            )
+        } else {
+            arrival.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow))
+        }
+    }
+    val arrivalRisePx = with(LocalDensity.current) { lineMotion.lineRise.dp.toPx() }
+    val arrivalPivotX = when (lyricsAlignment) {
+        "center" -> 0.5f
+        "right" -> 1f
+        else -> 0f
+    }
+    val arrivalModifier = Modifier.graphicsLayer {
+        val a = arrival.value
+        if (isCurrentLine) {
+            // 0.965 → 1 (a spring overshoot swells it just past 1 before it settles).
+            val s = 0.965f + 0.035f * a
+            scaleX = s
+            scaleY = s
+            translationY = (1f - a).coerceAtLeast(0f) * arrivalRisePx
+        } else {
+            // Leaving (and resting) lines recede a touch.
+            val s = 0.985f + 0.015f * a
+            scaleX = s
+            scaleY = s
+        }
+        transformOrigin = TransformOrigin(arrivalPivotX, 0.5f)
+    }
+
     // Animated mode: fisheye scaling + alpha based on distance from current line
     val targetScale = if (useAnimatedLyrics) when (distanceFromCurrent) {
         0 -> if (immersiveMode) 1.02f else 1.06f; 1 -> 0.96f; else -> 0.88f
@@ -2711,6 +2855,7 @@ fun LyricLineRow(
     if (highlightMode == com.theveloper.pixelplay.data.lyrics.LyricsHighlightMode.LINE || sanitizedWordClusters.isNullOrEmpty()) {
         Column(
             modifier = animatedModifier
+                .then(arrivalModifier)
                 .fillMaxWidth()
                 .clip(rowShape)
                 .background(activePillColor)
@@ -2779,6 +2924,7 @@ fun LyricLineRow(
 
         Column(
             modifier = animatedModifier
+                .then(arrivalModifier)
                 .fillMaxWidth()
                 .clip(rowShape)
                 .background(activePillColor)
@@ -2822,6 +2968,7 @@ fun LyricLineRow(
                 highlightColor = accentColor,
                 textAlign = textAlign,
                 emphasis = emphasisProvider,
+                wordLayout = wordLayout,
                 sungChars = {
                     val now = clock?.now() ?: position
                     when {

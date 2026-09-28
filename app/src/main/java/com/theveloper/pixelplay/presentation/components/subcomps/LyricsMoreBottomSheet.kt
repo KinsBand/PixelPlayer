@@ -878,6 +878,12 @@ private fun LyricsAdvancedSettings(
                                 depth = 1
                             ))
                         }
+                        add(AdvancedRow(
+                            icon = Icons.Rounded.ScreenRotation,
+                            title = stringResource(R.string.settings_lyrics_landscape_lyrics_left_title),
+                            checked = displayPrefs.landscapeLyricsOnLeft,
+                            onCheckedChange = { enabled -> editPrefs { it[com.theveloper.pixelplay.presentation.components.LyricsDisplayPrefKeys.LANDSCAPE_LYRICS_ON_LEFT] = enabled } }
+                        ))
                         // Expressive typography sits beside Immersive: one switch, and while it's
                         // on, the font / size / weight / spacing choices hang under it.
                         add(AdvancedRow(

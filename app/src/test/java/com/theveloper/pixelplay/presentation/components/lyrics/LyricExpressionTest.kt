@@ -118,4 +118,62 @@ class LyricExpressionTest {
             assertTrue(w in 200..800)
         }
     }
+
+    private fun syncedLyrics(lines: List<String>, gapMs: Int) = com.theveloper.pixelplay.data.model.Lyrics(
+        synced = lines.mapIndexed { i, text -> SyncedLine(time = i * gapMs, line = text) }
+    )
+
+    @Test
+    fun `songs without analysis still get their own voice from genre and pacing`() {
+        val ballad = LyricExpressionEngine.build(
+            song.copy(id = "2", genre = "Ballad"),
+            null,
+            syncedLyrics(List(12) { "slow and gentle" }, gapMs = 4_000),
+            null,
+            100_000L
+        )
+        val rap = LyricExpressionEngine.build(
+            song.copy(id = "3", genre = "Hip Hop"),
+            null,
+            syncedLyrics(List(12) { "fast words packed in tight every single bar LOUD" }, gapMs = 2_000),
+            null,
+            100_000L
+        )
+        assertTrue(rap.energy > ballad.energy, "rap=${rap.energy} ballad=${ballad.energy}")
+        assertTrue(rap.baseWeightShift > ballad.baseWeightShift)
+        assertTrue(rap.sizeScale > ballad.sizeScale)
+        assertTrue(rap.motion.wordLift > ballad.motion.wordLift)
+        assertTrue(rap.motion.lineStiffness > ballad.motion.lineStiffness)
+    }
+
+    @Test
+    fun `the song voice changes the whole line style`() {
+        val driving = LyricExpressionEngine.build(song, analysis(energy = 0.95f), null, null, 100_000L)
+        val base = androidx.compose.ui.text.TextStyle(
+            fontSize = androidx.compose.ui.unit.TextUnit(20f, androidx.compose.ui.unit.TextUnitType.Sp),
+            lineHeight = androidx.compose.ui.unit.TextUnit(28f, androidx.compose.ui.unit.TextUnitType.Sp),
+            fontWeight = FontWeight.Normal
+        )
+        val voiced = driving.applyTo(base)
+        assertTrue(voiced.fontSize.value > base.fontSize.value)
+        assertTrue(voiced.fontWeight!!.weight > FontWeight.Normal.weight)
+    }
+
+    @Test
+    fun `sung words lift and settle back without jumps`() {
+        assertEquals(0f, wordLiftAmount(0f))
+        assertEquals(0f, wordLiftAmount(1f))
+        assertTrue(wordLiftAmount(0.5f) > 0.9f)
+        assertTrue(wordLiftAmount(0.02f) < 0.3f)
+        assertTrue(wordLiftAmount(0.98f) < 0.1f)
+    }
+
+    @Test
+    fun `the letter wave follows the cursor and fades behind it`() {
+        assertEquals(0f, letterLiftAmount(-0.5f, 2f))
+        assertEquals(1f, letterLiftAmount(1f, 2f), 1e-4f)
+        assertTrue(letterLiftAmount(2f, 2f) in 0.01f..0.99f)
+        assertEquals(0f, letterLiftAmount(3.5f, 2f))
+    }
 }
+

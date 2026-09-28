@@ -214,6 +214,11 @@ data class LyricsDisplayPrefs(
     val headerCollapsed: Boolean = false,
     /** Face-to-face split view in immersive lyrics (top half turned 180°). */
     val splitFaceView: Boolean = false,
+    /**
+     * Landscape lyrics sheet: song + controls on one half, lyrics on the other. Off = lyrics on
+     * the right (the default), on = lyrics on the left.
+     */
+    val landscapeLyricsOnLeft: Boolean = false,
     /** Show the song structure strip (Intro, Verse, Chorus…) under the header. */
     val showSongStructure: Boolean = true,
     /** Immersive lyrics (lyrics menu → Immersive lyrics). Same key the sheet reads. */
@@ -244,6 +249,7 @@ object LyricsDisplayPrefKeys {
     val LINE_SPACING = stringPreferencesKey("lyrics_line_spacing_v1")
     val HEADER_COLLAPSED = booleanPreferencesKey("lyrics_header_collapsed_v1")
     val SPLIT_FACE_VIEW = booleanPreferencesKey("lyrics_split_face_v1")
+    val LANDSCAPE_LYRICS_ON_LEFT = booleanPreferencesKey("lyrics_landscape_lyrics_left_v1")
     val SHOW_SONG_STRUCTURE = booleanPreferencesKey("lyrics_show_song_structure")
     // Written by SettingsViewModel.setImmersiveLyricsEnabled / setImmersiveLyricsTimeout
     // (UserPreferencesRepository.PreferencesKeys.Lyrics) — same keys, same defaults.
@@ -289,6 +295,7 @@ fun lyricsDisplayPrefsFlow(dataStore: DataStore<Preferences>): Flow<LyricsDispla
                 chosenLineSpacing = chosenSpacing,
                 headerCollapsed = p[LyricsDisplayPrefKeys.HEADER_COLLAPSED] ?: false,
                 splitFaceView = p[LyricsDisplayPrefKeys.SPLIT_FACE_VIEW] ?: false,
+                landscapeLyricsOnLeft = p[LyricsDisplayPrefKeys.LANDSCAPE_LYRICS_ON_LEFT] ?: false,
                 showSongStructure = p[LyricsDisplayPrefKeys.SHOW_SONG_STRUCTURE] ?: true,
                 immersiveEnabled = p[LyricsDisplayPrefKeys.IMMERSIVE_ENABLED] ?: false,
                 immersiveTimeoutMs = p[LyricsDisplayPrefKeys.IMMERSIVE_TIMEOUT] ?: DEFAULT_IMMERSIVE_TIMEOUT_MS,
