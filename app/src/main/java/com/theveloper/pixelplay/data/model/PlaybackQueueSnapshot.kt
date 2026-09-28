@@ -11,6 +11,7 @@ data class PlaybackQueueItemSnapshot(
     val albumTitle: String? = null,
     val artworkUri: String? = null,
     val durationMs: Long? = null,
+    val queueEntry: QueueEntryMetadata = QueueEntryMetadata(),
 )
 
 @Serializable
@@ -23,4 +24,6 @@ data class PlaybackQueueSnapshot(
     val repeatMode: Int = 0,
     val shuffleEnabled: Boolean = false,
     val savedAtEpochMs: Long = System.currentTimeMillis(),
+    val currentEntryId: String? = null,
+    val schemaVersion: Int = 2,
 )

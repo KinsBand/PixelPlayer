@@ -10,7 +10,10 @@ object MixQueueMetadata {
     const val RECORDING = "pixelplay.mix.recording"
     const val AUTOMATIC = "pixelplay.mix.automatic"
     const val FILTER_PICK = "pixelplay.mix.filterPick"
-    fun automatic(item: MediaItem): Boolean = item.mediaMetadata.extras?.getBoolean(AUTOMATIC, false) == true
+    fun generated(item: MediaItem): Boolean = item.mediaMetadata.extras?.getBoolean(AUTOMATIC, false) == true
+    /** Only unpinned generated entries may be replaced by automatic queue maintenance. */
+    fun automatic(item: MediaItem): Boolean = generated(item) &&
+        item.mediaMetadata.extras?.getBoolean(com.theveloper.pixelplay.data.model.QueueEntryMetadata.PINNED, false) != true
 
     /**
      * Songs added by a one-shot mix button in the queue (Similar / a vibe filter). They are not

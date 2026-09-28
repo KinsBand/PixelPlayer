@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.material3.ColorScheme
 import androidx.compose.runtime.Composable
@@ -24,7 +23,6 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.util.lerp
@@ -93,19 +91,13 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                         .graphicsLayer {
                             // Compute miniAlpha in the draw phase from the Animatable,
                             // avoiding per-frame recomposition during gestures.
-                            alpha = (1f - playerContentExpansionFraction.value * 2f)
+                            alpha = (1f - (playerContentExpansionFraction.value - 0.06f) / 0.42f)
                                 .coerceIn(0f, 1f)
                         }
                         .layout { measurable, constraints ->
-                            val fraction = playerContentExpansionFraction.value
                             val startPaddingPx = currentHorizontalPaddingStartPxProvider().toInt().coerceAtLeast(0)
                             val endPaddingPx = currentHorizontalPaddingEndPxProvider().toInt().coerceAtLeast(0)
-                            
-                            val targetWidth = if (fraction > 0f) {
-                                (constraints.maxWidth - startPaddingPx - endPaddingPx).coerceAtLeast(0)
-                            } else {
-                                constraints.maxWidth
-                            }
+                            val targetWidth = (constraints.maxWidth - startPaddingPx - endPaddingPx).coerceAtLeast(0)
                             val placeable = measurable.measure(
                                 constraints.copy(
                                     minWidth = targetWidth,
@@ -113,8 +105,7 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                                 )
                             )
                             layout(constraints.maxWidth, constraints.maxHeight) {
-                                val xOffset = if (fraction > 0f) startPaddingPx else 0
-                                placeable.placeRelative(xOffset, 0)
+                                placeable.placeRelative(startPaddingPx, 0)
                             }
                         }
                         .zIndex(miniPlayerZIndex)
@@ -149,12 +140,6 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                         if (playerContentExpansionFraction.value >= 0.5f) 1f else 0f
                     }
                 }
-                val fullPlayerOffset by remember {
-                    derivedStateOf {
-                        if (playerContentExpansionFraction.value <= 0.01f) IntOffset(0, 10000)
-                        else IntOffset.Zero
-                    }
-                }
                 val fullPlayerRuntimePolicy = rememberFullPlayerRuntimePolicy(
                     currentSheetState = currentSheetContentState,
                     expansionFraction = playerContentExpansionFraction,
@@ -180,7 +165,6 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                             scaleY = lerp(1f, 0.972f, bottomSheetOpenFraction.value)
                         }
                         .zIndex(fullPlayerZIndex)
-                        .offset { fullPlayerOffset }
                 ) {
                     val latestInfrequentPlayerState = rememberUpdatedState(infrequentPlayerState)
                     val latestIsFavorite = rememberUpdatedState(isFavorite)

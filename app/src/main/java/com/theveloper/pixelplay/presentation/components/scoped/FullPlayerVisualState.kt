@@ -18,11 +18,11 @@ internal class FullPlayerVisualState(
     private val expansionFraction: Animatable<Float, AnimationVector1D>,
     private val initialOffsetY: Float
 ) {
-    /** Full-player fade-in: invisible until 25 % expanded, fully opaque at 100 %. */
+    /** Full-player fade-in: smoothly fades in from 6% expanded, reaching full opacity at 58% to preserve luminance with mini-player. */
     val contentAlpha: Float
         get() {
             val f = expansionFraction.value
-            return (f - 0.25f).coerceIn(0f, 0.75f) / 0.75f
+            return ((f - 0.06f) / 0.52f).coerceIn(0f, 1f)
         }
 
     /** Slide-up entrance driven by [contentAlpha]. */

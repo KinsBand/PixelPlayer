@@ -8,6 +8,7 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
+import com.theveloper.pixelplay.ui.theme.MotionTokens
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -523,13 +524,16 @@ private enum class MainRootDirection {
 private const val BOTTOM_NAV_TRANSITION_DURATION = 380
 
 // MD3 Expressive easing for bottom-nav switches
-private val BottomNavEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+private val BottomNavEasing = MotionTokens.EmphasizedEasing
 
 private val MAIN_ROOT_TRANSITION_SPEC =
     tween<IntOffset>(durationMillis = BOTTOM_NAV_TRANSITION_DURATION, easing = BottomNavEasing)
 
 private val MAIN_ROOT_FADE_SPEC =
-    tween<Float>(durationMillis = BOTTOM_NAV_TRANSITION_DURATION / 2, easing = BottomNavEasing)
+    tween<Float>(
+        durationMillis = MotionTokens.DurationMedium2,
+        easing = MotionTokens.EmphasizedAccelerateEasing
+    )
 
 private fun mainRootDirection(
     fromRoute: String?,

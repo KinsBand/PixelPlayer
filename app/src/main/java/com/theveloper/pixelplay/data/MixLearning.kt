@@ -29,7 +29,11 @@ data class MixAttempt(
     val schemaVersion: Int = 2,
     val decisionId: String? = null,
     val sessionId: String? = null,
-    val recordingId: String? = null
+    val recordingId: String? = null,
+    val artist: String? = null,
+    val genre: String? = null,
+    @ColumnInfo(defaultValue = "-1") val startPositionMs: Long = -1L,
+    @ColumnInfo(defaultValue = "-1") val endPositionMs: Long = -1L,
 ) {
     val coverage: Double get() = if (durationMs > 0) (uniqueMs.toDouble() / durationMs).coerceIn(0.0, 1.0) else 0.0
 }
@@ -64,6 +68,13 @@ interface MixAttemptDao {
     @Query("DELETE FROM recommendations WHERE id NOT IN (SELECT id FROM recommendations ORDER BY plannedAt DESC LIMIT 2000)")
     suspend fun compactRecommendations()
     @Query("DELETE FROM recommendations") suspend fun clearRecommendations()
+    @Query("SELECT * FROM attempts WHERE endReason != 'UNKNOWN' AND id != :id ORDER BY startedAt DESC LIMIT 1")
+    suspend fun previousFinished(id: String): MixAttempt?
+    @Query("SELECT * FROM attempts WHERE id = :id") suspend fun byId(id: String): MixAttempt?
+    @Upsert suspend fun saveCooldowns(entries: List<MicroSkipCooldown>)
+    @Query("SELECT * FROM micro_skip_cooldowns WHERE expiresAt > :now") suspend fun cooldowns(now: Long): List<MicroSkipCooldown>
+    @Query("DELETE FROM micro_skip_cooldowns WHERE expiresAt <= :now") suspend fun expireCooldowns(now: Long)
+    @Query("DELETE FROM micro_skip_cooldowns") suspend fun clearCooldowns()
 }
 
 /**
@@ -99,11 +110,20 @@ interface MixFeedbackDao {
 }
 
 // Independent, versioned store so recommendation history does not risk the music catalogue.
-@Database(entities = [MixAttempt::class, MixRecommendation::class, MixFeedbackEntry::class], version = 3, exportSchema = true)
+@Database(entities = [MixAttempt::class, MixRecommendation::class, MixFeedbackEntry::class, MicroSkipCooldown::class], version = 4, exportSchema = true)
 abstract class MixLearningDatabase : RoomDatabase() {
     abstract fun attempts(): MixAttemptDao
     abstract fun feedback(): MixFeedbackDao
     companion object {
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE attempts ADD COLUMN artist TEXT")
+                db.execSQL("ALTER TABLE attempts ADD COLUMN genre TEXT")
+                db.execSQL("ALTER TABLE attempts ADD COLUMN startPositionMs INTEGER NOT NULL DEFAULT -1")
+                db.execSQL("ALTER TABLE attempts ADD COLUMN endPositionMs INTEGER NOT NULL DEFAULT -1")
+                db.execSQL("CREATE TABLE IF NOT EXISTS micro_skip_cooldowns (vector TEXT NOT NULL PRIMARY KEY, sessionId TEXT NOT NULL, expiresAt INTEGER NOT NULL)")
+            }
+        }
         /** v3: mix feedback moves from SharedPreferences into its own table (see [MixFeedback]). */
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -127,7 +147,7 @@ abstract class MixLearningDatabase : RoomDatabase() {
 @Singleton
 class MixLearning @Inject constructor(@ApplicationContext private val context: Context) {
     private val database by lazy {
-        Room.databaseBuilder(context, MixLearningDatabase::class.java, "mix_learning.db").addMigrations(MixLearningDatabase.MIGRATION_1_2, MixLearningDatabase.MIGRATION_2_3).build()
+        Room.databaseBuilder(context, MixLearningDatabase::class.java, "mix_learning.db").addMigrations(MixLearningDatabase.MIGRATION_1_2, MixLearningDatabase.MIGRATION_2_3, MixLearningDatabase.MIGRATION_3_4).build()
     }
     private val storageMutex = Mutex()
     @Volatile private var historyCutoff = 0L
@@ -142,9 +162,8 @@ class MixLearning @Inject constructor(@ApplicationContext private val context: C
         }
     }
     /**
-     * Finished plays (a final end reason, not a checkpoint), as they happen. The live mix
-     * listens to this so a skip reshapes the upcoming songs straight away instead of waiting
-     * for the attempt to reach the database and the next refill.
+     * Finished plays after their attempt and cooldown transaction commits. The live mix
+     * can immediately replan using the same persisted evidence as the next refill.
      */
     private val _finished = kotlinx.coroutines.flow.MutableSharedFlow<MixAttempt>(extraBufferCapacity = 16,
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
@@ -152,7 +171,6 @@ class MixLearning @Inject constructor(@ApplicationContext private val context: C
 
     fun record(attempt: MixAttempt) {
         if (attempt.startedAt < historyCutoff) return
-        if (attempt.endReason != MixEndReason.UNKNOWN.name) _finished.tryEmit(attempt)
         if (!writes.trySend(attempt).isSuccess) Timber.w("Mix analytics buffer full; playback continues")
     }
     @Volatile var sessionId: String = java.util.UUID.randomUUID().toString()
@@ -160,12 +178,29 @@ class MixLearning @Inject constructor(@ApplicationContext private val context: C
     suspend fun save(attempt: MixAttempt) = withContext(Dispatchers.IO) {
         storageMutex.withLock {
             if (attempt.startedAt >= historyCutoff) {
-                database.attempts().save(attempt)
-                database.attempts().compact()
+                var finished = false
+                database.withTransaction {
+                    val dao = database.attempts()
+                    val existing = dao.byId(attempt.id)
+                    // Late checkpoints must not overwrite a final outcome or trigger it twice.
+                    if (existing != null && existing.endReason != MixEndReason.UNKNOWN.name) return@withTransaction
+                    finished = attempt.endReason != MixEndReason.UNKNOWN.name
+                    if (finished) {
+                        dao.saveCooldowns(MicroSkipPolicy.triggered(dao.previousFinished(attempt.id), attempt))
+                        dao.expireCooldowns(System.currentTimeMillis())
+                    }
+                    dao.save(attempt)
+                    dao.compact()
+                }
+                // Publish only after persistence, so the immediate replan sees the new cooldown.
+                if (finished) _finished.emit(attempt)
             }
         }
     }
     suspend fun recent(): List<MixAttempt> = withContext(Dispatchers.IO) { database.attempts().recent() }
+    suspend fun microSkipCooldowns(): List<MicroSkipCooldown> = withContext(Dispatchers.IO) {
+        database.attempts().cooldowns(System.currentTimeMillis())
+    }
     /** Mix feedback table (exclusions, snoozes, removals); owned by [MixFeedback]. */
     internal fun feedbackDao(): MixFeedbackDao = database.feedback()
     suspend fun recordRecommendation(decision: MixRecommendation) = withContext(Dispatchers.IO) {
@@ -182,6 +217,7 @@ class MixLearning @Inject constructor(@ApplicationContext private val context: C
             historyCutoff = System.currentTimeMillis()
             database.attempts().clear()
             database.attempts().clearRecommendations()
+            database.attempts().clearCooldowns()
         }
     }
 }

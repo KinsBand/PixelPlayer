@@ -1046,7 +1046,9 @@ class PlaybackDispatchStateHolder @Inject constructor(
 
     fun addSongToQueue(song: Song) {
         cb.getController()?.let { controller ->
-            val mediaItem = buildPlaybackMediaItem(song)
+            val mediaItem = com.theveloper.pixelplay.data.model.QueueEntryMetadata(
+                tier = com.theveloper.pixelplay.data.model.QueueTier.SESSION, pinned = true
+            ).attach(buildPlaybackMediaItem(song))
             controller.addMediaItem(mediaItem)
             // Queue UI is synced via onTimelineChanged listener
         }
@@ -1054,7 +1056,9 @@ class PlaybackDispatchStateHolder @Inject constructor(
 
     fun addSongNextToQueue(song: Song) {
         cb.getController()?.let { controller ->
-            val mediaItem = buildPlaybackMediaItem(song)
+            val mediaItem = com.theveloper.pixelplay.data.model.QueueEntryMetadata(
+                tier = com.theveloper.pixelplay.data.model.QueueTier.PRIORITY, pinned = true
+            ).attach(buildPlaybackMediaItem(song))
 
             val insertionIndex = if (controller.currentMediaItemIndex != C.INDEX_UNSET) {
                 (controller.currentMediaItemIndex + 1).coerceAtMost(controller.mediaItemCount)

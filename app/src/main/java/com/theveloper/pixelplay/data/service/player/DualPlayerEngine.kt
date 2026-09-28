@@ -377,10 +377,48 @@ class DualPlayerEngine @Inject constructor(
      * Reset to null after each transition.
      */
     var incomingTrackReplayGainVolume: Float? = null
+    /** Observational events; consumers must not use this lossy stream for durable history. */
+    private val _playbackEvents = kotlinx.coroutines.flow.MutableSharedFlow<PlaybackEvent>(extraBufferCapacity = 64,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
+    val playbackEvents: kotlinx.coroutines.flow.SharedFlow<PlaybackEvent> = _playbackEvents
+    private var focusPauseCause: InterruptionCause? = null
+    val currentInterruptionCause: InterruptionCause? get() = focusPauseCause
+
+    /** Explicit transport commands supersede a pending system-triggered resume. */
+    fun cancelPendingFocusResume() {
+        isFocusLossPause = false
+        focusPauseCause = null
+    }
+
+    fun pauseForOutputDisconnect() {
+        if (isReleased || !::playerA.isInitialized) return
+        focusPauseCause = InterruptionCause.OUTPUT_DISCONNECTED
+        isFocusLossPause = false
+        val wasTransitioning = transitionRunning
+        val volume = playerA.volume
+        playerA.pause()
+        playerB?.pause()
+        cancelNext()
+        if (!wasTransitioning) playerA.volume = volume
+    }
+
+    fun playbackCapabilities(): PlaybackCapabilities {
+        val format = currentAudioFormatSnapshot()
+        return PlaybackCapabilities(
+            decodedSampleRate = format?.sampleRate?.takeIf { it > 0 },
+            decodedPcmEncoding = format?.pcmEncoding?.takeIf { it > 0 },
+        )
+    }
+
+    private fun publishPlaybackEvent(kind: PlaybackEventKind, cause: InterruptionCause? = null,
+        mediaId: String? = playerA.currentMediaItem?.mediaId, positionMs: Long = playerA.currentPosition) {
+        _playbackEvents.tryEmit(PlaybackEvent(kind, mediaId, positionMs, SystemClock.elapsedRealtime(), cause))
+    }
 
     private val focusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
         when (focusChange) {
             AudioManager.AUDIOFOCUS_LOSS -> {
+                focusPauseCause = InterruptionCause.AUDIO_FOCUS
                 Timber.tag("TransitionDebug").d("AudioFocus LOSS. Pausing.")
                 isFocusLossPause = false
                 playerA.playWhenReady = false
@@ -391,6 +429,7 @@ class DualPlayerEngine @Inject constructor(
                 Timber.tag("TransitionDebug").d("AudioFocus LOSS_TRANSIENT from Listen recognizer. Ignoring.")
             } else {
                 Timber.tag("TransitionDebug").d("AudioFocus LOSS_TRANSIENT. Pausing.")
+                focusPauseCause = InterruptionCause.AUDIO_FOCUS
                 val auxiliaryPlayer = playerB
                 isFocusLossPause = shouldResumeAfterTransientAudioFocusLoss(
                     masterPlayWhenReady = playerA.playWhenReady,
@@ -429,6 +468,14 @@ class DualPlayerEngine @Inject constructor(
     // Listener to attach to the active master player (playerA)
     private val masterPlayerListener = object : Player.Listener, AnalyticsListener, ExoPlayer.AudioOffloadListener {
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (playWhenReady) {
+                publishPlaybackEvent(PlaybackEventKind.PLAY)
+                focusPauseCause = null
+            } else {
+                val cause = if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY)
+                    InterruptionCause.OUTPUT_DISCONNECTED else focusPauseCause ?: InterruptionCause.MANUAL
+                publishPlaybackEvent(if (cause == InterruptionCause.MANUAL) PlaybackEventKind.PAUSE else PlaybackEventKind.INTERRUPTION, cause)
+            }
             if (playWhenReady) {
                 lastPlayWhenReadyAtMs = SystemClock.elapsedRealtime()
                 requestAudioFocus()
@@ -629,6 +676,7 @@ class DualPlayerEngine @Inject constructor(
         }
 
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+            publishPlaybackEvent(PlaybackEventKind.ERROR)
             val player = playerA
             val item = player.currentMediaItem ?: return
             val uri = item.localConfiguration?.uri ?: return
@@ -671,6 +719,7 @@ class DualPlayerEngine @Inject constructor(
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState == Player.STATE_ENDED) publishPlaybackEvent(PlaybackEventKind.NATURAL_END)
             when (playbackState) {
                 Player.STATE_BUFFERING -> {
                     val now = SystemClock.elapsedRealtime()
@@ -737,6 +786,13 @@ class DualPlayerEngine @Inject constructor(
             newPosition: Player.PositionInfo,
             reason: Int
         ) {
+            val kind = when (reason) {
+                Player.DISCONTINUITY_REASON_AUTO_TRANSITION -> PlaybackEventKind.NATURAL_END
+                Player.DISCONTINUITY_REASON_SEEK -> if (oldPosition.mediaItemIndex == newPosition.mediaItemIndex)
+                    PlaybackEventKind.SEEK else PlaybackEventKind.SKIP
+                else -> null
+            }
+            kind?.let { publishPlaybackEvent(it, mediaId = oldPosition.mediaItem?.mediaId, positionMs = oldPosition.positionMs) }
             if (reason == Player.DISCONTINUITY_REASON_SEEK ||
                 reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT
             ) {
@@ -1074,6 +1130,7 @@ class DualPlayerEngine @Inject constructor(
             }
             AudioManager.AUDIOFOCUS_REQUEST_DELAYED -> {
                 audioFocusRequest = request
+                focusPauseCause = InterruptionCause.AUDIO_FOCUS
                 isFocusLossPause = true
                 playerA.playWhenReady = false
                 if (transitionRunning) playerB?.playWhenReady = false

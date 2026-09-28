@@ -2175,6 +2175,11 @@ class PlayerViewModel @Inject constructor(
 
                 // Move the item in the MediaController's timeline.
                 // This is the source of truth for playback.
+                if (fromIndex != currentIndexBeforeMove) {
+                    val moved = controller.getMediaItemAt(fromIndex)
+                    controller.replaceMediaItem(fromIndex,
+                        com.theveloper.pixelplay.data.model.QueueEntryMetadata.read(moved).copy(pinned = true).attach(moved))
+                }
                 controller.moveMediaItem(fromIndex, toIndex)
 
                 // Optimistically mirror the committed move in UI state. The drag preview stays

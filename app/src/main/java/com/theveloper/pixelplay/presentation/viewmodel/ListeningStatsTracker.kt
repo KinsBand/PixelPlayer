@@ -42,6 +42,10 @@ class ListeningStatsTracker @Inject constructor(
     private var playbackSpeed = 1f
     private data class RecommendationContext(val songId: String, val decisionId: String?, val sessionId: String?, val recordingId: String?)
     private var recommendationContext: RecommendationContext? = null
+    private var trackMetadata: Triple<String, String?, String?>? = null
+    @Synchronized fun setTrackMetadata(songId: String, artist: String?, genre: String?) {
+        trackMetadata = Triple(songId, artist, genre)
+    }
     @Synchronized fun setRecommendationContext(songId: String, decisionId: String?, sessionId: String?, recordingId: String?) {
         recommendationContext = RecommendationContext(songId, decisionId, sessionId, recordingId)
     }
@@ -78,6 +82,7 @@ class ListeningStatsTracker @Inject constructor(
         durationMs: Long,
         isPlaying: Boolean
     ) {
+        song?.let { setTrackMetadata(it.id, it.artist, it.genre) }
         onTrackChanged(
             songId = song?.id,
             positionMs = positionMs,
@@ -123,6 +128,9 @@ class ListeningStatsTracker @Inject constructor(
 
         currentSession = ActiveSession(
             songId = safeSongId,
+            artist = trackMetadata?.takeIf { it.first == safeSongId }?.second,
+            genre = trackMetadata?.takeIf { it.first == safeSongId }?.third,
+            startPositionMs = positionMs.coerceAtLeast(0L),
             totalDurationMs = normalizedDuration,
             startedAtEpochMs = nowEpoch,
             lastKnownPositionMs = positionMs.coerceAtLeast(0L),
@@ -339,7 +347,8 @@ class ListeningStatsTracker @Inject constructor(
         val now = SystemClock.elapsedRealtime()
         if (sameAttempt) session.exposure.discontinuity(oldPositionMs, newPositionMs, now, session.isPlaying, playbackSpeed)
         else session.exposure.sample(oldPositionMs, now, session.isPlaying, playbackSpeed)
-        session.lastKnownPositionMs = newPositionMs
+        // A cross-track discontinuity belongs to the outgoing attempt until it is finalized.
+        session.lastKnownPositionMs = if (sameAttempt) newPositionMs else oldPositionMs
         persistAttempt(session, checkpoint = true)
     }
 
@@ -359,7 +368,9 @@ class ListeningStatsTracker @Inject constructor(
             durationMs = session.totalDurationMs, voluntary = session.isVoluntary,
             endReason = if (checkpoint) MixEndReason.UNKNOWN.name else session.endReason.name,
             seeks = session.exposure.seeks, decisionId = session.decisionId,
-            sessionId = session.sessionId, recordingId = session.recordingId
+            sessionId = session.sessionId, recordingId = session.recordingId,
+            artist = session.artist, genre = session.genre,
+            startPositionMs = session.startPositionMs, endPositionMs = session.lastKnownPositionMs
         ))
     }
 
@@ -405,5 +416,8 @@ data class ActiveSession(
     val attemptId: String = java.util.UUID.randomUUID().toString(),
     val exposure: PlaybackExposure = PlaybackExposure(lastKnownPositionMs, lastRealtimeMs, isPlaying),
     var endReason: MixEndReason = MixEndReason.UNKNOWN,
-    var lastCheckpointMs: Long = lastRealtimeMs
+    var lastCheckpointMs: Long = lastRealtimeMs,
+    val artist: String? = null,
+    val genre: String? = null,
+    val startPositionMs: Long = -1L,
 )

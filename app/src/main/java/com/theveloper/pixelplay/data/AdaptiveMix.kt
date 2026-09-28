@@ -677,7 +677,7 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
             weights = weights,
             sessionId = learning.sessionId,
             extras = mapOf("soundAlike" to soundAlike(eligible, seedsAnalysed, libraryState.embeddings, weights.soundAlike)),
-            energyTarget = energyTarget)
+            energyTarget = energyTarget, microSkipCooldowns = learning.microSkipCooldowns())
         // Stale plans (feedback changed meanwhile) are discarded by the caller, not here: an
         // empty answer used to read as "no suitable songs".
         lastDecisions = decisions
@@ -716,7 +716,7 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
             weights = weights,
             sessionId = learning.sessionId,
             extras = mapOf("soundAlike" to soundAlike(pool, seedsAnalysed, library.embeddings, weights.soundAlike)),
-            energyTarget = energyTarget
+            energyTarget = energyTarget, microSkipCooldowns = learning.microSkipCooldowns()
         ).map { it.song.id }
     }
 

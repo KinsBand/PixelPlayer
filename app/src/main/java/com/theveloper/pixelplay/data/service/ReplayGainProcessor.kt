@@ -59,6 +59,58 @@ class ReplayGainProcessor(
     private var lastAppliedVolume: Float? = null
     // MediaId for which lastAppliedVolume was computed.
     private var lastMediaId: String? = null
+    private var resumeFadeJob: Job? = null
+    private var resumeFadeFactor = 1f
+    private var resumeBaseVolume = 1f
+    private var resumeFadeGeneration = 0L
+    val isResumeFading: Boolean get() = resumeFadeJob != null
+
+    fun cancelResumeFade() {
+        resumeFadeGeneration++
+        resumeFadeJob?.cancel()
+        resumeFadeJob = null
+        if (resumeFadeFactor != 1f) {
+            resumeFadeFactor = 1f
+            setPlayerVolume(engine.masterPlayer, resumeBaseVolume)
+        }
+    }
+
+    /** The envelope multiplies the current RG target, including late tag-read results. */
+    fun fadeInOnResume(durationMs: Long) {
+        cancelResumeFade()
+        if (durationMs <= 0 || engine.isTransitionRunning()) return
+        val player = engine.masterPlayer
+        val item = player.currentMediaItem
+        resumeBaseVolume = player.volume
+        resumeFadeFactor = 0f
+        val generation = resumeFadeGeneration
+        // Assign the job before the first write; volume callbacks must see envelope ownership.
+        resumeFadeJob = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            var playedMs = 0L
+            var previous = android.os.SystemClock.elapsedRealtime()
+            var wasPlaying = false
+            try {
+                while (playedMs < durationMs && player.playWhenReady && player.currentMediaItem == item &&
+                    !engine.isTransitionRunning()) {
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    if (wasPlaying && player.isPlaying) playedMs += now - previous
+                    previous = now
+                    wasPlaying = player.isPlaying
+                    resumeFadeFactor = (playedMs.toFloat() / durationMs).coerceIn(0f, 1f)
+                    setPlayerVolume(player, resumeBaseVolume)
+                    kotlinx.coroutines.delay(16)
+                }
+            } finally {
+                if (generation == resumeFadeGeneration) {
+                    resumeFadeFactor = 1f
+                    setPlayerVolume(player, resumeBaseVolume)
+                    resumeFadeJob = null
+                }
+            }
+        }
+        setPlayerVolume(player, resumeBaseVolume)
+        resumeFadeJob?.start()
+    }
     // Analysed gains (dB) of untagged tracks, filled by [prefetch].
     private val analysedGainCache = java.util.concurrent.ConcurrentHashMap<String, Float>()
 
@@ -77,6 +129,7 @@ class ReplayGainProcessor(
 
     fun cancel() {
         job?.cancel()
+        cancelResumeFade()
     }
 
     /**
@@ -91,12 +144,14 @@ class ReplayGainProcessor(
             expectedVolume = null
             return
         }
+        if (isResumeFading) return
         expectedVolume = null
         userSelectedVolume = volume.coerceIn(0f, 1f)
     }
 
     private fun setPlayerVolume(player: Player, volume: Float) {
-        val clampedVolume = volume.coerceIn(0f, 1f)
+        resumeBaseVolume = volume.coerceIn(0f, 1f)
+        val clampedVolume = (resumeBaseVolume * resumeFadeFactor).coerceIn(0f, 1f)
         expectedVolume = clampedVolume
         player.volume = clampedVolume
     }

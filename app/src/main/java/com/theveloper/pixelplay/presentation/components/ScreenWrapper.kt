@@ -4,8 +4,7 @@ import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.CubicBezierEasing
+import com.theveloper.pixelplay.ui.theme.MotionTokens
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateDp
@@ -109,7 +108,7 @@ fun ScreenWrapper(
     val targetRadius = if (shouldRunDepthEffects && !isResumed) 32f else 0f
     val animatedCornerRadius = if (transition != null) {
         val animatedValue by transition.animateFloat(
-            transitionSpec = { tween(durationMillis = 350, easing = FastOutSlowInEasing) },
+            transitionSpec = { tween(durationMillis = MotionTokens.DurationMedium3, easing = MotionTokens.EmphasizedEasing) },
             label = "cornerRadius"
         ) { state ->
             if (shouldRunDepthEffects && (state == EnterExitState.PostExit || state == EnterExitState.PreEnter)) {
@@ -122,7 +121,7 @@ fun ScreenWrapper(
     } else {
         val fallbackCornerRadius = remember { Animatable(targetRadius) }
         LaunchedEffect(targetRadius) {
-            fallbackCornerRadius.animateTo(targetRadius, animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing))
+            fallbackCornerRadius.animateTo(targetRadius, animationSpec = tween(durationMillis = MotionTokens.DurationMedium3, easing = MotionTokens.EmphasizedEasing))
         }
         fallbackCornerRadius.value
     }
@@ -135,7 +134,7 @@ fun ScreenWrapper(
     }
     val animatedDimAlpha = if (transition != null) {
         val animatedValue by transition.animateFloat(
-            transitionSpec = { tween(durationMillis = 350, easing = CubicBezierEasing(0.5f, 0f, 0.8f, 0.2f)) },
+            transitionSpec = { tween(durationMillis = MotionTokens.DurationMedium3, easing = MotionTokens.EmphasizedEasing) },
             label = "dimAlpha"
         ) { state ->
             if (shouldRunDepthEffects && shouldDim && (state == EnterExitState.PostExit || state == EnterExitState.PreEnter)) {
@@ -148,7 +147,7 @@ fun ScreenWrapper(
     } else {
         val fallbackDimAlpha = remember { Animatable(targetDim) }
         LaunchedEffect(targetDim) {
-            fallbackDimAlpha.animateTo(targetDim, animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing))
+            fallbackDimAlpha.animateTo(targetDim, animationSpec = tween(durationMillis = MotionTokens.DurationMedium3, easing = MotionTokens.EmphasizedEasing))
         }
         fallbackDimAlpha.value
     }
@@ -157,7 +156,7 @@ fun ScreenWrapper(
     val targetBlur = if (shouldRunDepthEffects && shouldDim && !disableBlurAllOver) 24f else 0f
     val animatedBlurRadius = if (transition != null) {
         val animatedValue by transition.animateDp(
-            transitionSpec = { tween(durationMillis = 350, easing = CubicBezierEasing(0.5f, 0f, 0.8f, 0.2f)) },
+            transitionSpec = { tween(durationMillis = MotionTokens.DurationMedium3, easing = MotionTokens.EmphasizedEasing) },
             label = "blurRadius"
         ) { state ->
             if (shouldRunDepthEffects && shouldDim && !disableBlurAllOver && (state == EnterExitState.PostExit || state == EnterExitState.PreEnter)) {
@@ -170,7 +169,7 @@ fun ScreenWrapper(
     } else {
         val fallbackBlurRadius = remember { Animatable(targetBlur) }
         LaunchedEffect(targetBlur) {
-            fallbackBlurRadius.animateTo(targetBlur, animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing))
+            fallbackBlurRadius.animateTo(targetBlur, animationSpec = tween(durationMillis = MotionTokens.DurationMedium3, easing = MotionTokens.EmphasizedEasing))
         }
         fallbackBlurRadius.value.dp
     }

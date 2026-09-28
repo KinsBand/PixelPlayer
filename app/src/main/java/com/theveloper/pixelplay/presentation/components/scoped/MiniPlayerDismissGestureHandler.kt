@@ -2,7 +2,6 @@ package com.theveloper.pixelplay.presentation.components.scoped
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -16,18 +15,17 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.util.lerp
+import com.theveloper.pixelplay.ui.theme.MotionTokens
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.math.abs
-import kotlin.math.sign
-
-private enum class MiniDismissDragPhase { IDLE, TENSION, SNAPPING, FREE_DRAG }
 
 /**
  * Keeps mini-player dismiss gesture behavior isolated from the sheet host.
- * Logic is unchanged; this only centralizes gesture transitions and animation dispatch.
+ * Employs progressive continuous resistance dampening to eliminate discrete tension jerks
+ * and accelerates off-screen with Material 3 Emphasized Accelerate easing.
  */
 internal class MiniPlayerDismissGestureHandler(
     private val scope: CoroutineScope,
@@ -38,13 +36,13 @@ internal class MiniPlayerDismissGestureHandler(
     private val onDismissPlaylistAndShowUndo: () -> Unit,
     private val onDismissStarted: () -> Unit = {}
 ) {
-    private var dragPhase: MiniDismissDragPhase = MiniDismissDragPhase.IDLE
     private var accumulatedDragX: Float = 0f
+    private var hasTriggeredCommitHaptic: Boolean = false
     private var offsetJob: Job? = null
 
     fun onDragStart() {
-        dragPhase = MiniDismissDragPhase.TENSION
         accumulatedDragX = 0f
+        hasTriggeredCommitHaptic = false
         offsetJob?.cancel()
         offsetJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             offsetAnimatable.stop()
@@ -53,57 +51,27 @@ internal class MiniPlayerDismissGestureHandler(
 
     fun onHorizontalDrag(dragAmount: Float) {
         accumulatedDragX += dragAmount
-
-        when (dragPhase) {
-            MiniDismissDragPhase.TENSION -> {
-                val snapThresholdPx = 100f * density.density
-                if (abs(accumulatedDragX) < snapThresholdPx) {
-                    val maxTensionOffsetPx = 30f * density.density
-                    val dragFraction = (abs(accumulatedDragX) / snapThresholdPx).coerceIn(0f, 1f)
-                    val tensionOffset = lerp(0f, maxTensionOffsetPx, dragFraction)
-                    offsetJob?.cancel()
-                    offsetJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
-                        offsetAnimatable.snapTo(tensionOffset * accumulatedDragX.sign)
-                    }
-                } else {
-                    dragPhase = MiniDismissDragPhase.SNAPPING
-                }
-            }
-
-            MiniDismissDragPhase.SNAPPING -> {
+        val xAbs = abs(accumulatedDragX)
+        val commitThresholdPx = 100f * density.density
+        val targetOffset = if (xAbs < commitThresholdPx) {
+            val t = (xAbs / commitThresholdPx).coerceIn(0f, 1f)
+            val s = 3f * t * t - 2f * t * t * t
+            val progressFactor = lerp(0.35f, 1.0f, s)
+            accumulatedDragX * progressFactor
+        } else {
+            if (!hasTriggeredCommitHaptic) {
+                hasTriggeredCommitHaptic = true
                 hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                offsetJob?.cancel()
-                offsetJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
-                    offsetAnimatable.animateTo(
-                        targetValue = accumulatedDragX,
-                        animationSpec = spring(
-                            dampingRatio = 0.8f,
-                            stiffness = Spring.StiffnessLow
-                        )
-                    )
-                }
-                dragPhase = MiniDismissDragPhase.FREE_DRAG
             }
-
-            MiniDismissDragPhase.FREE_DRAG -> {
-                offsetJob?.cancel()
-                offsetJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
-                    offsetAnimatable.animateTo(
-                        targetValue = accumulatedDragX,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioNoBouncy,
-                            stiffness = Spring.StiffnessHigh
-                        )
-                    )
-                }
-            }
-
-            MiniDismissDragPhase.IDLE -> Unit
+            accumulatedDragX
+        }
+        offsetJob?.cancel()
+        offsetJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            offsetAnimatable.snapTo(targetOffset)
         }
     }
 
     fun onDragEnd() {
-        dragPhase = MiniDismissDragPhase.IDLE
         offsetJob?.cancel()
         val dismissThreshold = screenWidthPx * 0.4f
         if (abs(accumulatedDragX) > dismissThreshold) {
@@ -114,7 +82,7 @@ internal class MiniPlayerDismissGestureHandler(
                     targetValue = targetDismissOffset,
                     animationSpec = tween(
                         durationMillis = 200,
-                        easing = FastOutSlowInEasing
+                        easing = MotionTokens.EmphasizedAccelerateEasing
                     )
                 )
                 onDismissPlaylistAndShowUndo()

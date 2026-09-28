@@ -421,7 +421,8 @@ class ContinuousMixRuntime @Inject constructor(
         val protectedUntil = player.currentMediaItemIndex + 1
         while (player.mediaItemCount > max && i > protectedUntil) {
             val item = player.getMediaItemAt(i)
-            if (includeUserSongs || MixQueueMetadata.automatic(item)) player.removeMediaItem(i)
+            if ((includeUserSongs && item.mediaMetadata.extras?.getBoolean(com.theveloper.pixelplay.data.model.QueueEntryMetadata.PINNED, false) != true) ||
+                MixQueueMetadata.automatic(item)) player.removeMediaItem(i)
             i--
         }
     }

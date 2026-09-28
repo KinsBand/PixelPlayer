@@ -284,6 +284,7 @@ object MediaItemBuilder {
         }
 
         val extras = Bundle().apply {
+            putString(com.theveloper.pixelplay.data.model.QueueEntryMetadata.ID, java.util.UUID.randomUUID().toString())
             putBoolean(EXTERNAL_EXTRA_FLAG, song.id.startsWith(EXTERNAL_MEDIA_ID_PREFIX))
             putString(EXTERNAL_EXTRA_ALBUM, song.album)
             putLong(EXTERNAL_EXTRA_DURATION, song.duration)

@@ -243,6 +243,7 @@ class MusicService : MediaLibraryService() {
     }
     private var endOfTrackTimerSongId: String? = null
     private var sleepFadeJob: Job? = null
+    private val smartResumePolicy = com.theveloper.pixelplay.data.service.player.SmartResumePolicy()
     // Cast remote-session synchronization, extracted to a standalone coordinator.
     // Lazily built so the Hilt-injected listeningStatsTracker is ready before first use.
     private val castSyncCoordinator by lazy {
@@ -403,6 +404,7 @@ class MusicService : MediaLibraryService() {
         }
 
         val mixExtras = mediaItem.mediaMetadata.extras
+        listeningStatsTracker.setTrackMetadata(songId, mediaItem.mediaMetadata.artist?.toString(), mediaItem.mediaMetadata.genre?.toString())
         listeningStatsTracker.setRecommendationContext(songId,
             mixExtras?.getString(com.theveloper.pixelplay.data.MixQueueMetadata.DECISION)?.takeIf { it.isNotBlank() },
             mixExtras?.getString(com.theveloper.pixelplay.data.MixQueueMetadata.SESSION),
@@ -617,6 +619,13 @@ class MusicService : MediaLibraryService() {
         }
 
         val callback = object : MediaLibrarySession.Callback {
+            override fun onPlayerCommandRequest(session: MediaSession, controller: MediaSession.ControllerInfo, playerCommand: Int): Int {
+                if (playerCommand == Player.COMMAND_PLAY_PAUSE || playerCommand == Player.COMMAND_STOP) {
+                    engine.cancelPendingFocusResume()
+                }
+                return super.onPlayerCommandRequest(session, controller, playerCommand)
+            }
+
             override fun onConnect(
                 session: MediaSession,
                 controller: MediaSession.ControllerInfo
@@ -1060,6 +1069,7 @@ class MusicService : MediaLibraryService() {
      * Falls back to a plain pause if nothing is playing or a crossfade owns the volume.
      */
     private fun fadeOutAndPauseForSleepTimer() {
+        replayGainProcessor.cancelResumeFade()
         sleepFadeJob?.cancel()
         val player = mediaSession?.player ?: engine.masterPlayer
         if (!player.isPlaying || engine.isTransitionRunning()) {
@@ -1163,6 +1173,7 @@ class MusicService : MediaLibraryService() {
             val player = mediaSession?.player ?: engine.masterPlayer
             when (action) {
                 PlayerActions.PLAY_PAUSE -> {
+                    engine.cancelPendingFocusResume()
                     if (player.playbackState == Player.STATE_IDLE) {
                         player.prepare()
                     }
@@ -1269,7 +1280,7 @@ class MusicService : MediaLibraryService() {
 
         override fun onVolumeChanged(volume: Float) {
             replayGainProcessor.onPlayerVolumeChanged(volume)
-            if (pauseOnVolumeZeroEnabled && volume == 0f) {
+            if (pauseOnVolumeZeroEnabled && volume == 0f && !replayGainProcessor.isResumeFading) {
                 val player = mediaSession?.player ?: engine.masterPlayer
                 if (player.isPlaying) {
                     player.pause()
@@ -1301,6 +1312,24 @@ class MusicService : MediaLibraryService() {
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            val player = engine.masterPlayer
+            val item = player.currentMediaItem
+            val entry = item?.mediaMetadata?.extras?.getString(com.theveloper.pixelplay.data.model.QueueEntryMetadata.ID)
+                ?: "${player.currentMediaItemIndex}:${item?.mediaId}"
+            if (!isRestoringPlaybackSnapshot && item != null && !engine.isTransitionRunning()) {
+                if (playWhenReady) {
+                    val action = smartResumePolicy.resume(entry, player.currentPosition, SystemClock.elapsedRealtime())
+                    if (action != null && action.fadeInMs > 0 && player.isCurrentMediaItemSeekable) {
+                        player.seekTo(action.positionMs)
+                        replayGainProcessor.fadeInOnResume(action.fadeInMs)
+                    }
+                } else {
+                    replayGainProcessor.cancelResumeFade()
+                    if (player.playbackState == Player.STATE_READY) {
+                        smartResumePolicy.paused(entry, player.currentPosition, SystemClock.elapsedRealtime())
+                    }
+                }
+            }
             prewarmNextStream()
             when {
                 playWhenReady -> clearHeadsetReconnectResume()
@@ -1377,6 +1406,8 @@ class MusicService : MediaLibraryService() {
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            smartResumePolicy.clear()
+            replayGainProcessor.cancelResumeFade()
             updateEqualizerGenre(mediaItem)
             prewarmNextStream()
             val activePlayer = mediaSession?.player ?: engine.masterPlayer
@@ -1537,6 +1568,11 @@ class MusicService : MediaLibraryService() {
 
     private fun registerHeadsetReconnectMonitor() {
         val callback = object : AudioDeviceCallback() {
+            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
+                if (removedDevices.any(::isReconnectableHeadsetOutput) && !hasReconnectableHeadsetOutput()) {
+                    engine.pauseForOutputDisconnect()
+                }
+            }
             override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
                 if (!addedDevices.any(::isReconnectableHeadsetOutput)) return
                 maybeResumeAfterHeadsetReconnect()
@@ -1606,6 +1642,7 @@ class MusicService : MediaLibraryService() {
             AudioDeviceInfo.TYPE_WIRED_HEADSET,
             AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
             AudioDeviceInfo.TYPE_USB_HEADSET,
+            AudioDeviceInfo.TYPE_USB_DEVICE,
             AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
             AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
             AudioDeviceInfo.TYPE_BLE_HEADSET,
@@ -1657,6 +1694,7 @@ class MusicService : MediaLibraryService() {
         }
 
         val snapshotItems = ArrayList<PlaybackQueueItemSnapshot>(mediaItemCount)
+        var capturedCurrentIndex = 0
         for (index in 0 until mediaItemCount) {
             val mediaItem = player.getMediaItemAt(index)
             val metadata = mediaItem.mediaMetadata
@@ -1671,6 +1709,7 @@ class MusicService : MediaLibraryService() {
                 ?.getLong(MediaItemBuilder.EXTERNAL_EXTRA_DURATION)
                 ?.takeIf { it > 0L }
 
+            if (index == player.currentMediaItemIndex) capturedCurrentIndex = snapshotItems.size
             snapshotItems.add(
                 PlaybackQueueItemSnapshot(
                     mediaId = mediaItem.mediaId,
@@ -1680,6 +1719,7 @@ class MusicService : MediaLibraryService() {
                     albumTitle = metadata.albumTitle?.toString(),
                     artworkUri = resolveStoredArtworkUriString(metadata),
                     durationMs = durationMs,
+                    queueEntry = com.theveloper.pixelplay.data.model.QueueEntryMetadata.read(mediaItem),
                 )
             )
         }
@@ -1689,15 +1729,7 @@ class MusicService : MediaLibraryService() {
         }
 
         val currentMediaId = player.currentMediaItem?.mediaId
-        val indexFromMediaId = currentMediaId
-            ?.let { id -> snapshotItems.indexOfFirst { it.mediaId == id } }
-            ?.takeIf { it >= 0 }
-
-        val safeCurrentIndex = when {
-            indexFromMediaId != null -> indexFromMediaId
-            player.currentMediaItemIndex in snapshotItems.indices -> player.currentMediaItemIndex
-            else -> 0
-        }
+        val safeCurrentIndex = capturedCurrentIndex.coerceIn(snapshotItems.indices)
 
         val safeRepeatMode = when (player.repeatMode) {
             Player.REPEAT_MODE_OFF,
@@ -1710,6 +1742,7 @@ class MusicService : MediaLibraryService() {
             items = snapshotItems,
             currentMediaId = currentMediaId,
             currentIndex = safeCurrentIndex,
+            currentEntryId = snapshotItems[safeCurrentIndex].queueEntry.entryId,
             currentPositionMs = player.currentPosition.coerceAtLeast(0L),
             playWhenReady = playWhenReadyOverride ?: player.playWhenReady,
             repeatMode = safeRepeatMode,
@@ -1731,10 +1764,8 @@ class MusicService : MediaLibraryService() {
             return
         }
 
-        val allowBackgroundPlayback = runCatching {
-            userPreferencesRepository.keepPlayingInBackgroundFlow.first()
-        }.getOrDefault(keepPlayingInBackground)
-        val shouldRestorePlaying = snapshot.playWhenReady && allowBackgroundPlayback
+        // A persisted queue is not consent to start audio after a process restart or reboot.
+        val shouldRestorePlaying = false
 
         val restoredItems = snapshot.items.mapNotNull(::buildMediaItemFromSnapshot)
         if (restoredItems.isEmpty()) {
@@ -1742,7 +1773,11 @@ class MusicService : MediaLibraryService() {
             return
         }
 
+        val restoredEntryIndex = restoredItems.indexOfFirst {
+            it.mediaMetadata.extras?.getString(com.theveloper.pixelplay.data.model.QueueEntryMetadata.ID) == snapshot.currentEntryId
+        }.takeIf { snapshot.currentEntryId != null && it >= 0 }
         val resolvedIndex = when {
+            restoredEntryIndex != null -> restoredEntryIndex
             snapshot.currentIndex in restoredItems.indices -> snapshot.currentIndex
             !snapshot.currentMediaId.isNullOrBlank() -> {
                 restoredItems.indexOfFirst { it.mediaId == snapshot.currentMediaId }
@@ -1817,6 +1852,7 @@ class MusicService : MediaLibraryService() {
             ?.let { metadataBuilder.setArtworkUri(it) }
 
         val extras = Bundle().apply {
+            snapshotItem.queueEntry.writeTo(this)
             putBoolean(
                 MediaItemBuilder.EXTERNAL_EXTRA_FLAG,
                 snapshotItem.mediaId.startsWith("external:")

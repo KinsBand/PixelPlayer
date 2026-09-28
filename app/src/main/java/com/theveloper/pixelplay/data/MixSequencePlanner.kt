@@ -49,7 +49,8 @@ internal object MixSequencePlanner {
         /** More named components per song id (e.g. "soundAlike"), added as they are. */
         extras: Map<String, Map<String, Double>> = emptyMap(),
         /** 0…1 energy the listener asked for (Calm ≈ 0.25, Hype ≈ 0.85), or null to follow. */
-        energyTarget: Double? = null
+        energyTarget: Double? = null,
+        microSkipCooldowns: List<MicroSkipCooldown> = emptyList(),
     ): List<Decision> {
         val observations = history.filter { it.startedAt <= now }
         val keyById = HashMap<String, String>(catalogue.size + candidates.size)
@@ -96,6 +97,7 @@ internal object MixSequencePlanner {
             components["rediscovery"] = if (rediscovered) weights.rediscovery else 0.0
             components["fatigue"] = -(fatigue + (penalties[song.id] ?: 0.0))
             components["recentRejection"] = -rejections.coerceAtMost(weights.recentRejectionCap)
+            components["microSkipCooldown"] = -MicroSkipPolicy.penalty(song.artist, song.genre, microSkipCooldowns, sessionId, now)
             components["coListen"] = if (coListen.isEmpty) 0.0 else coListen.affinity(seedKeys, key) * weights.coListen
             components.putAll(taste.components(song))
             if (boosts.isNotEmpty()) components["vibeFit"] = boosts[song.id] ?: 0.0

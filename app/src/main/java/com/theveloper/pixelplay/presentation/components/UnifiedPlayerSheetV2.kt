@@ -342,10 +342,6 @@ fun UnifiedPlayerSheetV2(
     var previousSheetState by remember { mutableStateOf(currentSheetContentState) }
     LaunchedEffect(showPlayerContentArea, currentSheetContentState) {
         val targetExpanded = showPlayerContentArea && currentSheetContentState == PlayerSheetState.EXPANDED
-        val shouldBounceCollapse =
-            showPlayerContentArea &&
-                previousSheetState == PlayerSheetState.EXPANDED &&
-                currentSheetContentState == PlayerSheetState.COLLAPSED
         if (previousSheetState != currentSheetContentState) {
             val fromState = previousSheetState
             val toState = currentSheetContentState
@@ -367,28 +363,11 @@ fun UnifiedPlayerSheetV2(
  
         if (showPlayerContentArea) {
             scope.launch {
-                if (targetExpanded) {
-                    visualOvershootScaleY.snapTo(1f)
+                if (visualOvershootScaleY.value != 1f) {
                     visualOvershootScaleY.animateTo(
                         targetValue = 1f,
-                        animationSpec = keyframes {
-                            durationMillis = 250
-                            1.0f at 0
-                            1.05f at 125
-                            1.0f at 250
-                        }
+                        animationSpec = sheetAnimationSpec
                     )
-                } else if (shouldBounceCollapse) {
-                    visualOvershootScaleY.snapTo(0.96f)
-                    visualOvershootScaleY.animateTo(
-                        targetValue = 1f,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                            stiffness = Spring.StiffnessLow
-                        )
-                    )
-                } else {
-                    visualOvershootScaleY.snapTo(1f)
                 }
             }
         } else {
@@ -779,13 +758,8 @@ fun UnifiedPlayerSheetV2(
                             // During drag/animation, we measure at stable full-screen constraints to prevent jank.
                             .layout { measurable, constraints ->
                                 val targetContentHeightPx = containerHeight.roundToPx()
-                                val fraction = playerContentExpansionFraction.value
                                 val startPaddingPx = currentHorizontalPaddingStartPxProvider().toInt()
-                                val measureWidth = if (fraction > 0f) {
-                                    screenWidthPx.roundToInt()
-                                } else {
-                                    constraints.maxWidth
-                                }
+                                val measureWidth = screenWidthPx.roundToInt()
                                 val placeable = measurable.measure(
                                     constraints.copy(
                                         minWidth = measureWidth,
@@ -795,8 +769,7 @@ fun UnifiedPlayerSheetV2(
                                     )
                                 )
                                 layout(constraints.maxWidth, constraints.maxHeight) {
-                                    val xOffset = if (fraction > 0f) -startPaddingPx else 0
-                                    placeable.placeRelative(xOffset, 0)
+                                    placeable.placeRelative(-startPaddingPx, 0)
                                 }
                             }
                             .miniPlayerDismissHorizontalGesture(

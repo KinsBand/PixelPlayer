@@ -20,11 +20,15 @@ import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.Timeline
 import androidx.compose.material.icons.rounded.Title
 import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -45,7 +49,6 @@ import com.theveloper.pixelplay.data.preferences.WidgetConfig
 import com.theveloper.pixelplay.data.preferences.WidgetKind
 import com.theveloper.pixelplay.data.preferences.WidgetProgressStyle
 import com.theveloper.pixelplay.data.preferences.WidgetSpinMode
-import com.theveloper.pixelplay.presentation.screens.ActionSettingsItem
 import com.theveloper.pixelplay.presentation.screens.SettingsItem
 import com.theveloper.pixelplay.presentation.screens.SettingsSegmentedSelectorItem
 import com.theveloper.pixelplay.presentation.screens.SliderSettingsItem
@@ -74,7 +77,6 @@ internal fun WidgetsSettingsContent(
     val context = LocalContext.current
     val configs by viewModel.configs.collectAsStateWithLifecycle()
     val selectedKind by viewModel.selectedKind.collectAsStateWithLifecycle()
-    val playerInfo by viewModel.playerInfo.collectAsStateWithLifecycle()
 
     val config = configs[selectedKind] ?: WidgetConfig(kind = selectedKind)
     val appearance = config.appearance
@@ -406,12 +408,12 @@ private fun WidgetIconToggle(
 ) {
     val highlighted = com.theveloper.pixelplay.presentation.screens.LocalHighlightSettingKey.current
         ?.equals(settingKey, ignoreCase = true) == true
-    androidx.compose.material3.TooltipBox(
-        positionProvider = androidx.compose.material3.TooltipDefaults.rememberTooltipPositionProvider(
-            androidx.compose.material3.TooltipAnchorPosition.Above
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(
+            TooltipAnchorPosition.Above
         ),
-        tooltip = { androidx.compose.material3.PlainTooltip { Text(label) } },
-        state = androidx.compose.material3.rememberTooltipState(),
+        tooltip = { PlainTooltip { Text(label) } },
+        state = rememberTooltipState(),
     ) {
         androidx.compose.material3.FilledIconToggleButton(
             checked = checked,

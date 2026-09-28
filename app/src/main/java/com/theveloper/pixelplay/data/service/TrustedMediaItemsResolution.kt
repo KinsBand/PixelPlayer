@@ -17,7 +17,12 @@ internal fun resolveMediaItemsWithTrustedArtworkGrants(
     requestedItems.forEach { requestedItem ->
         val trustedItem = trustedItemResolver(requestedItem.mediaId)
         if (trustedItem != null) {
-            resolvedItems += trustedItem
+            // Preserve only queue occurrence data. Artwork and source metadata still come
+            // exclusively from the trusted library item used for permission grants.
+            resolvedItems += if (requestedItem.mediaMetadata.extras?.getString(
+                    com.theveloper.pixelplay.data.model.QueueEntryMetadata.ID) != null) {
+                com.theveloper.pixelplay.data.model.QueueEntryMetadata.read(requestedItem).attach(trustedItem)
+            } else trustedItem
             trustedArtworkGrantItems += trustedItem
         } else {
             // Caller-supplied metadata is untrusted and must never drive provider grants.

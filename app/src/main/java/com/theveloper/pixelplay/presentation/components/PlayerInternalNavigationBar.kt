@@ -35,10 +35,12 @@ import kotlinx.collections.immutable.ImmutableList
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import com.theveloper.pixelplay.ui.theme.MotionTokens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -181,7 +183,10 @@ private fun PlayerInternalNavigationItemsRow(
             }
             val animatedWeight by animateFloatAsState(
                 targetValue = targetWeight,
-                animationSpec = tween(durationMillis = 220),
+                animationSpec = tween(
+                    durationMillis = 380,
+                    easing = MotionTokens.EmphasizedEasing
+                ),
                 label = "nav_item_weight"
             )
 
@@ -267,7 +272,9 @@ private fun PlayerInternalNavigationItemsRow(
                 AnimatedContent(
                     targetState = isOnSearchScreen,
                     transitionSpec = {
-                        fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(220))
+                        (fadeIn(animationSpec = tween(380, easing = MotionTokens.EmphasizedEasing)) togetherWith
+                            fadeOut(animationSpec = tween(380, easing = MotionTokens.EmphasizedEasing))
+                        ).using(SizeTransform(clip = false))
                     },
                     label = "search_morph",
                     modifier = Modifier.weight(animatedWeight)
@@ -375,7 +382,7 @@ private fun InlineNavSearchBar(
     LaunchedEffect(Unit) {
         // Opened by voice search: the words are typed in by the microphone, so no keyboard.
         if (voiceActive) return@LaunchedEffect
-        delay(120L) // wait slightly for animation to settle
+        delay(380L) // wait for 380ms navigation transition to settle before showing keyboard
         focusRequester.requestFocus()
         keyboardController?.show()
     }

@@ -9,10 +9,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.util.lerp
 import androidx.media3.common.util.UnstableApi
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerSheetState
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
+import com.theveloper.pixelplay.ui.theme.MotionTokens
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlin.coroutines.cancellation.CancellationException
@@ -40,15 +40,18 @@ internal fun PlayerSheetPredictiveBackHandler(
                     }
                     scope.launch {
                         val progressAtRelease = playerViewModel.predictiveBackCollapseFraction.value
-                        val currentVisualY = lerp(sheetExpandedTargetY, sheetCollapsedTargetY, progressAtRelease)
-                        val currentVisualExpansionFraction = (1f - progressAtRelease).coerceIn(0f, 1f)
-                        sheetMotionController.snapTo(
-                            translationYValue = currentVisualY,
-                            expansionFractionValue = currentVisualExpansionFraction
-                        )
-                        playerViewModel.updatePredictiveBackCollapseFraction(1f)
-                        playerViewModel.collapsePlayerSheet()
-                        playerViewModel.updatePredictiveBackCollapseFraction(0f)
+                        Animatable(progressAtRelease).animateTo(
+                            targetValue = 1f,
+                            animationSpec = tween(
+                                durationMillis = animationDurationMs.coerceAtLeast(200),
+                                easing = MotionTokens.EmphasizedAccelerateEasing
+                            )
+                        ) {
+                            playerViewModel.updatePredictiveBackCollapseFraction(this.value)
+                        }
+                        sheetMotionController.snapCollapsed(sheetCollapsedTargetY)
+                        playerViewModel.collapsePlayerSheet(resetPredictiveState = false)
+                        playerViewModel.resetPredictiveBackState()
                         onSwipeEdgeChanged(null)
                     }
                 } catch (_: CancellationException) {
