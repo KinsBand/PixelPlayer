@@ -227,7 +227,9 @@ class MusicService : MediaLibraryService() {
             nextId = next?.mediaId,
             next = next,
             readyToPlay = player.playbackState == Player.STATE_READY && player.playWhenReady,
-            later = if (next == null) emptyList() else upcomingAfter(player, index, UPCOMING_MANIFEST_LOOKAHEAD)
+            later = if (next == null) emptyList() else upcomingAfter(player, index, UPCOMING_MANIFEST_LOOKAHEAD),
+            // Once its buffer is full the playing song stops loading (onIsLoadingChanged).
+            networkBusy = player.isLoading
         )
     }
 
@@ -1298,6 +1300,10 @@ class MusicService : MediaLibraryService() {
                 listeningStatsTracker.finalizeCurrentSession()
             }
             pendingStatsTransition = false
+        }
+
+        override fun onIsLoadingChanged(isLoading: Boolean) {
+            prewarmNextStream()
         }
 
         override fun onVolumeChanged(volume: Float) {
