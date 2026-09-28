@@ -804,6 +804,17 @@
     <string name="settings_search_pill_hint">Search all settings</string>
     <string name="settings_summary_scrobbling_on">Scrobbling on</string>
 
+    <!-- App Lock (Lock App to Screen) -->
+    <string name="settings_app_lock_section">Group &amp; security</string>
+    <string name="settings_app_lock_title">Lock App to Screen</string>
+    <string name="settings_app_lock_subtitle">Require fingerprint or device authentication before leaving the app.</string>
+    <string name="settings_app_lock_active_title">🔒 App locked</string>
+    <string name="settings_app_lock_active_subtitle">Unlock / End locked session. Needs your fingerprint or screen lock</string>
+    <string name="settings_app_lock_paused_title">App lock paused</string>
+    <string name="settings_app_lock_paused_subtitle">Tap to lock PixelPlayer to the screen now. If Android doesn\'t offer to pin the app, turn on App pinning below</string>
+    <string name="settings_app_lock_pinning_title">Android app pinning</string>
+    <string name="settings_app_lock_pinning_subtitle">Turn on App pinning and \"Ask for PIN before unpinning\" so Android\'s own unpin gesture needs your PIN too</string>
+
     <!-- Full screen -->
     <string name="settings_full_screen_section">Full screen</string>
     <string name="settings_hide_status_bar_title">Hide status bar</string>

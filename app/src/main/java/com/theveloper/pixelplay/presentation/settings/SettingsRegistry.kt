@@ -644,6 +644,13 @@ object SettingsRegistry {
 
         // Added 2026-09-23: settings that were on screen but missing from search.
         SettingEntry(
+            key = "app_lock",
+            categoryId = "general",
+            titleRes = R.string.settings_app_lock_title,
+            descriptionRes = R.string.settings_app_lock_subtitle,
+            keywords = listOf("lock", "app lock", "pin", "screen pinning", "fingerprint", "biometric", "party", "group", "guest", "security")
+        ),
+        SettingEntry(
             key = "hide_status_bar",
             categoryId = "appearance",
             titleRes = R.string.settings_hide_status_bar_title,

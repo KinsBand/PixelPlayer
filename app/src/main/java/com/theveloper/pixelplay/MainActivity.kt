@@ -759,6 +759,16 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // App Lock ("Lock App to Screen"): re-pins on each visit while the setting is on.
+        com.theveloper.pixelplay.utils.AppLockSessionEffect(this@MainActivity)
+        val appLockArmed = com.theveloper.pixelplay.utils.rememberAppLockArmed()
+        val appLockPinned by com.theveloper.pixelplay.utils.AppLock.pinned.collectAsStateWithLifecycle()
+        // Registered before the navigation host, so Back still walks back through the app's
+        // screens as usual; this only catches the Back that would close the app from its root.
+        BackHandler(enabled = appLockArmed) {
+            playerViewModel.sendToast("PixelPlayer is locked · tap the lock to unlock")
+        }
+
         val navBarStyle by playerViewModel.navBarStyle.collectAsStateWithLifecycle()
         val navBarCompactMode by playerViewModel.navBarCompactMode.collectAsStateWithLifecycle()
         val navBarCornerRadiusRaw by playerViewModel.navBarCornerRadius.collectAsStateWithLifecycle()
@@ -1255,6 +1265,26 @@ class MainActivity : ComponentActivity() {
                                     }
                                 },
                                 onSearchAgain = { voiceSearchStateHolder.clearRecognizedSong() }
+                            )
+                        }
+
+                        // App Lock: a small lock badge at the top while the lock is armed (hidden
+                        // while the full player is open). Tapping it asks for the owner to unlock.
+                        AnimatedVisibility(
+                            visible = appLockArmed && !isExpandedOrExpanding,
+                            enter = fadeIn(),
+                            exit = fadeOut(),
+                            modifier = Modifier.align(Alignment.TopCenter)
+                        ) {
+                            com.theveloper.pixelplay.presentation.components.AppLockIndicator(
+                                pinned = appLockPinned,
+                                onClick = {
+                                    if (appLockPinned) {
+                                        scope.launch { com.theveloper.pixelplay.utils.AppLock.endSession(this@MainActivity) }
+                                    } else {
+                                        com.theveloper.pixelplay.utils.AppLock.lockNow(this@MainActivity)
+                                    }
+                                }
                             )
                         }
 
