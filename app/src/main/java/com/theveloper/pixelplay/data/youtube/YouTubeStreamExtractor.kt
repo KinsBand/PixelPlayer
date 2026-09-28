@@ -62,6 +62,20 @@ class YouTubeStreamExtractor @Inject constructor(private val innerTube: InnerTub
     private val manifests = object : LinkedHashMap<String, List<YouTubeAudioStream>>(64, .75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<YouTubeAudioStream>>): Boolean = size > 64
     }
+    /** Bumped on every network change; a lookup that straddles one isn't cached. */
+    @Volatile private var networkGeneration = 0
+
+    /**
+     * Signed stream URLs are bound to the client's IP address, so after the default network
+     * changes every cached one would be refused (HTTP 403), and each refusal also sent its song
+     * to full extraction for two minutes. Drop them, and cooldowns earned on the old network;
+     * the next lookup is one direct request instead.
+     */
+    fun onNetworkChanged() {
+        networkGeneration++
+        synchronized(manifests) { manifests.clear() }
+        synchronized(directCooldown) { directCooldown.clear() }
+    }
 
     suspend fun streamManifest(videoId: String, forceRefresh: Boolean = false): List<YouTubeAudioStream> = withContext(Dispatchers.IO) {
         val id = videoId.removePrefix("yt_")
@@ -73,6 +87,7 @@ class YouTubeStreamExtractor @Inject constructor(private val innerTube: InnerTub
                     ?.takeIf { it.isNotEmpty() }?.let { return@withKey it }
             }
             synchronized(manifests) { manifests.remove(id) }
+            val generation = networkGeneration
             try {
                 val started = System.nanoTime()
                 // A native player request can finish without full watch-page extraction.
@@ -89,7 +104,7 @@ class YouTubeStreamExtractor @Inject constructor(private val innerTube: InnerTub
                 Timber.tag("StreamingLatency").d("manifest_provider=%s manifest_network_ms=%d streams=%d",
                     resolved?.first ?: "none", (System.nanoTime() - started) / 1_000_000, streams.size)
                 com.theveloper.pixelplay.data.diagnostics.PlaybackTrace.mark("manifest", resolved?.first ?: "none")
-                if (streams.isNotEmpty()) synchronized(manifests) { manifests[id] = streams }
+                if (streams.isNotEmpty() && generation == networkGeneration) synchronized(manifests) { manifests[id] = streams }
                 streams
             } catch (e: CancellationException) {
                 throw e
@@ -129,6 +144,9 @@ class YouTubeStreamExtractor @Inject constructor(private val innerTube: InnerTub
             YouTubeAudioStream(stream.content, mimeType, bitrateBps, expiry, contentLength)
         }.distinctBy { it.url }.sortedByDescending { it.bitrate }
     }
+
+    /** Opens the manifest host's connection so the first tap needs only the player request. */
+    suspend fun warmUp() = innerTube.warmUpPlayback()
 
     suspend fun getStream(
         videoId: String,

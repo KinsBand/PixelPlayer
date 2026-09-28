@@ -179,6 +179,11 @@ class SearchStateHolder @Inject constructor(
         }
     }
 
+    /** Search is on screen: open the online connections while the user types. */
+    fun onSearchScreenShown() {
+        prewarmScheduler?.onSearchOpened()
+    }
+
     /** A song row is being pressed: start its stream work before the tap lands. */
     fun onSongPressed(song: com.theveloper.pixelplay.data.model.Song) {
         song.streamVideoId()?.let { prewarmScheduler?.onPress(it) }

@@ -170,54 +170,6 @@ internal fun shouldDisableAudioOffloadOnEarlyBuffering(
         !isPostMediaItemTransition
 }
 
-/** ExoPlayer [DefaultLoadControl] buffer durations (ms) for a build of the player. */
-internal data class LoadControlBufferProfile(
-    val minBufferMs: Int,
-    val maxBufferMs: Int,
-    val bufferForPlaybackMs: Int,
-    val bufferForPlaybackAfterRebufferMs: Int,
-    val targetBufferBytes: Int
-)
-
-/**
- * Bounds each player's buffer target by both duration and bytes. Byte targets take priority
- * for high-bitrate audio so overlapping players do not retain a full minute each. Low-RAM
- * devices use smaller targets; both profiles retain the same short startup thresholds.
- * These are allocator targets, not a cap on the application's total memory consumption.
- */
-internal fun loadControlBufferProfileFor(
-    isLowRamDevice: Boolean,
-    heapLimitBytes: Long = Long.MAX_VALUE
-): LoadControlBufferProfile {
-    val base = baseLoadControlBufferProfileFor(isLowRamDevice)
-    if (heapLimitBytes == Long.MAX_VALUE) return base
-    // ExoPlayer's DefaultAllocator buffers live on the Java heap. Two players overlap during
-    // crossfades (plus the preloaded next item), so 24 MB each was ~20% of a 256 MB heap just
-    // for read-ahead. Cap each player at 1/20 of the heap (12.8 MB on 256 MB, 16 MB max).
-    val heapCap = (heapLimitBytes / 20).coerceIn(4L * 1024 * 1024, 16L * 1024 * 1024).toInt()
-    return base.copy(targetBufferBytes = minOf(base.targetBufferBytes, heapCap))
-}
-
-private fun baseLoadControlBufferProfileFor(isLowRamDevice: Boolean): LoadControlBufferProfile {
-    return if (isLowRamDevice) {
-        LoadControlBufferProfile(
-            minBufferMs = 15_000,
-            maxBufferMs = 30_000,
-            bufferForPlaybackMs = 250,
-            bufferForPlaybackAfterRebufferMs = 1_000,
-            targetBufferBytes = 12 * 1024 * 1024
-        )
-    } else {
-        LoadControlBufferProfile(
-            minBufferMs = 30_000,
-            maxBufferMs = 60_000,
-            bufferForPlaybackMs = 250,
-            bufferForPlaybackAfterRebufferMs = 1_000,
-            targetBufferBytes = 24 * 1024 * 1024
-        )
-    }
-}
-
 /**
  * Manages two ExoPlayer instances (A and B) to enable seamless transitions.
  *
@@ -957,6 +909,10 @@ class DualPlayerEngine @Inject constructor(
         // Bind the loopback stream proxy now (off the main thread) so the first online tap
         // does not also pay for the server's cold start.
         youTubeStreamProxy.startIfNeeded()
+        // Likewise open the manifest host's connection, so a first tap is one request.
+        if (connectivityStateHolder.isOnline.value) {
+            scope.launch(Dispatchers.IO) { youTubeStreamProxy.warmUp() }
+        }
     }
 
     // ── Spatial audio per Bluetooth device (connect menu → device settings) ──
@@ -1306,6 +1262,8 @@ class DualPlayerEngine @Inject constructor(
                 profile.bufferForPlaybackMs, profile.bufferForPlaybackAfterRebufferMs)
             .setTargetBufferBytes(profile.targetBufferBytes)
             .setPrioritizeTimeOverSizeThresholds(false)
+            // Audio samples are all keyframes, so the resume rewind lands inside this buffer.
+            .setBackBuffer(profile.backBufferMs, /* retainBackBufferFromKeyframe= */ true)
             .build()
     }
 
@@ -1481,8 +1439,11 @@ class DualPlayerEngine @Inject constructor(
         rebuildPlayersPreservingMasterState("Hi-Fi mode set to $enabled")
     }
 
-    /** Resolve only the next manifest in advance; no player mutation or audio download. */
-    suspend fun prewarmNextStream(item: MediaItem) {
+    /**
+     * Resolves [item]'s manifest in advance and caches its first bytes; no player mutation.
+     * With [headBytes] 0 only the manifest (a few KB) is fetched, for songs further ahead.
+     */
+    suspend fun prewarmNextStream(item: MediaItem, headBytes: Int = NEXT_SONG_HEAD_BYTES) {
         val uri = item.localConfiguration?.uri ?: return
         if (!connectivityStateHolder.isOnline.value) return
         val videoId = when (uri.scheme) {
@@ -1494,7 +1455,7 @@ class DualPlayerEngine @Inject constructor(
         withContext(Dispatchers.IO) {
             if (cloudSongDao.getDownloadsByVideoId(videoId).any { it.downloadedAudioFile() != null }) return@withContext
             // Also cache the next song's first bytes so its transition needs no network wait.
-            youTubeStreamProxy.prewarm(videoId, headBytes = NEXT_SONG_HEAD_BYTES)
+            youTubeStreamProxy.prewarm(videoId, headBytes = headBytes)
         }
     }
 

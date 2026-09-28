@@ -259,6 +259,7 @@ fun SearchScreen(
     // Trigger genre categorization whenever user visits search screen
     LaunchedEffect(Unit) {
         playerViewModel.triggerGenreCategorization()
+        playerViewModel.onSearchScreenShown()
     }
 
     // Search debouncing is centralized in SearchStateHolder.

@@ -27,6 +27,7 @@ class InnerTubeClient @Inject constructor(
     private val versionStore: InnerTubeVersionStore = InnerTubeVersionStore(null)
 ) {
     private val http = client.newBuilder().callTimeout(5, TimeUnit.SECONDS).build()
+    private val visionOs = VisionOsPlayer(versionStore)
     private val locks = KeyedMutex<String>()
     private data class Cached(val items: List<SearchResultItem>, val expiry: Long)
     private val cache = object : LinkedHashMap<String, Cached>(48, .75f, true) {
@@ -76,6 +77,7 @@ class InnerTubeClient @Inject constructor(
             .header("X-Youtube-Client-Name", "67").header("X-Youtube-Client-Version", clientVersion)
             .post(body.toString().toRequestBody("application/json".toMediaType())).build()
         val result = http.newCall(request).awaitResponse().use { response ->
+            searchHostContactAt = System.currentTimeMillis()
             if (response.code == 429) YouTubeRateLimit.report()
             if (response.code == 400) {
                 version = null
@@ -136,20 +138,36 @@ class InnerTubeClient @Inject constructor(
             MusicBrowseParser.continuation(root))
     }
 
+    /** Opens the audio manifest host's connection before the first tap (see [VisionOsPlayer.warmUp]). */
+    suspend fun warmUpPlayback() = withContext(Dispatchers.IO) { visionOs.warmUp() }
+
+    @Volatile private var searchHostContactAt = 0L
+
+    /**
+     * Opens the YouTube Music connection while the user is still typing, so the first search
+     * of a session doesn't also pay for DNS, TCP and TLS. At most once per pooled connection.
+     */
+    suspend fun warmUpSearch() = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        if (now - searchHostContactAt < VisionOsPlayer.WARM_CONNECTION_MS || YouTubeRateLimit.isLimited(now)) return@withContext
+        searchHostContactAt = now
+        try {
+            // A static file: the response doesn't matter, only the connection it leaves open.
+            http.newCall(Request.Builder().url("https://music.youtube.com/favicon.ico").head().build())
+                .awaitResponse().close()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            searchHostContactAt = 0L
+        }
+    }
+
     suspend fun directStreams(id: String): List<YouTubeAudioStream> = withContext(Dispatchers.IO) {
         // Playback must not bootstrap the Music homepage / WEB_REMIX search client.
-        // Use the maintained native VISIONOS request (including visitor data and UA).
+        // Use the native VISIONOS request with remembered visitor data and a trimmed response.
         // NewPipeExecution cancels its blocking HTTP calls when a skip or fallback wins.
         val nonce = org.schabi.newpipe.extractor.services.youtube.YoutubeParsingHelper.generateContentPlaybackNonce()
-        val response = NewPipeExecution.run {
-            org.schabi.newpipe.extractor.services.youtube.YoutubeStreamHelper.getVisionOsPlayerResponse(
-                org.schabi.newpipe.extractor.localization.ContentCountry.DEFAULT,
-                org.schabi.newpipe.extractor.localization.Localization.DEFAULT,
-                id,
-                nonce
-            )
-        }
-        val root = JSONObject(com.grack.nanojson.JsonWriter.string(response))
+        val root = visionOs.playerResponse(id, nonce) ?: return@withContext emptyList()
         if (root.optJSONObject("playabilityStatus")?.optString("status") != "OK") return@withContext emptyList()
         if (root.optJSONObject("videoDetails")?.optString("videoId") != id) return@withContext emptyList()
         InnerTubeParser.directStreams(root, System.currentTimeMillis()).map { stream ->
