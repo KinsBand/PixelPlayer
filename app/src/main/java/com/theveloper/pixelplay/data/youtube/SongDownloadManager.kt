@@ -440,7 +440,7 @@ class SongDownloadManager @Inject constructor(
     private suspend fun tagMetadata(file: File, original: Song) {
         // Fill album, genre, track / disc number, album artist, cover etc. first (cached after
         // the first lookup, so usually instant). Title and artist stay exactly as the user saw them.
-        val song = runCatching { metadataGatherer.gather(original, timeoutMs = 6_000) }.getOrDefault(original)
+        val song = runCatching { metadataGatherer.gatherDeep(original, timeoutMs = 8_000) }.getOrDefault(original)
             .copy(title = original.title, artist = original.artist)
         val extra = metadataGatherer.cachedFor(original)
         val audioFile = AudioFileIO.read(file)
@@ -464,6 +464,13 @@ class SongDownloadManager @Inject constructor(
         optional(FieldKey.BARCODE, song.creditsAndRelease.upcEan ?: extra?.upc)
         optional(FieldKey.BPM, song.musicalFeatures.bpm?.let { Math.round(it).toString() })
         optional(FieldKey.MOOD, song.mixIntelligence.mood?.takeUnless { extra?.moodEstimated == true })
+        optional(FieldKey.COMPOSER, song.creditsAndRelease.composer ?: extra?.composer)
+        optional(FieldKey.LYRICIST, song.musicalFeatures.lyricist ?: extra?.lyricist)
+        optional(FieldKey.LANGUAGE, extra?.language)
+        // MusicBrainz ids let taggers such as Picard and servers such as Navidrome match the file.
+        // Not the release: that one is a best guess among every release of the recording.
+        optional(FieldKey.MUSICBRAINZ_TRACK_ID, extra?.recordingMbid)
+        optional(FieldKey.MUSICBRAINZ_WORK_ID, extra?.workMbid)
         // Highest-resolution version of the cover (1400 px where the host allows), falling
         // back to the URL as given if the upgraded one fails.
         val artworkCandidates = listOfNotNull(

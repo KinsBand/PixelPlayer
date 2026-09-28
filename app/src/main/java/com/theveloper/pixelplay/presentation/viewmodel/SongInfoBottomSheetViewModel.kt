@@ -88,9 +88,10 @@ class SongInfoBottomSheetViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             _localFilePath.value = resolveLocalFilePath(song)
             val current = _detailsSong.value ?: song
-            if (!song.isLocal && metadataGatherer.needsBasics(current)) {
-                val filled = runCatching { metadataGatherer.gather(current, timeoutMs = 15_000) }.getOrNull()
-                if (filled != null && _detailsSong.value?.id == song.id) _detailsSong.value = filled
+            if (!song.isLocal) {
+                // Someone is reading this song's details: worth asking MusicBrainz too.
+                val filled = runCatching { metadataGatherer.gatherDeep(current, timeoutMs = 15_000) }.getOrNull()
+                if (filled != null && filled != current && _detailsSong.value?.id == song.id) _detailsSong.value = filled
             }
         }
     }

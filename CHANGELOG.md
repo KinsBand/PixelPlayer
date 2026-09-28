@@ -25,10 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Lyrics:** quick reactions in the bottom corners (❤️ 🔥 👌 on the left, 😐 🥱 👎 on the right). Tap to open, or press and slide up to pick; closes after 3 s idle or on a tap elsewhere. Reactions are stored as their own signals for the mix (not likes); 😐 and 👎 re-plan upcoming automatic picks.
 - **Lyrics:** Expressive typography (beside Immersive lyrics, in the lyrics menu and Settings → Lyrics): font, size (now up to Extra large), weight and line spacing. The current line always stays a step bolder and the active card grows with the text.
 
+- **Metadata:** online songs you open, download or save are also looked up on MusicBrainz (by the exact recording's ISRC when known): original release year, community genres and tags, composer, lyricist and MusicBrainz ids. Deezer, iTunes and MusicBrainz are merged by weighted vote per field, and how much they agreed is kept with each value. Downloads get composer, lyricist, language and MusicBrainz ids in their tags.
 - **Lyrics:** Lyricsfile support (YAML with plain, line-synced and word-synced lyrics): `.lyrics` files can be imported, a `.lyrics` file is saved next to the `.lrc` when lyrics are saved, and LRCLIB's word-timed lyricsfiles are used when fetching.
 - **Lyrics:** Unison community lyrics (Better Lyrics' voted database) as a word- and line-synced source, matched to the exact YouTube video when there is one. It can be turned off in the lyrics sheet's advanced options.
 
 ### Changed
+- **Metadata:** a song's mood can come from MusicBrainz tags without a Last.fm key, and short tag words match whole words only ("funk" is no longer "Happy").
 - **Lyrics:** the credit under fetched lyrics names the provider that actually supplied them instead of always LRCLIB (Unison's lyrics always show its required attribution).
 - **Lyrics:** the lyrics start right under the header whatever its size; secondary controls dim while the screen is idle; the fallback highlight colour stays in the cover art's hue instead of a fixed amber.
 
