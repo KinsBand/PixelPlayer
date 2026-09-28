@@ -929,8 +929,83 @@ fun FullPlayerContent(
             playerAccentColor = playerAccentColor,
             onQueueClick = onSongMetadataQueueClick,
             onArtistClick = onSongMetadataArtistClick,
-            isPlayingProvider = isPlayingProvider
+            isPlayingProvider = isPlayingProvider,
+            onOptionsClick = { onShowOptionsClick(song) }
         )
+    }
+
+    // Song / Video selector: centred in the portrait top bar; in landscape (no top bar) it sits,
+    // a little smaller, above the album cover.
+    val songVideoSelector: @Composable (Modifier, Boolean) -> Unit = { selectorModifier, compact ->
+        Row(
+            modifier = selectorModifier
+                .clip(RoundedCornerShape(24.dp))
+                .background(playerOnAccentColor.copy(alpha = 0.3f))
+                .padding(4.dp)
+        ) {
+            val songTabBg by animateColorAsState(
+                targetValue = if (playerViewMode == "Song") playerAccentColor else Color.Transparent,
+                label = "songTabBg"
+            )
+            val songTabText by animateColorAsState(
+                targetValue = if (playerViewMode == "Song") playerOnAccentColor else playerAccentColor,
+                label = "songTabText"
+            )
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(songTabBg)
+                    .selectable(
+                        selected = playerViewMode == "Song",
+                        role = Role.Tab,
+                        onClick = { returnToAudio() }
+                    )
+                    .padding(horizontal = if (compact) 10.dp else 12.dp, vertical = if (compact) 4.dp else 6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.MusicNote,
+                    contentDescription = "Audio",
+                    tint = songTabText,
+                    modifier = Modifier.size(if (compact) 18.dp else 20.dp)
+                )
+            }
+            
+            val videoTabBg by animateColorAsState(
+                targetValue = if (playerViewMode == "Video") playerAccentColor else Color.Transparent,
+                label = "videoTabBg"
+            )
+            val videoTabText by animateColorAsState(
+                targetValue = if (playerViewMode == "Video") playerOnAccentColor else playerAccentColor,
+                label = "videoTabText"
+            )
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(videoTabBg)
+                    .selectable(
+                        selected = playerViewMode == "Video",
+                        role = Role.Tab,
+                        onClick = {
+                            if (isRemotePlaybackActive) {
+                                playerViewModel.sendToast("Disconnect casting to watch videos on this device.")
+                            } else {
+                                videoPlayback.seekTo(latestAudioPosition())
+                                playerViewMode = "Video"
+                            }
+                        }
+                    )
+                    .padding(horizontal = if (compact) 10.dp else 12.dp, vertical = if (compact) 4.dp else 6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.SmartDisplay,
+                    contentDescription = "Video",
+                    tint = videoTabText,
+                    modifier = Modifier.size(if (compact) 18.dp else 20.dp)
+                )
+            }
+        }
     }
 
     Scaffold(
@@ -983,77 +1058,12 @@ fun FullPlayerContent(
                     }
 
                     // Center: Segmented Selector (Song / Video)
-                    Row(
-                        modifier = Modifier
+                    songVideoSelector(
+                        Modifier
                             .align(Alignment.Center)
-                            .padding(top = 4.dp)
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(playerOnAccentColor.copy(alpha = 0.3f))
-                            .padding(4.dp)
-                    ) {
-                        val songTabBg by animateColorAsState(
-                            targetValue = if (playerViewMode == "Song") playerAccentColor else Color.Transparent,
-                            label = "songTabBg"
-                        )
-                        val songTabText by animateColorAsState(
-                            targetValue = if (playerViewMode == "Song") playerOnAccentColor else playerAccentColor,
-                            label = "songTabText"
-                        )
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(songTabBg)
-                                .selectable(
-                                    selected = playerViewMode == "Song",
-                                    role = Role.Tab,
-                                    onClick = { returnToAudio() }
-                                )
-                                .padding(horizontal = 12.dp, vertical = 6.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.MusicNote,
-                                contentDescription = "Audio",
-                                tint = songTabText,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        
-                        val videoTabBg by animateColorAsState(
-                            targetValue = if (playerViewMode == "Video") playerAccentColor else Color.Transparent,
-                            label = "videoTabBg"
-                        )
-                        val videoTabText by animateColorAsState(
-                            targetValue = if (playerViewMode == "Video") playerOnAccentColor else playerAccentColor,
-                            label = "videoTabText"
-                        )
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(videoTabBg)
-                                .selectable(
-                                    selected = playerViewMode == "Video",
-                                    role = Role.Tab,
-                                    onClick = {
-                                        if (isRemotePlaybackActive) {
-                                            playerViewModel.sendToast("Disconnect casting to watch videos on this device.")
-                                        } else {
-                                            videoPlayback.seekTo(latestAudioPosition())
-                                            playerViewMode = "Video"
-                                        }
-                                    }
-                                )
-                                .padding(horizontal = 12.dp, vertical = 6.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.SmartDisplay,
-                                contentDescription = "Video",
-                                tint = videoTabText,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
+                            .padding(top = 4.dp),
+                        false
+                    )
 
                     // Top-Right: download / downloaded badge, then Options.
                     Row(
@@ -1146,6 +1156,7 @@ fun FullPlayerContent(
             } else if (isLandscape) {
                 FullPlayerLandscapeContent(
                     paddingValues = paddingValues,
+                    topSelector = { songVideoSelector(Modifier, true) },
                     albumCoverSection = albumCoverSection,
                     songMetadataSection = landscapeSongMetadataSection,
                     playerProgressSection = playerProgressSection,
@@ -1685,7 +1696,9 @@ private fun FullPlayerSongMetadataSection(
     playerAccentColor: Color = chipContentColor,
     onQueueClick: () -> Unit,
     onArtistClick: () -> Unit,
-    isPlayingProvider: () -> Boolean = { true }
+    isPlayingProvider: () -> Boolean = { true },
+    /** Landscape: the button beside Lyrics opens the song options (the top bar is hidden). */
+    onOptionsClick: () -> Unit = {}
 ) {
     val shouldDelay = loadingTweaks.delayAll || loadingTweaks.delaySongMetadata
 
@@ -1733,7 +1746,8 @@ private fun FullPlayerSongMetadataSection(
             showQueueButton = isLandscape,
             onClickQueue = onQueueClick,
             onClickArtist = onArtistClick,
-            isPlayingProvider = isPlayingProvider
+            isPlayingProvider = isPlayingProvider,
+            onClickOptions = onOptionsClick
         )
     }
 }
@@ -1776,6 +1790,8 @@ private fun FullPlayerPortraitContent(
 @Composable
 private fun FullPlayerLandscapeContent(
     paddingValues: PaddingValues,
+    /** Song / Video selector: there's no top bar in landscape, so it sits above the cover. */
+    topSelector: @Composable () -> Unit,
     albumCoverSection: @Composable (Modifier) -> Unit,
     songMetadataSection: @Composable () -> Unit,
     playerProgressSection: @Composable () -> Unit,
@@ -1791,11 +1807,23 @@ private fun FullPlayerLandscapeContent(
             ),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        albumCoverSection(
-            Modifier
+        // The cover gives up a little height so the selector fits above it.
+        Column(
+            modifier = Modifier
                 .fillMaxHeight()
-                .weight(1f)
-        )
+                .weight(1f),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(modifier = Modifier.padding(top = 6.dp, bottom = 6.dp)) {
+                topSelector()
+            }
+            albumCoverSection(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(bottom = 6.dp)
+            )
+        }
         Spacer(Modifier.width(9.dp))
         Column(
             modifier = Modifier
@@ -1836,7 +1864,8 @@ private fun SongMetadataDisplaySection(
     onClickQueue: () -> Unit,
     onClickArtist: () -> Unit,
     modifier: Modifier = Modifier,
-    isPlayingProvider: () -> Boolean = { true }
+    isPlayingProvider: () -> Boolean = { true },
+    onClickOptions: () -> Unit = {}
 ) {
     Row(
         modifier
@@ -1954,31 +1983,39 @@ private fun SongMetadataDisplaySection(
                         tint = chipContentColor
                     )
                 }
-                val queueBusy by playerViewModel.isQueueBusy.collectAsStateWithLifecycle()
-                val queueButtonShape = RoundedCornerShape(
+                // Options (song menu) beside Lyrics: the queue already has its own corner
+                // button, and landscape has no top bar with the options button.
+                val optionsButtonShape = RoundedCornerShape(
                     topStart = 6.dp,
                     topEnd = 50.dp,
                     bottomStart = 6.dp,
                     bottomEnd = 50.dp
                 )
+                val sleepTimerRunning by playerViewModel.activeTimerValueDisplay.collectAsStateWithLifecycle()
                 Box(
                     modifier = Modifier
                         .size(height = 42.dp, width = 50.dp)
-                        .queueBusyOutline(
-                            active = queueBusy,
-                            shape = queueButtonShape,
-                            color = playerAccentColor
-                        )
-                        .clip(queueButtonShape)
+                        .clip(optionsButtonShape)
                         .background(chipColor)
-                        .clickable { onClickQueue() },
+                        .clickable { onClickOptions() },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        painter = painterResource(R.drawable.rounded_queue_music_24),
-                        contentDescription = stringResource(R.string.player_cd_open_queue),
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "Options",
                         tint = chipContentColor
                     )
+                    // Small dot so an active sleep timer is visible without opening the menu.
+                    if (sleepTimerRunning != null) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(top = 6.dp, end = 10.dp)
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(chipContentColor)
+                        )
+                    }
                 }
             }
         } else {
