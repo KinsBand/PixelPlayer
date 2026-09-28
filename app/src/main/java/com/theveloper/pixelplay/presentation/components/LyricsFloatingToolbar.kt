@@ -194,26 +194,10 @@ fun LyricsFloatingToolbar(
             onPerformanceViewChange = onPerformanceViewChange,
             instrumentsPanelOpen = instrumentsPanelOpen,
             onInstrumentsClick = onInstrumentsClick,
+            onAddSongClick = onAddSongClick,
         )
-        
-        Spacer(modifier = Modifier.width(8.dp))
 
-        if (onAddSongClick != null) {
-            IconButton(
-                colors = IconButtonDefaults.iconButtonColors(
-                    containerColor = backgroundColor,
-                    contentColor = onBackgroundColor
-                ),
-                onClick = onAddSongClick
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Add,
-                    contentDescription = "Add a song",
-                    tint = onBackgroundColor
-                )
-            }
-            Spacer(modifier = Modifier.width(4.dp))
-        }
+        Spacer(modifier = Modifier.width(8.dp))
 
         IconButton(
             colors = IconButtonDefaults.iconButtonColors(
@@ -255,6 +239,8 @@ private fun PageButtons(
     onPerformanceViewChange: (PerformanceView) -> Unit,
     instrumentsPanelOpen: Boolean,
     onInstrumentsClick: () -> Unit,
+    /** Add Song sits between the Synced / lyrics button and Tabs. Hidden when null. */
+    onAddSongClick: (() -> Unit)?,
 ) {
     val onInstruments = performanceView == PerformanceView.Instruments
     val progress by animateFloatAsState(
@@ -276,7 +262,9 @@ private fun PageButtons(
         val p = progress.coerceIn(0f, 1.05f)
         val leftW = androidx.compose.ui.unit.lerp(lyricsLeft, round, p).coerceAtLeast(0.dp)
         val gapW = if (hasToggle) gap else androidx.compose.ui.unit.lerp(0.dp, gap, progress.coerceIn(0f, 1f))
-        val rightW = (maxWidth - leftW - gapW).coerceAtLeast(round)
+        val addButtonSize = 48.dp
+        val addW = if (onAddSongClick != null) addButtonSize + gap else 0.dp
+        val rightW = (maxWidth - leftW - gapW - addW).coerceAtLeast(round)
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (leftW > 1.dp) {
@@ -335,6 +323,25 @@ private fun PageButtons(
                     }
                 }
                 Spacer(Modifier.width(gapW))
+            }
+
+            // Add Song: centred between the lyrics button and Tabs.
+            if (onAddSongClick != null) {
+                IconButton(
+                    modifier = Modifier.size(addButtonSize),
+                    colors = IconButtonDefaults.iconButtonColors(
+                        containerColor = backgroundColor,
+                        contentColor = onBackgroundColor
+                    ),
+                    onClick = onAddSongClick
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Add,
+                        contentDescription = "Add a song",
+                        tint = onBackgroundColor
+                    )
+                }
+                Spacer(Modifier.width(gap))
             }
 
             // Tabs: opens the page, then opens / closes the practice area.

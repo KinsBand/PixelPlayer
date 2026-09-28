@@ -828,6 +828,7 @@ fun FullPlayerContent(
                 isSheetDragGestureActive = isSheetDragGestureActive,
                 loadingTweaks = loadingTweaks,
                 onNavigateToEqualizer = onNavigateToEqualizer,
+                onPlayVersion = { version -> playerViewModel.showAndPlaySong(version) },
                 onScrubPreview = if (isVideoMode) ({ _, _ -> }) else onCoverScrubPreview
             )
         }
@@ -1555,6 +1556,7 @@ private fun FullPlayerProgressSection(
     isSheetDragGestureActive: Boolean,
     loadingTweaks: FullPlayerLoadingTweaks,
     onNavigateToEqualizer: () -> Unit,
+    onPlayVersion: (Song) -> Unit = {},
     durationHintMs: Long = song.duration,
     onScrubPreview: (positionMs: Long, finished: Boolean) -> Unit = { _, _ -> }
 ) {
@@ -1574,6 +1576,7 @@ private fun FullPlayerProgressSection(
     } else {
         song.sampleRate
     }
+    var showAudioDetails by rememberSaveable(song.id) { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         PlayerProgressBarSection(
@@ -1597,7 +1600,19 @@ private fun FullPlayerProgressSection(
             isSheetDragGestureActive = isSheetDragGestureActive,
             loadingTweaks = loadingTweaks,
             onNavigateToEqualizer = onNavigateToEqualizer,
+            onShowAudioDetails = { showAudioDetails = true },
             onScrubPreview = onScrubPreview
+        )
+    }
+
+    if (showAudioDetails) {
+        AudioDetailsBottomSheet(
+            song = song,
+            audioMimeType = audioMimeType,
+            audioBitrate = audioBitrate,
+            audioSampleRate = audioSampleRate,
+            onPlayVersion = onPlayVersion,
+            onDismiss = { showAudioDetails = false }
         )
     }
 }
@@ -2042,6 +2057,7 @@ private fun PlayerProgressBarSection(
     isSheetDragGestureActive: Boolean = false,
     loadingTweaks: FullPlayerLoadingTweaks? = null,
     onNavigateToEqualizer: () -> Unit = {},
+    onShowAudioDetails: () -> Unit = {},
     /** Scrub position while the timeline is dragged (finished = released and seeked). */
     onScrubPreview: (positionMs: Long, finished: Boolean) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
@@ -2243,7 +2259,8 @@ private fun PlayerProgressBarSection(
                 textColor = timeTextColor,
                 audioMetaLabel = displayAudioMetaLabel,
                 horizontalTrackInset = progressSectionHorizontalInset,
-                onNavigateToEqualizer = onNavigateToEqualizer
+                onNavigateToEqualizer = onNavigateToEqualizer,
+                onShowAudioDetails = onShowAudioDetails
             )
         }
     }
@@ -2306,7 +2323,8 @@ private fun EfficientTimeLabels(
     textColor: Color,
     audioMetaLabel: String?,
     horizontalTrackInset: Dp,
-    onNavigateToEqualizer: () -> Unit
+    onNavigateToEqualizer: () -> Unit,
+    onShowAudioDetails: () -> Unit
 ) {
     val coarsePositionMs by remember(isVisible, positionState) {
         derivedStateOf {
@@ -2351,7 +2369,15 @@ private fun EfficientTimeLabels(
             Surface(
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .padding(horizontal = 44.dp),
+                    .padding(horizontal = 44.dp)
+                    // Whole chip opens audio details; the equalizer icon inside keeps its own click.
+                    .clip(RoundedCornerShape(999.dp))
+                    .clickable(
+                        onClickLabel = "Show audio details",
+                        role = Role.Button,
+                        onClick = onShowAudioDetails
+                    )
+                    .semantics { contentDescription = "Audio details" },
                 shape = RoundedCornerShape(999.dp),
                 color = textColor.copy(alpha = 0.12f),
                 contentColor = textColor.copy(alpha = 0.96f)

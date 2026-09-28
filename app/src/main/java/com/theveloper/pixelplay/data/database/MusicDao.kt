@@ -1819,6 +1819,23 @@ interface MusicDao {
     """)
     suspend fun getAudioMetadataById(id: Long): AudioMeta?
 
+    /** Writes values from an on-demand scan of one song. Null arguments keep the stored value. */
+    @Query("""
+    UPDATE songs SET
+        mime_type = COALESCE(:mimeType, mime_type),
+        bitrate = COALESCE(:bitrate, bitrate),
+        sample_rate = COALESCE(:sampleRate, sample_rate),
+        audio_tech_json = COALESCE(:audioTechJson, audio_tech_json)
+    WHERE id = :songId
+    """)
+    suspend fun updateScannedAudioMetadata(
+        songId: Long,
+        mimeType: String?,
+        bitrate: Int?,
+        sampleRate: Int?,
+        audioTechJson: String?
+    )
+
     // ===== Song-Artist Cross Reference (Junction Table) Operations =====
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
