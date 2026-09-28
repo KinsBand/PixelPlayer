@@ -63,6 +63,7 @@ import net.sourceforge.pinyin4j.PinyinHelper
 import net.sourceforge.pinyin4j.format.HanyuPinyinCaseType
 import net.sourceforge.pinyin4j.format.HanyuPinyinOutputFormat
 import net.sourceforge.pinyin4j.format.HanyuPinyinToneType
+import com.theveloper.pixelplay.data.lyrics.Lyricsfile
 import com.theveloper.pixelplay.data.model.Lyrics
 import com.theveloper.pixelplay.data.model.SyncedLine
 import com.theveloper.pixelplay.data.model.SyncedWord
@@ -759,6 +760,11 @@ object LyricsUtils {
         val entireLyricsHasKana = lyricsText.any { it in '\u3040'..'\u309F' || it in '\u30A0'..'\u30FF' }
 
         val normalizedInput = stripLeadingLyricsDocumentNoise(lyricsText)
+        if (Lyricsfile.looksLikeLyricsfile(normalizedInput)) {
+            Lyricsfile.parse(normalizedInput)?.let { return finishLyricsfile(it.lyrics, entireLyricsHasKana) }
+            // A broken Lyricsfile isn't plain lyrics; showing its YAML would be worse than nothing.
+            if (Lyricsfile.isDefinitelyLyricsfile(normalizedInput)) return Lyrics()
+        }
         if (normalizedInput.startsWith("{") && normalizedInput.contains("\"synced\"")) {
             return com.theveloper.pixelplay.data.lyrics.LyricsTiming.parse(normalizedInput) ?: Lyrics()
         }
@@ -891,45 +897,65 @@ object LyricsUtils {
         }
 
         return if (isSynced && syncedLines.isNotEmpty()) {
-            val sortedSyncedLines = syncedLines.sortedBy { it.time }
-            val pairedLines = pairTranslationLines(sortedSyncedLines).map { line ->
-
-                val romanized = when {
-                    MultiLangRomanizer.isJapanese(line.line, entireLyricsHasKana) -> MultiLangRomanizer.romanizeJapanese(line.line)
-                    MultiLangRomanizer.isChinese(line.line) -> MultiLangRomanizer.romanizeChinese(line.line)
-                    MultiLangRomanizer.isKorean(line.line) -> MultiLangRomanizer.romanizeKorean(line.line)
-                    MultiLangRomanizer.isHindi(line.line) -> MultiLangRomanizer.romanizeHindi(line.line)
-                    MultiLangRomanizer.isPunjabi(line.line) -> MultiLangRomanizer.romanizePunjabi(line.line)
-                    MultiLangRomanizer.isCyrillic(line.line) -> MultiLangRomanizer.romanizeCyrillic(line.line)
-                    else -> null
-                }?.capitalizeFirstLetter()?.trim()
-
-                line.copy(romanization = romanized)
-            }
-            val plainVersion = pairedLines.map { line ->
-                buildString {
-                    append(line.line)
-                    if (!line.romanization.isNullOrEmpty()) append("\n").append(line.romanization)
-                    if (!line.translation.isNullOrEmpty()) append("\n").append(line.translation)
-                }
-            }
-            Lyrics(synced = pairedLines, plain = plainVersion)
+            finishSyncedLines(syncedLines, entireLyricsHasKana)
         } else {
-            val processedPlain = plainLines.map { line ->
-                val romanized = when {
-                    MultiLangRomanizer.isJapanese(line, entireLyricsHasKana) -> MultiLangRomanizer.romanizeJapanese(line)
-                    MultiLangRomanizer.isChinese(line) -> MultiLangRomanizer.romanizeChinese(line)
-                    MultiLangRomanizer.isKorean(line) -> MultiLangRomanizer.romanizeKorean(line)
-                    MultiLangRomanizer.isHindi(line) -> MultiLangRomanizer.romanizeHindi(line)
-                    MultiLangRomanizer.isPunjabi(line) -> MultiLangRomanizer.romanizePunjabi(line)
-                    MultiLangRomanizer.isCyrillic(line) -> MultiLangRomanizer.romanizeCyrillic(line)
-                    else -> null
-                }?.capitalizeFirstLetter()?.trim()
-
-                if (!romanized.isNullOrEmpty()) "$line\n$romanized" else line
-            }
-            Lyrics(plain = processedPlain)
+            finishPlainLines(plainLines, entireLyricsHasKana)
         }
+    }
+
+    /** Sorts lines, pairs same-time translation lines, and adds romanization and the plain version. */
+    private fun finishSyncedLines(syncedLines: List<SyncedLine>, entireLyricsHasKana: Boolean): Lyrics {
+        val sortedSyncedLines = syncedLines.sortedBy { it.time }
+        val pairedLines = pairTranslationLines(sortedSyncedLines).map { line ->
+
+            val romanized = when {
+                MultiLangRomanizer.isJapanese(line.line, entireLyricsHasKana) -> MultiLangRomanizer.romanizeJapanese(line.line)
+                MultiLangRomanizer.isChinese(line.line) -> MultiLangRomanizer.romanizeChinese(line.line)
+                MultiLangRomanizer.isKorean(line.line) -> MultiLangRomanizer.romanizeKorean(line.line)
+                MultiLangRomanizer.isHindi(line.line) -> MultiLangRomanizer.romanizeHindi(line.line)
+                MultiLangRomanizer.isPunjabi(line.line) -> MultiLangRomanizer.romanizePunjabi(line.line)
+                MultiLangRomanizer.isCyrillic(line.line) -> MultiLangRomanizer.romanizeCyrillic(line.line)
+                else -> null
+            }?.capitalizeFirstLetter()?.trim()
+
+            line.copy(romanization = romanized)
+        }
+        val plainVersion = pairedLines.map { line ->
+            buildString {
+                append(line.line)
+                if (!line.romanization.isNullOrEmpty()) append("\n").append(line.romanization)
+                if (!line.translation.isNullOrEmpty()) append("\n").append(line.translation)
+            }
+        }
+        return Lyrics(synced = pairedLines, plain = plainVersion)
+    }
+
+    private fun finishPlainLines(plainLines: List<String>, entireLyricsHasKana: Boolean): Lyrics {
+        val processedPlain = plainLines.map { line ->
+            val romanized = when {
+                MultiLangRomanizer.isJapanese(line, entireLyricsHasKana) -> MultiLangRomanizer.romanizeJapanese(line)
+                MultiLangRomanizer.isChinese(line) -> MultiLangRomanizer.romanizeChinese(line)
+                MultiLangRomanizer.isKorean(line) -> MultiLangRomanizer.romanizeKorean(line)
+                MultiLangRomanizer.isHindi(line) -> MultiLangRomanizer.romanizeHindi(line)
+                MultiLangRomanizer.isPunjabi(line) -> MultiLangRomanizer.romanizePunjabi(line)
+                MultiLangRomanizer.isCyrillic(line) -> MultiLangRomanizer.romanizeCyrillic(line)
+                else -> null
+            }?.capitalizeFirstLetter()?.trim()
+
+            if (!romanized.isNullOrEmpty()) "$line\n$romanized" else line
+        }
+        return Lyrics(plain = processedPlain)
+    }
+
+    /** A Lyricsfile's lines get the same finishing as LRC; its timing evidence is kept. */
+    private fun finishLyricsfile(lyrics: Lyrics, entireLyricsHasKana: Boolean): Lyrics {
+        val synced = lyrics.synced
+        val finished = if (!synced.isNullOrEmpty()) {
+            finishSyncedLines(synced, entireLyricsHasKana)
+        } else {
+            finishPlainLines(lyrics.plain.orEmpty(), entireLyricsHasKana)
+        }
+        return finished.copy(timing = lyrics.timing)
     }
 
     // ── Kugou / Paxsenix word-by-word helpers ─────────────────────────────
@@ -1193,7 +1219,8 @@ fun ProviderText(
     uri: String,
     modifier: Modifier = Modifier,
     textAlign: TextAlign? = null,
-    accentColor: Color? = null
+    accentColor: Color? = null,
+    providerName: String = "LRCLIB"
 ) {
     val uriHandler = LocalUriHandler.current
     val linkColor = accentColor ?: MaterialTheme.colorScheme.primary
@@ -1208,7 +1235,7 @@ fun ProviderText(
                 styles = TextLinkStyles(style = SpanStyle(color = linkColor))
             )
         ) {
-            append(" LRCLIB")
+            append(" $providerName")
         }
     }
 
@@ -1219,6 +1246,27 @@ fun ProviderText(
         text = annotatedString,
         style = finalStyle,
         modifier = modifier
+    )
+}
+
+/**
+ * Credit line for lyrics from [credit]: "Lyrics provided by <provider>", or the provider's own
+ * required wording (Unison's "Lyrics from Unison (https://unison.boidu.dev)").
+ */
+@Composable
+fun LyricsCreditText(
+    credit: com.theveloper.pixelplay.data.lyrics.LyricsAttribution.Credit,
+    modifier: Modifier = Modifier,
+    textAlign: TextAlign? = null,
+    accentColor: Color? = null
+) {
+    ProviderText(
+        providerText = credit.lead ?: androidx.compose.ui.res.stringResource(com.theveloper.pixelplay.R.string.lyrics_provided_by),
+        uri = credit.url,
+        modifier = modifier,
+        textAlign = textAlign,
+        accentColor = accentColor,
+        providerName = credit.name
     )
 }
 

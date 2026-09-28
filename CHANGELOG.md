@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Streaming:** on weak mobile data, online songs no longer play for a moment, stop for a long time and then fail with a playback error. The local stream proxy passed audio on to the player only in 1 MB bursts, so the player ran dry, timed out and reopened while the abandoned downloads kept competing for the connection. Audio now reaches the player as it arrives, a stalled connection is replaced within 10 s from the same byte, abandoned downloads stop, and the player waits for the proxy instead of timing out after 8 s.
+- **Streaming:** when the connection can't keep up, playback no longer stops every second: after repeated buffering it waits for a few more seconds of audio before resuming. The next song is only prepared once the playing song has what it needs.
 - **Streaming:** first plays of online songs no longer fail and fall back to slow extraction when the fast manifest request takes more than 200 ms (the winning manifest was being discarded).
 - **Streaming:** after switching between Wi-Fi and mobile data, songs no longer hit refused stream URLs or get stuck on the slow extraction path.
 
@@ -23,7 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Lyrics:** quick reactions in the bottom corners (❤️ 🔥 👌 on the left, 😐 🥱 👎 on the right). Tap to open, or press and slide up to pick; closes after 3 s idle or on a tap elsewhere. Reactions are stored as their own signals for the mix (not likes); 😐 and 👎 re-plan upcoming automatic picks.
 - **Lyrics:** Expressive typography (beside Immersive lyrics, in the lyrics menu and Settings → Lyrics): font, size (now up to Extra large), weight and line spacing. The current line always stays a step bolder and the active card grows with the text.
 
+- **Metadata:** online songs you open, download or save are also looked up on MusicBrainz (by the exact recording's ISRC when known): original release year, community genres and tags, composer, lyricist and MusicBrainz ids. Deezer, iTunes and MusicBrainz are merged by weighted vote per field, and how much they agreed is kept with each value. Downloads get composer, lyricist, language and MusicBrainz ids in their tags.
+- **Lyrics:** Lyricsfile support (YAML with plain, line-synced and word-synced lyrics): `.lyrics` files can be imported, a `.lyrics` file is saved next to the `.lrc` when lyrics are saved, and LRCLIB's word-timed lyricsfiles are used when fetching.
+- **Lyrics:** Unison community lyrics (Better Lyrics' voted database) as a word- and line-synced source, matched to the exact YouTube video when there is one. It can be turned off in the lyrics sheet's advanced options.
+
 ### Changed
+- **Metadata:** a song's mood can come from MusicBrainz tags without a Last.fm key, and short tag words match whole words only ("funk" is no longer "Happy").
+- **Lyrics:** the credit under fetched lyrics names the provider that actually supplied them instead of always LRCLIB (Unison's lyrics always show its required attribution).
 - **Lyrics:** the lyrics start right under the header whatever its size; secondary controls dim while the screen is idle; the fallback highlight colour stays in the cover art's hue instead of a fixed amber.
 
 ## [1.0.0] - KinsBand build

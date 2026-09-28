@@ -13,5 +13,11 @@ data class LrcLibResponse(
     @SerializedName("albumName") val albumName: String,
     @SerializedName("duration") val duration: Double,
     @SerializedName("plainLyrics") val plainLyrics: String?,
-    @SerializedName("syncedLyrics") val syncedLyrics: String?
+    @SerializedName("syncedLyrics") val syncedLyrics: String?,
+    /**
+     * The record as a Lyricsfile (YAML). Every LRCLIB record has one, and it is the only field
+     * that can carry word timing; [syncedLyrics] is its line-level LRC.
+     */
+    @SerializedName("lyricsfile") val lyricsfile: String? = null,
+    @SerializedName("instrumental") val instrumental: Boolean? = null
 )

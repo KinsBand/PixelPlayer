@@ -37,6 +37,16 @@ interface MusicBrainzApiService {
     ): MbRecording
 
     /**
+     * Recordings carrying an ISRC. No `inc`: the chosen recording is looked up in full with
+     * [lookupRecording] anyway.
+     */
+    @GET("ws/2/isrc/{isrc}")
+    suspend fun lookupIsrc(
+        @Path("isrc") isrc: String,
+        @Query("fmt") format: String = "json"
+    ): MbIsrcResponse
+
+    /**
      * Lookup a single release with label info, track listings, media,
      * release groups, and artist credits.
      */

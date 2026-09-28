@@ -11,6 +11,10 @@ import kotlinx.coroutines.withTimeoutOrNull
  * Main-thread owned, with at most one speculative lookup at a time. The next song gets
  * [prepare]; after it, the songs queued behind it get the cheaper [prepareLater] one by one,
  * so a double skip also lands on a song whose manifest is ready.
+ *
+ * Nothing new starts while the playing song is still loading (`networkBusy`): on a slow
+ * connection the next song's bytes would be taken from the song being listened to. Work that
+ * already started is left to finish.
  */
 internal class NextStreamPrewarmer<T>(
     private val scope: CoroutineScope,
@@ -21,7 +25,14 @@ internal class NextStreamPrewarmer<T>(
     private var job: Job? = null
     private var preparedId: String? = null
 
-    fun update(currentId: String?, nextId: String?, next: T?, readyToPlay: Boolean, later: List<T> = emptyList()) {
+    fun update(
+        currentId: String?,
+        nextId: String?,
+        next: T?,
+        readyToPlay: Boolean,
+        later: List<T> = emptyList(),
+        networkBusy: Boolean = false
+    ) {
         // A skip may promote the speculative lookup to foreground work. Let it finish:
         // the foreground extractor waits on the same per-video mutex and reuses its result.
         if (job?.isActive == true && preparedId == currentId && !readyToPlay) return
@@ -31,6 +42,7 @@ internal class NextStreamPrewarmer<T>(
             preparedId = null
         }
         if (!readyToPlay || nextId == null || next == null || preparedId == nextId) return
+        if (networkBusy) return // Asked again once the playing song has loaded.
         preparedId = nextId
         job = scope.launch {
             delay(200) // Coalesce rapid queue changes before starting network work.

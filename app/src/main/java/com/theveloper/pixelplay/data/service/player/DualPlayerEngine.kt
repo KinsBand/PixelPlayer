@@ -22,8 +22,10 @@ import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.LoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.Renderer
@@ -1254,10 +1256,14 @@ class DualPlayerEngine @Inject constructor(
         Timber.tag("DualPlayerEngine").d(logMessage)
     }
 
-    /** Bound each player's allocations even for high-bitrate lossless tracks during overlap. */
-    private fun buildAdaptiveLoadControl(): DefaultLoadControl {
+    /**
+     * Bound each player's allocations even for high-bitrate lossless tracks during overlap.
+     * On a connection that can't keep up, repeated rebuffers wait for more audio before
+     * resuming instead of stopping again every second ([RebufferBackoff]).
+     */
+    private fun buildAdaptiveLoadControl(): LoadControl {
         val profile = loadControlBufferProfileFor(isLowRamDevice, Runtime.getRuntime().maxMemory())
-        return DefaultLoadControl.Builder()
+        val defaults = DefaultLoadControl.Builder()
             .setBufferDurationsMs(profile.minBufferMs, profile.maxBufferMs,
                 profile.bufferForPlaybackMs, profile.bufferForPlaybackAfterRebufferMs)
             .setTargetBufferBytes(profile.targetBufferBytes)
@@ -1265,6 +1271,7 @@ class DualPlayerEngine @Inject constructor(
             // Audio samples are all keyframes, so the resume rewind lands inside this buffer.
             .setBackBuffer(profile.backBufferMs, /* retainBackBufferFromKeyframe= */ true)
             .build()
+        return RebufferBackoffLoadControl(defaults)
     }
 
     private fun buildPlayer(): ExoPlayer {
@@ -1356,7 +1363,16 @@ class DualPlayerEngine @Inject constructor(
             }
         }
         
-        val dataSourceFactory = DefaultDataSource.Factory(context)
+        // The stream proxies reconnect upstream on their own and are silent meanwhile; the
+        // player waits for them instead of timing out and reopening (see CloudStreamProxy).
+        val proxyHttpFactory = DefaultHttpDataSource.Factory()
+            .setConnectTimeoutMs(5_000)
+            .setReadTimeoutMs(com.theveloper.pixelplay.data.stream.CloudStreamProxy.PLAYER_READ_TIMEOUT_MS)
+        val httpFactory = LoopbackRoutingDataSource.Factory(
+            local = proxyHttpFactory,
+            remote = DefaultHttpDataSource.Factory()
+        )
+        val dataSourceFactory = DefaultDataSource.Factory(context, httpFactory)
         val resolvingFactory = ResolvingDataSource.Factory(dataSourceFactory, resolver)
         val extractorsFactory = DefaultExtractorsFactory()
             // FLAG_WORKAROUND_IGNORE_EDIT_LISTS intentionally removed: it breaks Opus files

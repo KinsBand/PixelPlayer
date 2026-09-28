@@ -36,10 +36,23 @@ object LyricsImportSecurity {
     const val MAX_TTML_FILE_BYTES = 1024 * 1024 // 1 MB
     const val MAX_LYRICS_TEXT_CHARS = 50_000
 
+    /** In preference order: sidecar lookups try the first extension first. */
     private enum class LyricsDocumentFormat(
         val extension: String,
         val allowedMimeTypes: Set<String>
     ) {
+        /** Lyricsfile YAML: the only one that keeps word timing, line end times and metadata. */
+        LYRICSFILE(
+            extension = com.theveloper.pixelplay.data.lyrics.Lyricsfile.FILE_EXTENSION,
+            allowedMimeTypes = setOf(
+                "application/yaml",
+                "application/x-yaml",
+                "text/yaml",
+                "text/x-yaml",
+                "text/plain",
+                "application/octet-stream"
+            )
+        ),
         LRC(
             extension = "lrc",
             allowedMimeTypes = setOf(
@@ -128,7 +141,10 @@ object LyricsImportSecurity {
         if (sanitized.isBlank()) {
             return LyricsImportValidationResult.Invalid(LyricsImportFailureReason.EMPTY_CONTENT)
         }
-        if (sanitized.length > if (sanitized.trimStart().startsWith("{")) MAX_TTML_FILE_BYTES else MAX_LYRICS_TEXT_CHARS) {
+        // Structured documents (timing JSON, Lyricsfile YAML) spend many characters per word.
+        val structured = sanitized.trimStart().startsWith("{") ||
+            com.theveloper.pixelplay.data.lyrics.Lyricsfile.looksLikeLyricsfile(sanitized)
+        if (sanitized.length > if (structured) MAX_TTML_FILE_BYTES else MAX_LYRICS_TEXT_CHARS) {
             return LyricsImportValidationResult.Invalid(LyricsImportFailureReason.FILE_TOO_LARGE)
         }
 
@@ -148,7 +164,7 @@ object LyricsImportSecurity {
     fun messageFor(reason: LyricsImportFailureReason): String {
         return when (reason) {
             LyricsImportFailureReason.UNSUPPORTED_EXTENSION ->
-                "Use .lrc, .ttml or PixelPlayer timing .json files."
+                "Use .lyrics (Lyricsfile), .lrc, .ttml or PixelPlayer timing .json files."
             LyricsImportFailureReason.UNSUPPORTED_MIME_TYPE ->
                 "The selected file type is not a supported lyrics file."
             LyricsImportFailureReason.FILE_TOO_LARGE ->
@@ -191,6 +207,9 @@ object LyricsImportSecurity {
         format: LyricsDocumentFormat
     ): List<String> {
         val candidates = when (format) {
+            // Kept as written: the parser reads Lyricsfile directly, and a file named .lyrics
+            // that is really LRC is read as LRC.
+            LyricsDocumentFormat.LYRICSFILE -> listOf(sanitizeImportedLyrics(decoded))
             LyricsDocumentFormat.JSON -> listOf(sanitizeImportedLyrics(decoded))
             LyricsDocumentFormat.LRC -> listOfNotNull(
                 sanitizeImportedLyrics(decoded),

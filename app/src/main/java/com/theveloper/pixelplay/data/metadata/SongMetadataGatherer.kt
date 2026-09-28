@@ -4,7 +4,11 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.data.metadata.MetadataConsensus.DEEZER
+import com.theveloper.pixelplay.data.metadata.MetadataConsensus.ITUNES
+import com.theveloper.pixelplay.data.metadata.MetadataConsensus.MUSICBRAINZ
 import com.theveloper.pixelplay.data.network.lastfm.LastFmRepository
+import com.theveloper.pixelplay.data.network.musicbrainz.MusicBrainzRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -41,8 +45,14 @@ import kotlin.math.abs
  *   then track + album details fetched together (BPM, ISRC, gain, label, UPC, genre, cover_xl).
  * - iTunes Search: one call gives genre, track / disc number, release date, explicit flag,
  *   copyright-free metadata and the best free cover (up to 3000 px; we ask for 1400).
- * Then Last.fm tags when the user has a Last.fm key (genre fallback and mood). If no source
- * gives a mood it is estimated from genre + BPM and marked as estimated.
+ * - MusicBrainz, for single songs someone opens, downloads or saves ([gatherDeep]): the exact
+ *   recording through Deezer's ISRC (a scored search without one), then its original release
+ *   date, community genres and tags, composer, lyricist and MusicBrainz ids. It allows one
+ *   request a second, so lists don't use it.
+ * The answers are merged by weighted vote per field ([MetadataConsensus]), keeping how much the
+ * sources agreed. Then mood from MusicBrainz tags, or Last.fm tags when the user has a Last.fm
+ * key (which also backs up the genre). If no source gives a mood it is estimated from genre +
+ * BPM and marked as estimated.
  *
  * Only blank fields are ever filled; nothing the file or the user set is overwritten.
  * Results are cached on disk by title + artist, so each song is looked up once.
@@ -52,40 +62,13 @@ class SongMetadataGatherer @Inject constructor(
     @ApplicationContext private val context: Context,
     private val lastFm: LastFmRepository,
     private val metadataStore: SongMetadataStore,
+    private val musicBrainz: MusicBrainzRepository,
     okHttpClient: okhttp3.OkHttpClient
 ) {
-    /** What was found for one song. Any field may be null. */
-    data class Gathered(
-        val genre: String? = null,
-        val album: String? = null,
-        val artist: String? = null,
-        val durationMs: Long? = null,
-        val year: Int? = null,
-        val bpm: Float? = null,
-        val mood: String? = null,
-        val moodEstimated: Boolean = false,
-        val albumArtist: String? = null,
-        val trackNumber: Int? = null,
-        val discNumber: Int? = null,
-        /** Release date as "yyyy-MM-dd" (or a prefix of it). */
-        val releaseDate: String? = null,
-        /** Best cover found, already sized to [ArtworkUrls.DEFAULT_SIZE] where the host allows. */
-        val coverUrl: String? = null,
-        val isrc: String? = null,
-        val label: String? = null,
-        val upc: String? = null,
-        val explicit: Boolean? = null,
-        /** Deezer's loudness gain in dB (informational; not used for playback). */
-        val gainDb: Float? = null,
-        val sources: List<String> = emptyList(),
-        /** When the lookup ran; failed lookups are retried after [RETRY_MISS_MS]. */
-        val at: Long = System.currentTimeMillis(),
-        val found: Boolean = true
-    )
-
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val cache = com.theveloper.pixelplay.utils.BoundedCache<String, Gathered>(MAX_CACHE)
-    private val inFlight = ConcurrentHashMap<String, Deferred<Gathered?>>()
+    private val cache = com.theveloper.pixelplay.utils.BoundedCache<String, GatheredMetadata>(MAX_CACHE)
+    private val inFlight = ConcurrentHashMap<String, Deferred<GatheredMetadata?>>()
+    private val deepInFlight = ConcurrentHashMap<String, Deferred<GatheredMetadata?>>()
     private val network = Semaphore(3)
     private val deezerPace = kotlinx.coroutines.sync.Mutex()
     @Volatile private var lastDeezerCallAt = 0L
@@ -105,7 +88,7 @@ class SongMetadataGatherer @Inject constructor(
             (!song.isLocal && (song.trackNumber <= 0 || ArtworkUrls.isLowQuality(song.albumArtUriString)))
 
     /** What was gathered for [song] (cached only, no network), or null. */
-    fun cachedFor(song: Song): Gathered? = cache[keyOf(song)]?.takeIf { it.found }
+    fun cachedFor(song: Song): GatheredMetadata? = cache[keyOf(song)]?.takeIf { it.found }
 
     /**
      * Title + artist with upload noise removed ("(Official Video)", "feat. …", "- Topic").
@@ -151,7 +134,7 @@ class SongMetadataGatherer @Inject constructor(
             inFlight[key] ?: run {
                 if (inFlight.size >= 24) return cached
                 scope.async(start = kotlinx.coroutines.CoroutineStart.LAZY) {
-                    try { withTimeoutOrNull(30_000) { lookup(song) } }
+                    try { withTimeoutOrNull(30_000) { lookup(song, deep = false) } }
                     finally { synchronized(inFlight) { inFlight.remove(key) } }
                 }.also { inFlight[key] = it }
             }
@@ -159,6 +142,41 @@ class SongMetadataGatherer @Inject constructor(
         pending.start()
         val result = withTimeoutOrNull(timeoutMs) { pending.await() } ?: return cached
         return merge(song, result)
+    }
+
+    /**
+     * [gather], and MusicBrainz too: the original release year, community genres and tags,
+     * composer, lyricist and MusicBrainz ids, voted together with Deezer and iTunes. For one
+     * song someone opens, downloads or saves (MusicBrainz allows a request a second). Waits at
+     * most [timeoutMs]; what Deezer and iTunes found is used meanwhile, and a slower lookup
+     * finishes in the background for next time.
+     */
+    suspend fun gatherDeep(song: Song, timeoutMs: Long = 8_000): Song {
+        val key = keyOf(song)
+        val known = cache[key]
+        val now = System.currentTimeMillis()
+        if (known != null && known.deepAt > 0 && now - known.deepAt < (if (known.found) REFRESH_MS else RETRY_MISS_MS)) {
+            return applyCached(song)
+        }
+        val pending = synchronized(deepInFlight) {
+            deepInFlight[key] ?: if (deepInFlight.size >= 8) null else {
+                scope.async(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+                    try { withTimeoutOrNull(60_000) { lookup(song, deep = true) } }
+                    finally { synchronized(deepInFlight) { deepInFlight.remove(key) } }
+                }.also { deepInFlight[key] = it }
+            }
+        } ?: return gather(song, timeoutMs) // Plenty queued for MusicBrainz already.
+        pending.start()
+        // Whatever finished in time is in the cache: the deep result, or meanwhile what Deezer
+        // and iTunes found, or an earlier lookup's.
+        withTimeoutOrNull(timeoutMs) { pending.await() }
+        return applyCached(song)
+    }
+
+    /** [gatherDeep] without waiting (a song just liked or saved). */
+    fun gatherDeepInBackground(song: Song) {
+        if (song.isLocal) return
+        scope.launch { runCatching { gatherDeep(song, timeoutMs = 60_000) } }
     }
 
     /**
@@ -237,17 +255,23 @@ class SongMetadataGatherer @Inject constructor(
 
     // ── Lookup ─────────────────────────────────────────────────────────────────────────
 
-    private suspend fun lookup(song: Song): Gathered? {
+    /**
+     * Deezer and iTunes at once, and with [deep] MusicBrainz as well; see the class comment.
+     * A deep lookup publishes what Deezer and iTunes found as soon as they answer, so callers
+     * that can't wait for MusicBrainz still get it.
+     */
+    private suspend fun lookup(song: Song, deep: Boolean): GatheredMetadata? {
         if (!isOnline()) return null
         val title = cleanTitle(song.title)
         val artist = cleanArtist(song.artist)
         if (title.isBlank()) return null
         val isrc = song.creditsAndRelease.isrc?.trim()?.takeIf { it.length == 12 }
+        val key = keyOf(song)
 
         var deezerFailed = false
         val result = network.withPermit {
-            // Both catalogues at once: the slower one no longer adds to the wait.
-            val (dz, itn) = kotlinx.coroutines.coroutineScope {
+            // All catalogues at once: the slowest one no longer adds to the wait.
+            kotlinx.coroutines.coroutineScope {
                 val d = async {
                     runCatching { deezer(title, artist, song.duration, isrc) }
                         .onFailure {
@@ -260,74 +284,89 @@ class SongMetadataGatherer @Inject constructor(
                         .onFailure { Timber.tag(TAG).d("iTunes lookup failed for %s: %s", title, it.message) }
                         .getOrNull()
                 }
-                d.await() to i.await()
-            }
-            var g = combine(dz, itn)
+                val m = if (!deep) null else async {
+                    // Deezer's ISRC pins the exact recording; without one it's a scored search.
+                    val dz = d.await()
+                    val album = song.album.takeUnless { it.isPlaceholderAlbum() } ?: dz?.album ?: i.await()?.album
+                    runCatching { musicBrainz(song, title, artist, isrc ?: dz?.isrc, album) }
+                        .onFailure { Timber.tag(TAG).d("MusicBrainz lookup failed for %s: %s", title, it.message) }
+                        .getOrNull()
+                }
+                val fast = listOfNotNull(d.await(), i.await())
+                if (m != null && cache[key]?.found != true) {
+                    MetadataConsensus.combine(fast).takeIf { it.found }?.let { cache[key] = it }
+                }
+                var g = MetadataConsensus.combine(fast + listOfNotNull(m?.await()))
+                if (deep) g = g.copy(deepAt = System.currentTimeMillis()) // Also when MusicBrainz had nothing.
 
-            // Last.fm tags (only when the user set a Last.fm key): genre fallback + mood.
-            if (g.genre == null || g.mood == null) {
-                val tags = runCatching { lastFm.getTrackInfo(g.artist ?: artist, title)?.tags }.getOrNull().orEmpty()
-                if (tags.isNotEmpty()) {
-                    g = g.copy(
-                        genre = g.genre ?: tags.firstOrNull { it.lowercase() in KNOWN_GENRE_WORDS || KNOWN_GENRE_WORDS.any { w -> it.lowercase().contains(w) } }
-                            ?.replaceFirstChar { it.titlecase(Locale.ROOT) },
-                        mood = g.mood ?: moodFromTags(tags),
-                        sources = g.sources + "Last.fm",
-                        found = true
-                    )
+                if (g.mood == null) {
+                    moodFromTags(g.tags)?.let { g = g.copy(mood = it, moodSource = "MusicBrainz tags") }
                 }
-            }
-            if (g.mood == null) {
-                estimateMood(g.genre ?: song.genre, g.bpm ?: song.musicalFeatures.bpm)?.let {
-                    g = g.copy(mood = it, moodEstimated = true)
+                // Last.fm tags (only when the user set a Last.fm key): genre fallback + mood.
+                if (g.genre == null || g.mood == null) {
+                    val tags = runCatching { lastFm.getTrackInfo(g.artist ?: artist, title)?.tags }.getOrNull().orEmpty()
+                    if (tags.isNotEmpty()) {
+                        val tagMood = if (g.mood == null) moodFromTags(tags) else null
+                        g = g.copy(
+                            genre = g.genre ?: tags.firstOrNull { it.lowercase() in KNOWN_GENRE_WORDS || KNOWN_GENRE_WORDS.any { w -> it.lowercase().contains(w) } }
+                                ?.replaceFirstChar { it.titlecase(Locale.ROOT) },
+                            mood = g.mood ?: tagMood,
+                            moodSource = if (tagMood != null) "Last.fm tags" else g.moodSource,
+                            sources = g.sources + "Last.fm",
+                            found = true
+                        )
+                    }
                 }
+                if (g.mood == null) {
+                    estimateMood(g.genre ?: song.genre, g.bpm ?: song.musicalFeatures.bpm)?.let {
+                        g = g.copy(mood = it, moodEstimated = true)
+                    }
+                }
+                g.copy(at = System.currentTimeMillis())
             }
-            g.copy(at = System.currentTimeMillis())
         }
         // A miss caused by a network error or Deezer's rate limit isn't a real miss: don't
         // remember it, so the song is tried again next time instead of after 24 h.
         if (deezerFailed && !result.found) return null
-        cache[keyOf(song)] = result
+        store(key, result)
         scheduleSave()
         if (result.found) recordClaims(song, result)
         return result
     }
 
+    private fun store(key: String, result: GatheredMetadata) {
+        val existing = cache[key]
+        cache[key] = when {
+            existing == null || !existing.found -> result
+            // A plain lookup never replaces one that also asked MusicBrainz.
+            result.deepAt == 0L && existing.deepAt > 0 -> return
+            // Nothing matched this time: keep what was found before, noting MusicBrainz was asked.
+            !result.found -> existing.copy(deepAt = maxOf(existing.deepAt, result.deepAt))
+            else -> result
+        }
+    }
+
     /**
-     * Deezer is preferred for identity and audio facts (ISRC, BPM, label, gain), iTunes for
-     * the cover (bigger) and track / disc numbers (more reliable). Either fills the other's gaps.
+     * MusicBrainz's view of the song: the recording (by ISRC, else a scored search), its
+     * first release, genres, tags, work credits and the release closest to [album].
      */
-    private fun combine(dz: Gathered?, itn: Gathered?): Gathered {
-        if (dz == null && itn == null) return Gathered(found = false)
-        if (dz == null) return itn!!
-        if (itn == null) return dz
-        return Gathered(
-            genre = dz.genre ?: itn.genre,
-            album = dz.album ?: itn.album,
-            artist = dz.artist ?: itn.artist,
-            durationMs = dz.durationMs ?: itn.durationMs,
-            year = dz.year ?: itn.year,
-            bpm = dz.bpm,
-            albumArtist = dz.albumArtist ?: itn.albumArtist,
-            trackNumber = itn.trackNumber ?: dz.trackNumber,
-            discNumber = itn.discNumber ?: dz.discNumber,
-            releaseDate = dz.releaseDate ?: itn.releaseDate,
-            coverUrl = itn.coverUrl ?: dz.coverUrl,
-            isrc = dz.isrc,
-            label = dz.label,
-            upc = dz.upc,
-            explicit = dz.explicit ?: itn.explicit,
-            gainDb = dz.gainDb,
-            sources = dz.sources + itn.sources,
-            found = true
-        )
+    private suspend fun musicBrainz(song: Song, title: String, artist: String, isrc: String?, album: String?): GatheredMetadata? {
+        val durationMs = song.duration.takeIf { it > 0 }
+        val mbid = isrc?.let { musicBrainz.recordingForIsrc(it, title, durationMs) }
+            ?: musicBrainz.searchRecording(title, artist, album = null, durationMs = durationMs)?.recordingMbid
+            ?: return null
+        val recording = musicBrainz.lookupRecordingModel(mbid) ?: return null
+        val work = recording.relations.firstNotNullOfOrNull { it.work?.id?.takeIf(String::isNotBlank) }
+            ?.let { musicBrainz.fetchWorkDetails(it) }
+        val releaseMbid = musicBrainz.pickBestRelease(recording.releases, album)
+        return MusicBrainzSongFacts.toGathered(recording, work, releaseMbid, isrc, System.currentTimeMillis())
     }
 
     /**
      * Deezer: exact ISRC lookup when possible, else the best search match by title / artist /
      * duration. Track and album details are then fetched together.
      */
-    private suspend fun deezer(title: String, artist: String, durationMs: Long, isrc: String?): Gathered? = withContext(Dispatchers.IO) {
+    private suspend fun deezer(title: String, artist: String, durationMs: Long, isrc: String?): GatheredMetadata? = withContext(Dispatchers.IO) {
         var trackFromIsrc = isrc?.let { deezerJson("https://api.deezer.com/track/isrc:$it") }
             ?.takeIf { it.optLong("id") > 0 }
         // An ISRC hit still has to be the same song (bad ISRCs exist on YouTube uploads).
@@ -366,7 +405,7 @@ class SongMetadataGatherer @Inject constructor(
         val albumObj = track?.optJSONObject("album") ?: best.optJSONObject("album")
         val cover = album?.optString("cover_xl")?.takeIf(String::isNotBlank)
             ?: albumObj?.optString("cover_xl")?.takeIf(String::isNotBlank)
-        Gathered(
+        GatheredMetadata(
             genre = genre,
             album = albumObj?.optString("title")?.takeIf(String::isNotBlank),
             artist = best.optJSONObject("artist")?.optString("name")?.takeIf(String::isNotBlank),
@@ -383,7 +422,7 @@ class SongMetadataGatherer @Inject constructor(
             upc = album?.optString("upc")?.takeIf(String::isNotBlank),
             explicit = track?.takeIf { it.has("explicit_lyrics") }?.optBoolean("explicit_lyrics"),
             gainDb = track?.optDouble("gain")?.takeIf { !it.isNaN() && it != 0.0 }?.toFloat(),
-            sources = listOf("Deezer"),
+            sources = listOf(DEEZER),
             found = true
         )
     }
@@ -392,7 +431,7 @@ class SongMetadataGatherer @Inject constructor(
      * iTunes Search: one call, no key. Apple asks for roughly 20 calls a minute per device;
      * when it answers 403 / 429 it is skipped for a few minutes and Deezer carries on alone.
      */
-    private suspend fun iTunes(title: String, artist: String, durationMs: Long): Gathered? = withContext(Dispatchers.IO) {
+    private suspend fun iTunes(title: String, artist: String, durationMs: Long): GatheredMetadata? = withContext(Dispatchers.IO) {
         if (System.currentTimeMillis() < iTunesBlockedUntil) return@withContext null
         val term = URLEncoder.encode(listOf(artist, title).filter(String::isNotBlank).joinToString(" "), "UTF-8")
         val country = Locale.getDefault().country.takeIf { it.length == 2 }?.let { "&country=$it" }.orEmpty()
@@ -416,7 +455,7 @@ class SongMetadataGatherer @Inject constructor(
             .maxByOrNull { it.second }?.first ?: return@withContext null
 
         val releaseDate = best.optString("releaseDate").takeIf { it.length >= 4 }?.take(10)
-        Gathered(
+        GatheredMetadata(
             genre = best.optString("primaryGenreName").takeIf { it.isNotBlank() && it != "Music" },
             album = best.optString("collectionName").takeIf(String::isNotBlank)
                 ?.replace(Regex("""\s*-\s*(Single|EP)$"""), ""),
@@ -429,7 +468,7 @@ class SongMetadataGatherer @Inject constructor(
             releaseDate = releaseDate,
             coverUrl = ArtworkUrls.upgrade(best.optString("artworkUrl100").takeIf(String::isNotBlank)),
             explicit = best.optString("trackExplicitness").takeIf(String::isNotBlank)?.let { it == "explicit" },
-            sources = listOf("iTunes"),
+            sources = listOf(ITUNES),
             found = true
         )
     }
@@ -518,7 +557,7 @@ class SongMetadataGatherer @Inject constructor(
             ArtworkUrls.isLowQuality(song.albumArtUriString)) filled.albumArtUriString else song.albumArtUriString,
     )
 
-    private fun merge(song: Song, g: Gathered): Song {
+    private fun merge(song: Song, g: GatheredMetadata): Song {
         if (!g.found) return song
         return song.copy(
             genre = if (song.genre.isPlaceholderGenre()) g.genre ?: song.genre else song.genre,
@@ -526,7 +565,11 @@ class SongMetadataGatherer @Inject constructor(
             artist = if (song.artist.isBlankOrUnknown()) g.artist ?: song.artist else song.artist,
             duration = if (song.duration <= 0) g.durationMs ?: song.duration else song.duration,
             year = if (song.year <= 0) g.year ?: song.year else song.year,
-            musicalFeatures = if (song.musicalFeatures.bpm == null && g.bpm != null) song.musicalFeatures.copy(bpm = g.bpm) else song.musicalFeatures,
+            musicalFeatures = song.musicalFeatures.let { f ->
+                if ((f.bpm == null && g.bpm != null) || (f.lyricist.isNullOrBlank() && g.lyricist != null)) {
+                    f.copy(bpm = f.bpm ?: g.bpm, lyricist = f.lyricist?.takeIf(String::isNotBlank) ?: g.lyricist)
+                } else f
+            },
             mixIntelligence = if (song.mixIntelligence.mood.isNullOrBlank() && g.mood != null) song.mixIntelligence.copy(mood = g.mood) else song.mixIntelligence,
             albumArtist = if (song.albumArtist.isBlankOrUnknown()) g.albumArtist ?: song.albumArtist else song.albumArtist,
             trackNumber = if (song.trackNumber <= 0) g.trackNumber ?: song.trackNumber else song.trackNumber,
@@ -545,7 +588,9 @@ class SongMetadataGatherer @Inject constructor(
             creditsAndRelease = song.creditsAndRelease.let { c ->
                 c.copy(
                     recordLabel = c.recordLabel ?: g.label,
-                    upcEan = c.upcEan ?: g.upc
+                    upcEan = c.upcEan ?: g.upc,
+                    composer = c.composer?.takeIf(String::isNotBlank) ?: g.composer,
+                    songwriter = c.songwriter?.takeIf(String::isNotBlank) ?: g.songwriter
                 )
             }
         )
@@ -561,8 +606,18 @@ class SongMetadataGatherer @Inject constructor(
     }.getOrNull()
 
     private fun moodFromTags(tags: List<String>): String? {
-        val lower = tags.map { it.lowercase() }
-        return MOOD_WORDS.entries.firstOrNull { (_, words) -> lower.any { tag -> words.any { tag.contains(it) } } }?.key
+        val lower = tags.map { it.lowercase(Locale.ROOT) }
+        return MOOD_WORDS.entries.firstOrNull { (_, words) -> lower.any { tag -> words.any { tagMeans(tag, it) } } }?.key
+    }
+
+    /**
+     * Whether [tag] says [word]: phrases anywhere in the tag, short words as whole words
+     * ("fun" is not "funk"), longer words also as a stem ("melanchol" → "melancholic").
+     */
+    private fun tagMeans(tag: String, word: String): Boolean {
+        if (' ' in word) return tag.contains(word)
+        val words = tag.split(NON_WORD)
+        return if (word.length <= 4) word in words else words.any { it.startsWith(word) }
     }
 
     /** Rough, clearly-estimated mood when no source has one. */
@@ -581,23 +636,43 @@ class SongMetadataGatherer @Inject constructor(
         }
     }
 
-    private suspend fun recordClaims(song: Song, g: Gathered) {
+    private suspend fun recordClaims(song: Song, g: GatheredMetadata) {
         val now = System.currentTimeMillis()
-        val src = g.sources.distinct().filter { it != "Last.fm" }.joinToString(" / ").ifBlank { "Deezer" }
+        val all = g.sources.distinct()
+        val src = all.filter { it != "Last.fm" }.joinToString(" / ").ifBlank { DEEZER }
+        /** A value the sources voted on carries how much of the vote agreed with it. */
+        fun voted(field: String, value: String, source: String = src, unit: String? = null): MetadataClaim {
+            val agreement = g.agreement[field]
+            return MetadataClaim(value, source, now, unit = unit, confidence = agreement,
+                methodVersion = if (agreement != null) MetadataConsensus.METHOD else null)
+        }
+        fun musicBrainz(value: String) = MetadataClaim(value, MUSICBRAINZ, now)
         val claims = buildMap {
-            g.genre?.let { put("classification.genres", MetadataClaim(it, g.sources.distinct().joinToString(" / "), now)) }
-            g.album?.let { put("release.album_title", MetadataClaim(it, src, now)) }
-            g.albumArtist?.let { put("release.album_artist", MetadataClaim(it, src, now)) }
-            g.durationMs?.let { put("asset.duration", MetadataClaim(it.toString(), src, now, unit = "ms")) }
-            g.bpm?.let { put("performance.tempo", MetadataClaim(it.toString(), "Deezer", now, unit = "BPM")) }
-            g.trackNumber?.let { put("release.track_number", MetadataClaim(it.toString(), src, now)) }
-            g.discNumber?.let { put("release.disc_number", MetadataClaim(it.toString(), src, now)) }
-            g.isrc?.let { put("identity.isrc", MetadataClaim(it, "Deezer", now)) }
-            g.upc?.let { put("release.barcode", MetadataClaim(it, "Deezer", now)) }
-            g.label?.let { put("release.label", MetadataClaim(it, "Deezer", now)) }
+            g.genre?.let { put("classification.genres", voted("genre", it, all.joinToString(" / "))) }
+            g.album?.let { put("release.album_title", voted("album", it)) }
+            g.albumArtist?.let { put("release.album_artist", voted("albumArtist", it)) }
+            g.durationMs?.let { put("asset.duration", voted("duration", it.toString(), unit = "ms")) }
+            g.bpm?.let { put("performance.tempo", MetadataClaim(it.toString(), DEEZER, now, unit = "BPM")) }
+            g.trackNumber?.let { put("release.track_number", voted("trackNumber", it.toString())) }
+            g.discNumber?.let { put("release.disc_number", voted("discNumber", it.toString())) }
+            g.isrc?.let { put("identity.isrc", voted("isrc", it)) }
+            g.upc?.let { put("release.barcode", MetadataClaim(it, DEEZER, now)) }
+            g.label?.let { put("release.label", MetadataClaim(it, DEEZER, now)) }
+            g.releaseDate?.let { put("release.original_release_date", voted("year", it)) }
+            g.recordingMbid?.let { put("identity.musicbrainz_recording_id", musicBrainz(it)) }
+            g.releaseMbid?.let { put("identity.musicbrainz_release_id", musicBrainz(it)) }
+            g.workMbid?.let { put("identity.musicbrainz_work_id", musicBrainz(it)) }
+            g.composer?.let { put("credits.composer", musicBrainz(it)) }
+            g.lyricist?.let { put("credits.lyricist", musicBrainz(it)) }
+            g.songwriter?.let { put("credits.songwriter", musicBrainz(it)) }
+            g.language?.let { put("song.languages", musicBrainz(it)) }
+            if (g.tags.isNotEmpty()) put("classification.tags", musicBrainz(g.tags.take(10).joinToString(", ")))
+            if (g.conflicts.isNotEmpty()) {
+                put("provenance.conflicting_values", MetadataClaim(g.conflicts.joinToString("\n"), MetadataConsensus.METHOD, now))
+            }
 
             g.mood?.let {
-                put("classification.mood", MetadataClaim(it, if (g.moodEstimated) "Estimated from genre + BPM" else "Last.fm tags", now,
+                put("classification.mood", MetadataClaim(it, if (g.moodEstimated) "Estimated from genre + BPM" else g.moodSource ?: "Last.fm tags", now,
                     state = if (g.moodEstimated) MetadataState.ESTIMATED else MetadataState.KNOWN))
             }
         }
@@ -612,7 +687,7 @@ class SongMetadataGatherer @Inject constructor(
             val root = JSONObject(file.readText())
             root.keys().forEach { key ->
                 val o = root.optJSONObject(key) ?: return@forEach
-                cache[key] = Gathered(
+                cache[key] = GatheredMetadata(
                     genre = o.optString("genre").ifBlank { null },
                     album = o.optString("album").ifBlank { null },
                     artist = o.optString("artist").ifBlank { null },
@@ -631,13 +706,30 @@ class SongMetadataGatherer @Inject constructor(
                     upc = o.optString("upc").ifBlank { null },
                     explicit = if (o.has("explicit")) o.optBoolean("explicit") else null,
                     gainDb = o.optDouble("gain").takeIf { !it.isNaN() }?.toFloat(),
+                    moodSource = o.optString("moodSource").ifBlank { null },
+                    tags = o.optJSONArray("tags").strings(),
+                    composer = o.optString("composer").ifBlank { null },
+                    lyricist = o.optString("lyricist").ifBlank { null },
+                    songwriter = o.optString("songwriter").ifBlank { null },
+                    language = o.optString("language").ifBlank { null },
+                    recordingMbid = o.optString("mbRecording").ifBlank { null },
+                    releaseMbid = o.optString("mbRelease").ifBlank { null },
+                    workMbid = o.optString("mbWork").ifBlank { null },
+                    agreement = o.optJSONObject("agreement")?.let { a ->
+                        a.keys().asSequence().associateWith { a.optDouble(it).toFloat() }.filterValues { !it.isNaN() }
+                    }.orEmpty(),
+                    conflicts = o.optJSONArray("conflicts").strings(),
                     sources = o.optString("sources").split(',').filter(String::isNotBlank),
                     at = o.optLong("at"),
+                    deepAt = o.optLong("deepAt"),
                     found = o.optBoolean("found", true)
                 )
             }
         }.onFailure { Timber.tag(TAG).w(it, "Could not read gathered metadata cache") }
     }
+
+    private fun JSONArray?.strings(): List<String> =
+        if (this == null) emptyList() else (0 until length()).mapNotNull { optString(it).takeIf(String::isNotBlank) }
 
     @Synchronized
     private fun scheduleSave() {
@@ -668,8 +760,22 @@ class SongMetadataGatherer @Inject constructor(
                         g.upc?.let { put("upc", it) }
                         g.explicit?.let { put("explicit", it) }
                         g.gainDb?.let { put("gain", it.toDouble()) }
+                        g.moodSource?.let { put("moodSource", it) }
+                        if (g.tags.isNotEmpty()) put("tags", JSONArray(g.tags))
+                        g.composer?.let { put("composer", it) }
+                        g.lyricist?.let { put("lyricist", it) }
+                        g.songwriter?.let { put("songwriter", it) }
+                        g.language?.let { put("language", it) }
+                        g.recordingMbid?.let { put("mbRecording", it) }
+                        g.releaseMbid?.let { put("mbRelease", it) }
+                        g.workMbid?.let { put("mbWork", it) }
+                        if (g.agreement.isNotEmpty()) {
+                            put("agreement", JSONObject().apply { g.agreement.forEach { (field, share) -> put(field, share.toDouble()) } })
+                        }
+                        if (g.conflicts.isNotEmpty()) put("conflicts", JSONArray(g.conflicts))
                         if (g.sources.isNotEmpty()) put("sources", g.sources.distinct().joinToString(","))
                         put("at", g.at)
+                        if (g.deepAt > 0) put("deepAt", g.deepAt)
                         put("found", g.found)
                     }
                     writer.name(key).jsonValue(record.toString())
@@ -714,6 +820,7 @@ class SongMetadataGatherer @Inject constructor(
 
     private companion object {
         const val TAG = "SongMetadataGatherer"
+        val NON_WORD = Regex("[^\\p{L}\\p{N}]+")
         const val MIN_MATCH = 3.0
         const val RETRY_MISS_MS = 24 * 60 * 60 * 1000L
         const val REFRESH_MS = 30L * 24 * 60 * 60 * 1000L

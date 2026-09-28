@@ -105,6 +105,35 @@ class MusicBrainzRepository @Inject constructor(
             .maxByOrNull { it.score }
     }
 
+    /**
+     * The recording an ISRC belongs to, when it is the song asked about ([title], and
+     * [durationMs] when known): ISRCs attached to YouTube uploads are sometimes wrong.
+     */
+    suspend fun recordingForIsrc(isrc: String, title: String, durationMs: Long? = null): String? {
+        val code = isrc.trim().uppercase(Locale.ROOT).takeIf { ISRC_PATTERN.matches(it) } ?: return null
+        val response = runMbSafely("recordingForIsrc") { musicBrainzApi.lookupIsrc(code) } ?: return null
+        return bestIsrcRecording(response.recordings, title, durationMs)?.id
+    }
+
+    /**
+     * Of the recordings sharing an ISRC, the one matching [title] (and [durationMs]) best: all
+     * of the title's words, then the fewest others ("(live at Wembley)"), then the length.
+     */
+    internal fun bestIsrcRecording(recordings: List<MbRecording>, title: String, durationMs: Long?): MbRecording? {
+        val wanted = normalizeForMatch(title)
+        return recordings
+            .filter { it.id.isNotBlank() }
+            .map { recording ->
+                val found = normalizeForMatch(recording.title)
+                Triple(recording, tokenCoverage(wanted, found), tokenCoverage(found, wanted))
+            }
+            .filter { (recording, coverage, _) ->
+                coverage >= 0.5 && durationComponent(recording.length, durationMs) >= 0
+            }
+            .maxWithOrNull(compareBy({ it.second }, { it.third }, { durationComponent(it.first.length, durationMs) }))
+            ?.first
+    }
+
     // ─── Lookups ────────────────────────────────────────────────────────
 
     suspend fun fetchRecordingDetails(mbid: String): MbRecordingDetails? {
@@ -405,5 +434,6 @@ class MusicBrainzRepository @Inject constructor(
         const val ARTIST_WEIGHT = 25.0
         const val DURATION_TOLERANCE_SECONDS = 10.0
         const val DEFAULT_RETRY_AFTER_SECONDS = 2L
+        val ISRC_PATTERN = Regex("^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$")
     }
 }
