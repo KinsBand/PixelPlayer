@@ -167,8 +167,10 @@ class SongMetadataGatherer @Inject constructor(
             }
         } ?: return gather(song, timeoutMs) // Plenty queued for MusicBrainz already.
         pending.start()
-        val result = withTimeoutOrNull(timeoutMs) { pending.await() } ?: return applyCached(song)
-        return merge(song, result)
+        // Whatever finished in time is in the cache: the deep result, or meanwhile what Deezer
+        // and iTunes found, or an earlier lookup's.
+        withTimeoutOrNull(timeoutMs) { pending.await() }
+        return applyCached(song)
     }
 
     /** [gatherDeep] without waiting (a song just liked or saved). */
@@ -332,11 +334,16 @@ class SongMetadataGatherer @Inject constructor(
         return result
     }
 
-    /** A plain lookup never replaces one that also asked MusicBrainz. */
     private fun store(key: String, result: GatheredMetadata) {
         val existing = cache[key]
-        if (result.deepAt == 0L && existing != null && existing.found && existing.deepAt > 0) return
-        cache[key] = result
+        cache[key] = when {
+            existing == null || !existing.found -> result
+            // A plain lookup never replaces one that also asked MusicBrainz.
+            result.deepAt == 0L && existing.deepAt > 0 -> return
+            // Nothing matched this time: keep what was found before, noting MusicBrainz was asked.
+            !result.found -> existing.copy(deepAt = maxOf(existing.deepAt, result.deepAt))
+            else -> result
+        }
     }
 
     /**

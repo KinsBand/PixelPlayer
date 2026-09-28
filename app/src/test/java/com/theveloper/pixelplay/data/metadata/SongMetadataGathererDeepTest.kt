@@ -10,6 +10,7 @@ import com.theveloper.pixelplay.data.network.lastfm.LastFmRepository
 import com.theveloper.pixelplay.data.network.musicbrainz.MbArtist
 import com.theveloper.pixelplay.data.network.musicbrainz.MbIsrcResponse
 import com.theveloper.pixelplay.data.network.musicbrainz.MbRecording
+import com.theveloper.pixelplay.data.network.musicbrainz.MbRecordingSearchResponse
 import com.theveloper.pixelplay.data.network.musicbrainz.MbRelation
 import com.theveloper.pixelplay.data.network.musicbrainz.MbWork
 import com.theveloper.pixelplay.data.network.musicbrainz.MusicBrainzApiService
@@ -59,11 +60,15 @@ class SongMetadataGathererDeepTest {
         "relations":[{"type":"performance","target-type":"work","work":{"id":"work-1","title":"Bohemian Rhapsody"}}]}"""
 
     private val calls = mutableListOf<String>()
+    /** Every catalogue answers "no match". */
+    @Volatile private var noMatches = false
 
     private val http = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
         val url = chain.request().url
         synchronized(calls) { calls += url.host + url.encodedPath }
         val body = when {
+            noMatches && url.host == "api.deezer.com" -> """{"data":[]}"""
+            noMatches && url.host == "itunes.apple.com" -> """{"resultCount":0,"results":[]}"""
             url.host == "api.deezer.com" && url.encodedPath == "/search" -> deezerSearch
             url.host == "api.deezer.com" && url.encodedPath == "/track/9997018" -> deezerTrack
             url.host == "api.deezer.com" && url.encodedPath == "/album/915785" -> deezerAlbum
@@ -89,6 +94,30 @@ class SongMetadataGathererDeepTest {
         }
     }
 
+    private val song = Song(
+        id = "yt_fJ9rUzIMcZQ", title = "Bohemian Rhapsody (Official Video)", artist = "Queen",
+        artistId = 0L, album = "YouTube Music", albumId = 0L, path = "", contentUriString = "youtube://fJ9rUzIMcZQ",
+        albumArtUriString = null, duration = 0L, genre = "YouTube Music", youtubeId = "fJ9rUzIMcZQ"
+    )
+
+    @Test fun `a later lookup that matches nothing keeps what was found`() = runBlocking {
+        val api = mockk<MusicBrainzApiService> {
+            coEvery { searchRecordings(any(), any(), any()) } returns MbRecordingSearchResponse()
+        }
+        val musicBrainz = MusicBrainzRepository(api, mockk(), MusicBrainzRateLimiter(), OkHttpClient())
+        val store = mockk<SongMetadataStore> { coEvery { record(any(), any()) } returns mockk() }
+        val lastFm = mockk<LastFmRepository> { coEvery { getTrackInfo(any(), any()) } returns null }
+        val gatherer = SongMetadataGatherer(context(), lastFm, store, musicBrainz, http)
+
+        assertEquals("Rock", gatherer.gather(song, timeoutMs = 15_000).genre)
+        noMatches = true
+        val again = gatherer.gatherDeep(song, timeoutMs = 15_000)
+
+        assertEquals("Rock", again.genre)
+        assertEquals(11, again.trackNumber)
+        assertTrue(gatherer.cachedFor(song)!!.deepAt > 0)
+    }
+
     @Test fun `a deep lookup votes three catalogues together`() = runBlocking {
         val api = mockk<MusicBrainzApiService> {
             coEvery { lookupIsrc("GBUM71029604", any()) } returns MbIsrcResponse(
@@ -107,11 +136,6 @@ class SongMetadataGathererDeepTest {
         val lastFm = mockk<LastFmRepository> { coEvery { getTrackInfo(any(), any()) } returns null }
         val gatherer = SongMetadataGatherer(context(), lastFm, store, musicBrainz, http)
 
-        val song = Song(
-            id = "yt_fJ9rUzIMcZQ", title = "Bohemian Rhapsody (Official Video)", artist = "Queen",
-            artistId = 0L, album = "YouTube Music", albumId = 0L, path = "", contentUriString = "youtube://fJ9rUzIMcZQ",
-            albumArtUriString = null, duration = 0L, genre = "YouTube Music", youtubeId = "fJ9rUzIMcZQ"
-        )
         val filled = gatherer.gatherDeep(song, timeoutMs = 15_000)
 
         // The original release, not the 2011 remaster album's date.
