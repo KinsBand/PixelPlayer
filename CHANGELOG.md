@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Streaming:** first plays of online songs no longer fail and fall back to slow extraction when the fast manifest request takes more than 200 ms (the winning manifest was being discarded).
+- **Streaming:** after switching between Wi-Fi and mobile data, songs no longer hit refused stream URLs or get stuck on the slow extraction path.
+
+### Changed
+- **Streaming:** a cold manifest is one request instead of two. Visitor data is kept and reused, and the player response is trimmed from ~15 KB to ~3.4 KB.
+- **Streaming:** resuming after a long pause plays the 7 s rewind from memory instead of refetching the song.
+- **Streaming:** the two songs after the next one also get their manifests ready (three in all), and the next song's cover is prefetched.
+- **Search:** opening Search pre-opens the search and playback connections, so the first query and first tap skip the connection setup.
+
 ## [1.0.0] - KinsBand build
 
 ### Fixed

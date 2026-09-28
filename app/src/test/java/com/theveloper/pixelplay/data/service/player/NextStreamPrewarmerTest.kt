@@ -101,4 +101,54 @@ class NextStreamPrewarmerTest {
         assertEquals(2, attempts)
         assertEquals(2, failures)
     }
+
+    @Test fun `songs after the next one get the lighter preparation in queue order`() = runTest {
+        val calls = mutableListOf<String>()
+        val warmer = NextStreamPrewarmer<String>(backgroundScope, { calls.add("next:$it") },
+            prepareLater = { calls.add("later:$it") })
+        warmer.update("a", "b", "b", true, later = listOf("c", "d"))
+        advanceTimeBy(200)
+        runCurrent()
+        assertEquals(listOf("next:b", "later:c", "later:d"), calls)
+    }
+
+    @Test fun `lookahead waits for the next song and is skipped when it fails`() = runTest {
+        val calls = mutableListOf<String>()
+        val nextDone = CompletableDeferred<Unit>()
+        val warmer = NextStreamPrewarmer<String>(backgroundScope, { nextDone.await() },
+            prepareLater = { calls.add(it) })
+        warmer.update("a", "b", "b", true, later = listOf("c"))
+        advanceTimeBy(5_000)
+        runCurrent()
+        assertTrue(calls.isEmpty())
+        nextDone.complete(Unit)
+        runCurrent()
+        assertEquals(listOf("c"), calls)
+
+        val failing = NextStreamPrewarmer<String>(backgroundScope, { throw IllegalStateException("offline") },
+            prepareLater = { calls.add("unexpected:$it") })
+        failing.update("a", "b", "b", true, later = listOf("c"))
+        advanceTimeBy(200)
+        runCurrent()
+        assertEquals(listOf("c"), calls)
+    }
+
+    @Test fun `a skip elsewhere cancels the lookahead but promoting the next song keeps it`() = runTest {
+        var laterCancelled = false
+        val laterStarted = CompletableDeferred<Unit>()
+        val warmer = NextStreamPrewarmer<String>(backgroundScope, { }, prepareLater = {
+            laterStarted.complete(Unit)
+            try { awaitCancellation() } finally { laterCancelled = true }
+        })
+        warmer.update("a", "b", "b", true, later = listOf("c"))
+        advanceTimeBy(200)
+        runCurrent()
+        assertTrue(laterStarted.isCompleted)
+        warmer.update("b", "c", "c", false) // skipped to the prepared song; it is buffering
+        runCurrent()
+        assertFalse(laterCancelled)
+        warmer.update("x", "y", "y", false) // jumped somewhere else
+        runCurrent()
+        assertTrue(laterCancelled)
+    }
 }

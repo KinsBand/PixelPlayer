@@ -212,7 +212,9 @@ class MusicService : MediaLibraryService() {
         com.theveloper.pixelplay.data.service.player.NextStreamPrewarmer<MediaItem>(
             scope = serviceScope,
             prepare = { engine.prewarmNextStream(it) },
-            onFailure = { Timber.d(it, "Next stream prewarm unavailable") }
+            onFailure = { Timber.d(it, "Next stream prewarm unavailable") },
+            // Songs after the next one: manifest only, a few KB each.
+            prepareLater = { engine.prewarmNextStream(it, headBytes = 0) }
         )
     }
 
@@ -224,8 +226,26 @@ class MusicService : MediaLibraryService() {
             currentId = player.currentMediaItem?.mediaId,
             nextId = next?.mediaId,
             next = next,
-            readyToPlay = player.playbackState == Player.STATE_READY && player.playWhenReady
+            readyToPlay = player.playbackState == Player.STATE_READY && player.playWhenReady,
+            later = if (next == null) emptyList() else upcomingAfter(player, index, UPCOMING_MANIFEST_LOOKAHEAD)
         )
+    }
+
+    /** Up to [count] items that play after [index], in the order skipping would reach them. */
+    private fun upcomingAfter(player: Player, index: Int, count: Int): List<MediaItem> {
+        val timeline = player.currentTimeline
+        if (timeline.isEmpty || index !in 0 until timeline.windowCount) return emptyList()
+        // Same navigation as Player.nextMediaItemIndex: repeat-one still moves on when skipping.
+        val repeatMode = if (player.repeatMode == Player.REPEAT_MODE_ONE) Player.REPEAT_MODE_OFF else player.repeatMode
+        val seen = hashSetOf(player.currentMediaItemIndex, index)
+        val items = ArrayList<MediaItem>(count)
+        var cursor = index
+        while (items.size < count) {
+            cursor = timeline.getNextWindowIndex(cursor, repeatMode, player.shuffleModeEnabled)
+            if (cursor == C.INDEX_UNSET || !seen.add(cursor)) break
+            items.add(player.getMediaItemAt(cursor))
+        }
+        return items
     }
     private var keepPlayingInBackground = true
     private var isManualShuffleEnabled = false
@@ -307,6 +327,8 @@ class MusicService : MediaLibraryService() {
         // JSON+DataStore rewrite on every Media3 event (track transition fires 3-4 listeners
         // within ~200ms) is unnecessary work. 1500ms coalesces those without harming restore.
         private const val PLAYBACK_SNAPSHOT_DEBOUNCE_MS = 1500L
+        /** Songs after the next one whose manifests are prepared too (Musify prepares three in all). */
+        private const val UPCOMING_MANIFEST_LOOKAHEAD = 2
         private const val MEDIA_SESSION_BUTTON_DEBOUNCE_MS = 250L
         private const val DEFERRED_SERVICE_STARTUP_WORK_DELAY_MS = 1_000L
         private const val PAUSED_RESTORE_PREPARE_QUEUE_LIMIT = 50
