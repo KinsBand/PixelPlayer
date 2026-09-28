@@ -718,10 +718,13 @@ private fun LyricsAdvancedSettings(
     }
     val wordSourcePrefs by remember(context) {
         context.applicationContext.dataStore.data.map { prefs ->
-            (prefs[com.theveloper.pixelplay.data.network.lyrics.wordsync.WordLyricsPrefs.WORD_SOURCES_ENABLED] ?: true) to
-                (prefs[com.theveloper.pixelplay.data.network.lyrics.wordsync.WordLyricsPrefs.MUSIXMATCH_ENABLED] ?: false)
+            Triple(
+                prefs[com.theveloper.pixelplay.data.network.lyrics.wordsync.WordLyricsPrefs.WORD_SOURCES_ENABLED] ?: true,
+                prefs[com.theveloper.pixelplay.data.network.lyrics.wordsync.WordLyricsPrefs.MUSIXMATCH_ENABLED] ?: false,
+                prefs[com.theveloper.pixelplay.data.network.lyrics.wordsync.WordLyricsPrefs.UNISON_ENABLED] ?: true
+            )
         }
-    }.collectAsState(initial = true to false)
+    }.collectAsState(initial = Triple(true, false, true))
     val chevronRotation by androidx.compose.animation.core.animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
         label = "advancedChevron"
@@ -793,6 +796,16 @@ private fun LyricsAdvancedSettings(
                                 checked = wordSourcePrefs.first,
                                 onCheckedChange = { enabled ->
                                     editPrefs { it[com.theveloper.pixelplay.data.network.lyrics.wordsync.WordLyricsPrefs.WORD_SOURCES_ENABLED] = enabled }
+                                },
+                                depth = 1
+                            ))
+                            add(AdvancedRow(
+                                icon = Icons.Rounded.Cloud,
+                                title = "Unison community lyrics",
+                                subtitle = "Word and line synced, matched to the exact YouTube video when there is one",
+                                checked = wordSourcePrefs.third,
+                                onCheckedChange = { enabled ->
+                                    editPrefs { it[com.theveloper.pixelplay.data.network.lyrics.wordsync.WordLyricsPrefs.UNISON_ENABLED] = enabled }
                                 },
                                 depth = 1
                             ))

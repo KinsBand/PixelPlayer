@@ -326,8 +326,9 @@ class LyricsUtilsTest {
         val lyrics = LyricsUtils.parseLyrics(lrc)
         val synced = requireNotNull(lyrics.synced)
 
-        // Credits + 2 paired lines = 4 lines
-        assertEquals(4, synced.size)
+        // The credit header is dropped by LyricsCleanup; the 2 lyric lines keep their pairs.
+        assertEquals(2, synced.size)
+        assertTrue(synced.none { it.line.startsWith("作词") || it.line.startsWith("作曲") })
 
         // The Japanese originals should be separate synced lines, not merged into credits
         val line22 = synced.first { it.line == "愛情なんて忘れて" }

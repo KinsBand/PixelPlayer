@@ -44,10 +44,14 @@ import java.util.concurrent.ConcurrentHashMap
  * @param K The song identifier type (e.g. [String] for YouTube videoId)
  */
 abstract class CloudStreamProxy<K : Any>(
-    private val okHttpClient: OkHttpClient
+    private val okHttpClient: OkHttpClient,
+    upstreamStallTimeoutMs: Long = UPSTREAM_STALL_TIMEOUT_MS,
+    private val resumeBudgetMs: Long = RESUME_BUDGET_MS
 ) {
     private val streamingClient = okHttpClient.newBuilder()
-        .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+        // No bytes for this long and the connection is treated as stalled (common on a weak
+        // mobile signal): a new connection resumes at the same byte sooner than waiting it out.
+        .readTimeout(upstreamStallTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
         .callTimeout(0, java.util.concurrent.TimeUnit.SECONDS)
         .build()
 
@@ -108,6 +112,15 @@ abstract class CloudStreamProxy<K : Any>(
     @Volatile private var readySignal = CompletableDeferred<Int>()
 
     private val urlCache = ConcurrentHashMap<K, CachedUrl>()
+
+    /**
+     * The newest request per song. The player only ever reads one of them: when it reopens
+     * (after a seek or its own timeout) the older response is abandoned, so a failure there is
+     * not resumed. Otherwise every abandoned response kept downloading and a weak connection
+     * ended up shared by several copies of the same song.
+     */
+    private val latestRequest = ConcurrentHashMap<K, Long>()
+    private val requestCounter = java.util.concurrent.atomic.AtomicLong()
 
     private data class CachedUrl(val url: String, val timestamp: Long, val expirationMs: Long) {
         fun isExpired(): Boolean = System.currentTimeMillis() - timestamp >= expirationMs
@@ -222,22 +235,24 @@ abstract class CloudStreamProxy<K : Any>(
 
     // Retry only before downstream headers/bytes are sent. Media3 reopens its original
     // DataSpec after a socket failure, preserving the byte offset; never splice renditions.
-    private suspend fun openUpstream(id: K, range: String?): Upstream {
+    // [mayRetry] is asked before each retry; false gives up with the last failure.
+    private suspend fun openUpstream(id: K, range: String?, mayRetry: () -> Boolean = { true }): Upstream {
         for (attempt in 0..2) {
+            val last = attempt == 2
             try {
                 val url = getOrFetchStreamUrl(id) ?: throw java.io.IOException("Stream unavailable")
                 if (!CloudStreamSecurity.isSafeRemoteStreamUrl(url, allowedHostSuffixes, true)) {
                     throw java.io.IOException("Rejected upstream URL")
                 }
                 val response = streamingClient.newCall(buildUpstreamRequest(url, range)).awaitResponse()
-                if (attempt == 2 || !StreamRetryPolicy.retryStatus(response.code)) return Upstream(url, response)
+                if (last || !StreamRetryPolicy.retryStatus(response.code) || !mayRetry()) return Upstream(url, response)
                 Timber.tag(proxyTag).w("Upstream HTTP %d (attempt %d), retrying", response.code, attempt + 1)
                 response.close()
                 onUpstreamFailure(id, response.code, attempt + 1)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: java.io.IOException) {
-                if (attempt == 2) throw error
+                if (last || !mayRetry()) throw error
                 onUpstreamFailure(id, null, attempt + 1)
             }
             delay(StreamRetryPolicy.delayMs(attempt))
@@ -248,8 +263,14 @@ abstract class CloudStreamProxy<K : Any>(
     /** Thrown for upstream read failures so they can be retried; downstream errors are not. */
     private class UpstreamReadException(cause: java.io.IOException) : java.io.IOException(cause)
 
-    private suspend fun openChunk(id: K, start: Long, endInclusive: Long, total: Long): Upstream {
-        val upstream = openUpstream(id, "bytes=$start-$endInclusive")
+    private suspend fun openChunk(
+        id: K,
+        start: Long,
+        endInclusive: Long,
+        total: Long,
+        mayRetry: () -> Boolean = { true }
+    ): Upstream {
+        val upstream = openUpstream(id, "bytes=$start-$endInclusive", mayRetry)
         val code = upstream.response.code
         val sameResource = knownContentLength(upstream.url) == total
         if (!sameResource || (code != 206 && !(code == 200 && start == 0L))) {
@@ -341,6 +362,11 @@ abstract class CloudStreamProxy<K : Any>(
      * rendition is resolved and opened in parallel. If that rendition can no longer be fetched
      * the response is aborted (never continued with different bytes); the player reopens and
      * the retry takes the normal path.
+     *
+     * A connection that fails or stalls mid-transfer is replaced by a new one from the same
+     * byte, so the player just sees a slower read. That goes on while it makes progress and
+     * the player still reads this response ([superseded] is false), for up to [resumeBudgetMs]
+     * without a byte; after that the response is aborted and the player's retry starts over.
      */
     private suspend fun serveChunked(
         call: ApplicationCall,
@@ -348,7 +374,8 @@ abstract class CloudStreamProxy<K : Any>(
         total: Long,
         validation: CloudStreamSecurity.RangeHeaderValidation,
         requestStartedNanos: Long,
-        head: HeadData? = null
+        head: HeadData? = null,
+        superseded: () -> Boolean = { false }
     ) = coroutineScope {
         val from: Long
         val to: Long
@@ -391,7 +418,7 @@ abstract class CloudStreamProxy<K : Any>(
                 val end = minOf(headEnd + initialChunk - 1, to)
                 continuation = async(Dispatchers.IO) {
                     try {
-                        Pending(openChunk(id, headEnd, end, total), end).also { openedContinuation.set(it) }
+                        Pending(openChunk(id, headEnd, end, total) { !superseded() }, end).also { openedContinuation.set(it) }
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -412,7 +439,7 @@ abstract class CloudStreamProxy<K : Any>(
             contentType = ContentType.parse(key.mimeType)
         } else {
             val firstEnd = minOf(position + initialChunk - 1, to)
-            val first = openChunk(id, position, firstEnd, total)
+            val first = openChunk(id, position, firstEnd, total) { !superseded() }
             pending = Pending(first, firstEnd)
             val contentTypeHeader = first.response.header("Content-Type")
                 ?.takeIf { it.substringBefore(';').trim().startsWith("audio/") }
@@ -457,6 +484,11 @@ abstract class CloudStreamProxy<K : Any>(
                     }
                     val buffer = ByteArray(64 * 1024)
                     var failures = 0
+                    var failedAt = -1L
+                    var lastProgressNanos = System.nanoTime()
+                    val mayResume = {
+                        !superseded() && System.nanoTime() - lastProgressNanos < resumeBudgetMs * 1_000_000
+                    }
                     var firstNetworkWrite = head == null
                     while (position <= to) {
                         try {
@@ -466,7 +498,7 @@ abstract class CloudStreamProxy<K : Any>(
                                     deferred.await().also { openedContinuation.set(null) }
                                 }
                                 ?: minOf(position + chunk - 1, to).let { end ->
-                                    Pending(openChunk(id, position, end, total), end)
+                                    Pending(openChunk(id, position, end, total, mayResume), end)
                                 }
                             pending = null
                             next.upstream.response.use { response ->
@@ -479,20 +511,32 @@ abstract class CloudStreamProxy<K : Any>(
                                         throw UpstreamReadException(e)
                                     }
                                     if (read < 0) throw UpstreamReadException(java.io.IOException("Upstream chunk ended early"))
-                                    writeFully(buffer, 0, read)
-                                    if (firstNetworkWrite) {
-                                        firstNetworkWrite = false
-                                        flush()
-                                        Timber.tag("StreamingLatency").d("proxy_first_bytes_ms=%d source=network",
-                                            (System.nanoTime() - requestStartedNanos) / 1_000_000)
-                                        com.theveloper.pixelplay.data.diagnostics.PlaybackTrace.mark("first_bytes", "network")
-                                    }
                                     teeBuffer?.let { tee ->
                                         if (position == teeFilled.toLong() && teeFilled < tee.size) {
                                             val copy = minOf(read, tee.size - teeFilled)
                                             buffer.copyInto(tee, teeFilled, 0, copy)
                                             teeFilled += copy
+                                            if (teeFilled == tee.size && cache != null) {
+                                                // Stored once complete, before the player has these
+                                                // bytes: it may reopen the song right after them.
+                                                runCatching { cache.store(teeKey!!, tee, teeFilled) }
+                                                teeBuffer = null
+                                            }
                                         }
+                                    }
+                                    writeFully(buffer, 0, read)
+                                    // writeFully alone passes bytes on only once 1 MiB has piled
+                                    // up: on a slow connection the player got nothing for tens of
+                                    // seconds, ran dry and timed out. Hand over each read at once.
+                                    flush()
+                                    // After flush: time the player spends not reading (its buffer
+                                    // is full, or it is paused) is not upstream silence.
+                                    lastProgressNanos = System.nanoTime()
+                                    if (firstNetworkWrite) {
+                                        firstNetworkWrite = false
+                                        Timber.tag("StreamingLatency").d("proxy_first_bytes_ms=%d source=network",
+                                            (System.nanoTime() - requestStartedNanos) / 1_000_000)
+                                        com.theveloper.pixelplay.data.diagnostics.PlaybackTrace.mark("first_bytes", "network")
                                     }
                                     position += read
                                     remaining -= read
@@ -502,8 +546,11 @@ abstract class CloudStreamProxy<K : Any>(
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: UpstreamReadException) {
-                            if (++failures > 3) throw e
-                            Timber.tag(proxyTag).w(e, "Chunk failed at %d/%d, resuming", position, total)
+                            // Failures only count up while no byte arrives in between.
+                            if (position > failedAt) failures = 0
+                            failedAt = position
+                            if (++failures > MAX_RESUMES_WITHOUT_PROGRESS || !mayResume()) throw e
+                            Timber.tag(proxyTag).w("Chunk failed at %d/%d (%s), resuming", position, total, e.cause ?: e)
                             onUpstreamFailure(id, null, failures)
                             delay(StreamRetryPolicy.delayMs(failures - 1))
                         }
@@ -533,6 +580,9 @@ abstract class CloudStreamProxy<K : Any>(
                         call.respond(HttpStatusCode.BadRequest, "Invalid ID")
                         return@get
                     }
+                    val requestNumber = requestCounter.incrementAndGet()
+                    latestRequest[id] = requestNumber
+                    val superseded = { latestRequest[id] != requestNumber }
 
                     try {
                         val rangeValidation = CloudStreamSecurity.validateRangeHeader(
@@ -550,17 +600,17 @@ abstract class CloudStreamProxy<K : Any>(
                         // resolved while those bytes play.
                         val head = headDataFor(id, rangeValidation)
                         if (head != null) {
-                            serveChunked(call, id, head.entry.key.contentLength, rangeValidation, requestStartedNanos, head)
+                            serveChunked(call, id, head.entry.key.contentLength, rangeValidation, requestStartedNanos, head, superseded)
                             return@get
                         }
 
                         val total = getOrFetchStreamUrl(id)?.let { knownContentLength(it) }
                         if (total != null) {
-                            serveChunked(call, id, total, rangeValidation, requestStartedNanos)
+                            serveChunked(call, id, total, rangeValidation, requestStartedNanos, superseded = superseded)
                             return@get
                         }
 
-                        val response = openUpstream(id, rangeValidation.normalizedHeader).response
+                        val response = openUpstream(id, rangeValidation.normalizedHeader) { !superseded() }.response
 
                         response.use { upstream ->
                             if (upstream.code != 200 && upstream.code != 206) {
@@ -624,9 +674,9 @@ abstract class CloudStreamProxy<K : Any>(
                                                 .also { bytesRead = it } != -1
                                         ) {
                                             writeFully(buffer, 0, bytesRead)
+                                            flush() // As in serveChunked: don't hold bytes back.
                                             if (firstWrite) {
                                                 firstWrite = false
-                                                flush()
                                                 Timber.tag("StreamingLatency").d("proxy_first_bytes_ms=%d",
                                                     (System.nanoTime() - requestStartedNanos) / 1_000_000)
                                             }
@@ -650,9 +700,31 @@ abstract class CloudStreamProxy<K : Any>(
                             if (!call.response.isCommitted) call.respond(HttpStatusCode.BadGateway, "Stream unavailable")
                             else throw e
                         }
+                    } finally {
+                        latestRequest.remove(id, requestNumber)
                     }
                 }
             }
         }
+    }
+
+    companion object {
+        /** Upstream silence after which a connection is replaced (see [serveChunked]). */
+        const val UPSTREAM_STALL_TIMEOUT_MS = 10_000L
+
+        /** How long a response may go without a byte while the proxy reconnects upstream. */
+        const val RESUME_BUDGET_MS = 20_000L
+
+        /** Consecutive failed connections, with no byte in between, before giving up. */
+        private const val MAX_RESUMES_WITHOUT_PROGRESS = 4
+
+        /**
+         * Read timeout for the player's connection to a proxy. Longer than the proxy can stay
+         * silent while it recovers ([RESUME_BUDGET_MS], plus the connect, response and stall
+         * timeouts of an attempt started just before it ran out: about 50 s). With a shorter
+         * one the player gave up first and reopened while the old response kept its upstream
+         * connection busy, and on a weak signal each retry made the next one slower.
+         */
+        const val PLAYER_READ_TIMEOUT_MS = 60_000
     }
 }

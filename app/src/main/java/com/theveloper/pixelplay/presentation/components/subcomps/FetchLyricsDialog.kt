@@ -326,10 +326,14 @@ private fun PickResultContent(
             ResultItemCard(result = result, onClick = { onPickResult(result) })
         }
 
-        item {
-            ProviderText(
-                providerText = stringResource(R.string.lyrics_provided_by),
-                uri = stringResource(R.string.lyrics_lrclib_uri),
+        // One credit per provider in the list (LRCLIB, and e.g. Unison or a word-timed source).
+        val credits = results
+            .mapNotNull { com.theveloper.pixelplay.data.lyrics.LyricsAttribution.creditFor(it.lyrics) }
+            .distinct()
+            .ifEmpty { listOf(com.theveloper.pixelplay.data.lyrics.LyricsAttribution.LRCLIB) }
+        items(credits, key = { "credit:" + it.url }) { credit ->
+            com.theveloper.pixelplay.utils.LyricsCreditText(
+                credit = credit,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 8.dp)
             )

@@ -1105,8 +1105,8 @@ class MusicRepositoryImpl @Inject constructor(
                     dateAdded = existing?.dateAdded ?: System.currentTimeMillis()
                 )
             )
-            // Look up genre, duration, album, BPM and mood for the saved song in the background.
-            metadataGatherer.gatherInBackground(song)
+            // Look up genre, duration, album, BPM, mood and credits for the saved song in the background.
+            metadataGatherer.gatherDeepInBackground(song)
         }
     }
 

@@ -25,6 +25,8 @@ data class MbRecording(
     @SerializedName("score") val score: Int = 0,
     // Duration in milliseconds; MusicBrainz often sends null / omits it.
     @SerializedName("length") val length: Long? = null,
+    // Earliest release date of any release containing the recording ("1975-10-31", "1975").
+    @SerializedName("first-release-date") val firstReleaseDate: String? = null,
     @SerializedName("artist-credit") val artistCredit: List<MbArtistCredit> = emptyList(),
     @SerializedName("releases") val releases: List<MbRelease> = emptyList(),
     @SerializedName("isrcs") val isrcs: List<String> = emptyList(),
@@ -36,6 +38,12 @@ data class MbRecording(
     val artistName: String
         get() = artistCredit.joinToString("") { it.name }.trim()
 }
+
+/** Non-MBID lookup by ISRC: every recording carrying the code (usually one). */
+data class MbIsrcResponse(
+    @SerializedName("isrc") val isrc: String = "",
+    @SerializedName("recordings") val recordings: List<MbRecording> = emptyList()
+)
 
 data class MbArtistCredit(
     // The credited name as it appears in the artist-credit phrase.

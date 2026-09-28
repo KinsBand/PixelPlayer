@@ -29,6 +29,33 @@ class NextStreamPrewarmerTest {
         assertEquals(listOf("c"), calls)
     }
 
+    @Test fun `nothing starts while the playing song loads and running work is left to finish`() = runTest {
+        val calls = mutableListOf<String>()
+        val release = CompletableDeferred<Unit>()
+        var cancelled = false
+        val warmer = NextStreamPrewarmer<String>(backgroundScope, { id ->
+            calls.add(id)
+            if (id == "c") try { release.await() } finally { cancelled = !release.isCompleted }
+        })
+        warmer.update("a", "b", "b", readyToPlay = true, networkBusy = true)
+        advanceTimeBy(1_000)
+        assertTrue(calls.isEmpty())
+        warmer.update("a", "b", "b", readyToPlay = true, networkBusy = false)
+        advanceTimeBy(300)
+        assertEquals(listOf("b"), calls)
+
+        warmer.update("b", "c", "c", readyToPlay = true)
+        advanceTimeBy(300)
+        assertEquals(listOf("b", "c"), calls)
+        // The playing song starts loading again: the running lookup is not thrown away.
+        warmer.update("b", "c", "c", readyToPlay = true, networkBusy = true)
+        runCurrent()
+        assertFalse(cancelled)
+        release.complete(Unit)
+        runCurrent()
+        assertFalse(cancelled)
+    }
+
     @Test fun `promoting next song preserves its running lookup but unrelated skip cancels it`() = runTest {
         val started = CompletableDeferred<Unit>()
         var cancelled = false

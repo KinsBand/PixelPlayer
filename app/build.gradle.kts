@@ -286,6 +286,8 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.logging.interceptor)
     implementation(libs.gson)
+    // Lyricsfile (YAML lyrics from LRCLIB / LRCGET and .lyrics sidecars)
+    implementation(libs.snakeyaml.engine)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.collections.immutable)
     implementation(libs.ktor.server.core)
