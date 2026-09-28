@@ -10,6 +10,8 @@ data class YouTubeAudioStream(
     val expiresAt: Long,
     /** Exact byte size (googlevideo `clen`), or -1 when unknown. */
     val contentLength: Long = -1L,
+    /** Which stream client produced [url] (see [StreamClients]); empty when unknown. */
+    val client: String = "",
 ) {
     val container: String get() = if (mimeType.contains("webm")) "webm" else "mp4"
     val fileExtension: String get() = if (container == "webm") "webm" else "m4a"

@@ -27,6 +27,11 @@ class YouTubeStreamProxy @Inject constructor(
             com.theveloper.pixelplay.data.diagnostics.HeapPressure.register("yt-stream-head") { cache.trimMemory() }
         }
 
+    public override val bodyCache: StreamBodyCache = StreamBodyCache(File(context.cacheDir, "stream_body"))
+
+    private val connectivity =
+        context.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+
     private val renditionKeys = object : LinkedHashMap<String, String>(100, .75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>) = size > 100
     }
@@ -62,6 +67,8 @@ class YouTubeStreamProxy @Inject constructor(
     fun useCompatibleRendition(id: String) {
         compatibleIds.add(id)
         synchronized(renditionKeys) { renditionKeys.remove(id) }
+        // The cached copy may be what failed to decode; fetch it again.
+        bodyCache.remove(id.removePrefix("yt_"))
         invalidateStream(id)
     }
 
@@ -102,6 +109,16 @@ class YouTubeStreamProxy @Inject constructor(
     }
 
     /**
+     * The CDN accepted the request but sent nothing before the player's first byte. Blame the
+     * client that produced the URL and move to the next one (the other direct client, then
+     * full extraction) rather than waiting on the same URL again.
+     */
+    override fun onFirstByteStall(id: String) {
+        super.invalidateStream(id)
+        youTubeStreamExtractor.reportStall(id)
+    }
+
+    /**
      * Only a rejected URL proves the signature is bad. A dropped socket, a 5xx or a 429 does
      * not, and re-resolving then would also put the song on the slow full-extraction path
      * for the extractor's cooldown. Retry the same URL first; re-resolve (without that
@@ -128,6 +145,7 @@ class YouTubeStreamProxy @Inject constructor(
      */
     suspend fun prewarm(id: String, headBytes: Int = 0) {
         val cleanId = id.removePrefix("yt_")
+        if (hasCachedBody(cleanId)) return // Plays from disk; nothing to prepare.
         if (headBytes > 0) {
             if (!prefetchHead(cleanId, headBytes)) youTubeStreamExtractor.streamManifest(cleanId)
         } else {
@@ -140,6 +158,40 @@ class YouTubeStreamProxy @Inject constructor(
 
     /** True when [id] can start from cached bytes without waiting for its stream URL. */
     fun hasCachedHead(id: String): Boolean = cachedHeadFor(id.removePrefix("yt_")) != null
+
+    /** True when all of [id] is on disk, so it plays without the network (even offline). */
+    fun hasCachedBody(id: String): Boolean = cachedBodyFor(id.removePrefix("yt_")) != null
+
+    /**
+     * Downloads all of [id] into the song cache so it plays with no network dependency, e.g.
+     * the next song while the current one plays. Only on unmetered networks, and paced while
+     * the playing song is still streaming in. Returns true when the song is cached.
+     */
+    suspend fun prefetchWhole(id: String): Boolean {
+        val cleanId = id.removePrefix("yt_")
+        if (hasCachedBody(cleanId)) return true
+        if (connectivity?.isActiveNetworkMetered != false) return false
+        if (com.theveloper.pixelplay.data.youtube.YouTubeRateLimit.isLimited()) return false
+        return prefetchBody(cleanId) { bytes, elapsedMs -> PlaybackBandwidthGate.pauseAfterRead(bytes, elapsedMs) }
+    }
+
+    override fun cachedBodyFor(id: String): StreamBodyCache.Entry? {
+        val entry = bodyCache.lookup(id) ?: return null
+        // After a decoder failure only MP4 renditions are allowed for this song.
+        if (id in compatibleIds && entry.key.mimeType != "audio/mp4") return null
+        return entry
+    }
+
+    override fun onServedFromBody(id: String, entry: StreamBodyCache.Entry) {
+        // File info under the player's timeline, as for a streamed rendition.
+        com.theveloper.pixelplay.data.youtube.StreamFormatRegistry.record(
+            id,
+            com.theveloper.pixelplay.data.youtube.YouTubeAudioStream(
+                url = "", mimeType = entry.key.mimeType, bitrate = entry.key.bitrate,
+                expiresAt = Long.MAX_VALUE, contentLength = entry.key.contentLength
+            )
+        )
+    }
 
     override fun cachedHeadFor(id: String): StreamHeadCache.Entry? {
         val entry = headCache.lookup(id) ?: return null

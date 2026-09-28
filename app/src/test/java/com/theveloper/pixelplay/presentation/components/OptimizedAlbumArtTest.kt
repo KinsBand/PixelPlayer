@@ -22,12 +22,14 @@ class OptimizedAlbumArtTest {
         val url = "https://lh3.googleusercontent.com/cover=w1400-h1400-l90-rj"
 
         assertThat(smallerArtworkKeyCandidates(url)).containsExactly(
+            "${url}_128x128",
+            "https://lh3.googleusercontent.com/cover=w128-h128-l90-rj",
             "https://lh3.googleusercontent.com/cover=w256-h256-l90-rj",
             "https://lh3.googleusercontent.com/cover=w512-h512-l90-rj",
             url
         ).inOrder()
         assertThat(smallerArtworkKeyCandidates("content://media/external/audio/albumart/1"))
-            .containsExactly("content://media/external/audio/albumart/1")
+            .containsExactly("content://media/external/audio/albumart/1_128x128", "content://media/external/audio/albumart/1")
         assertThat(smallerArtworkKeyCandidates(null)).isEmpty()
     }
 

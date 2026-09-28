@@ -4,11 +4,20 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
 class ArtworkUrlsTest {
+    @Test fun `player promotes catalogue thumbnails while lists keep small sources`() {
+        val small = "https://lh3.googleusercontent.com/cover=w120-h120-l90-rj"
+        assertEquals(small, ArtworkUrls.forDisplay(small, 96, 96))
+        assertEquals("https://lh3.googleusercontent.com/cover=w1400-h1400-l90-rj", ArtworkUrls.forDisplay(small, 2048, 2048))
+        assertEquals("https://lh3.googleusercontent.com/cover=w1024-h1024-l90-rj", ArtworkUrls.forDisplay(small, 800, 800))
+        assertEquals("https://is1-ssl.mzstatic.com/image/1024x1024bb.jpg", ArtworkUrls.forDisplay("https://is1-ssl.mzstatic.com/image/100x100bb.jpg", 1024, 1024))
+        assertEquals("$small?signature=secret", ArtworkUrls.forDisplay("$small?signature=secret", 1024, 1024))
+    }
+
     @Test fun `list and grid requests share size buckets and preserve provider flags`() {
         val google = "https://lh3.googleusercontent.com/cover=w1400-h1400-l90-rj"
-        assertEquals("https://lh3.googleusercontent.com/cover=w256-h256-l90-rj", ArtworkUrls.forDisplay(google, 96, 128))
+        assertEquals("https://lh3.googleusercontent.com/cover=w128-h128-l90-rj", ArtworkUrls.forDisplay(google, 96, 128))
         assertEquals("https://lh3.googleusercontent.com/cover=w512-h512-l90-rj", ArtworkUrls.forDisplay(google, 300, 300))
-        assertEquals("https://is1-ssl.mzstatic.com/image/256x256bb.jpg", ArtworkUrls.forDisplay("https://is1-ssl.mzstatic.com/image/1400x1400bb.jpg", 128, 128))
+        assertEquals("https://is1-ssl.mzstatic.com/image/128x128bb.jpg", ArtworkUrls.forDisplay("https://is1-ssl.mzstatic.com/image/1400x1400bb.jpg", 128, 128))
         assertEquals("https://e-cdns-images.dzcdn.net/images/cover/id/512x512-000000-80-0-0.jpg", ArtworkUrls.forDisplay("https://e-cdns-images.dzcdn.net/images/cover/id/1000x1000-000000-80-0-0.jpg", 300, 300))
     }
 

@@ -138,7 +138,7 @@ fun AlbumCarouselSection(
         pagerState = carouselState.pagerState,
         queue = queue,
         radius = 1,
-        targetSize = targetSize,
+        targetSize = SmartImageListTargetSize,
         anchorIndex = effectiveTargetIndex
     )
     var programmaticScrollInProgress by remember { mutableStateOf(false) }
@@ -269,7 +269,8 @@ fun AlbumCarouselSection(
                         modifier = Modifier
                             .fillMaxSize()
                             .then(if (coverBlurRadius > 0.dp) Modifier.blur(coverBlurRadius) else Modifier),
-                        targetSize = targetSize
+                        targetSize = if (isFocusedItem && expansionFraction > 0.08f) targetSize else SmartImageListTargetSize,
+                        prioritizeArtwork = isFocusedItem && expansionFraction > 0.08f
                     )
 
                     if (coverDimAlpha > 0f) {

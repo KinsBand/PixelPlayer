@@ -28,6 +28,7 @@ class InnerTubeClient @Inject constructor(
 ) {
     private val http = client.newBuilder().callTimeout(5, TimeUnit.SECONDS).build()
     private val visionOs = VisionOsPlayer(versionStore)
+    private val visionOsMusic = VisionOsMusicPlayer()
     private val locks = KeyedMutex<String>()
     private data class Cached(val items: List<SearchResultItem>, val expiry: Long)
     private val cache = object : LinkedHashMap<String, Cached>(48, .75f, true) {
@@ -172,9 +173,37 @@ class InnerTubeClient @Inject constructor(
         if (root.optJSONObject("videoDetails")?.optString("videoId") != id) return@withContext emptyList()
         InnerTubeParser.directStreams(root, System.currentTimeMillis()).map { stream ->
             stream.copy(url = stream.url.toHttpUrlOrNull()!!.newBuilder()
-                .setQueryParameter("cpn", nonce).build().toString())
+                .setQueryParameter("cpn", nonce).build().toString(), client = StreamClients.VISIONOS)
         }
     }
+
+    /**
+     * Audio from the backup direct client (visionOS 0.1 on the YouTube Music player endpoint,
+     * see [VisionOsMusicPlayer]). Independent of [directStreams]: another host, profile and user
+     * agent, so the two rarely fail together.
+     */
+    suspend fun musicDirectStreams(id: String): List<YouTubeAudioStream> = withContext(Dispatchers.IO) {
+        val nonce = org.schabi.newpipe.extractor.services.youtube.YoutubeParsingHelper.generateContentPlaybackNonce()
+        val root = visionOsMusic.playerResponse(id, visionOs.rememberedVisitorData()) ?: return@withContext emptyList()
+        if (!InnerTubeParser.isUsableMusicClientResponse(root, id)) return@withContext emptyList()
+        InnerTubeParser.directStreams(root, System.currentTimeMillis()).map { stream ->
+            val url = stream.url.toHttpUrlOrNull()!!.newBuilder().setQueryParameter("cpn", nonce).build().toString()
+            // googlevideo checks that media requests come from the client that got the URL.
+            YouTubeHttp.rememberUserAgent(url, VisionOsMusicPlayer.USER_AGENT)
+            stream.copy(url = url, client = StreamClients.VISIONOS_MUSIC)
+        }
+    }
+}
+
+/** Names of the ways the app gets an audio manifest, as used by [StreamClientHealth]. */
+object StreamClients {
+    /** NewPipe's visionOS 1.02 profile via youtubei.googleapis.com ([VisionOsPlayer]). */
+    const val VISIONOS = "visionos"
+    /** visionOS 0.1 via the YouTube Music player endpoint ([VisionOsMusicPlayer]). */
+    const val VISIONOS_MUSIC = "visionos_music"
+    /** NewPipe's full watch-page extraction (signature and n transforms). */
+    const val NEWPIPE = "newpipe"
+    val DIRECT = listOf(VISIONOS, VISIONOS_MUSIC)
 }
 
 /** Parse only result row endpoints: menu and recommendation IDs must never become playable results. */
@@ -239,6 +268,28 @@ internal object InnerTubeParser {
                 }
             }
         }.distinctBy { it.searchIdentity() }
+    }
+
+    /**
+     * InnerTubeX accepts visionOS 0.1 answers on their formats alone (its
+     * `skipPlayerResponseValidation`): the status can be other than OK while the audio plays.
+     * Only the video id (when given) must match, and a clearly shortened audio (a preview) is
+     * refused.
+     */
+    fun isUsableMusicClientResponse(root: JSONObject, videoId: String): Boolean {
+        val details = root.optJSONObject("videoDetails")
+        val answeredId = details?.optString("videoId").orEmpty()
+        if (answeredId.isNotEmpty() && answeredId != videoId) return false
+        val status = root.optJSONObject("playabilityStatus")?.optString("status").orEmpty()
+        val formats = root.optJSONObject("streamingData")?.optJSONArray("adaptiveFormats")
+        if (status != "OK" && (formats == null || formats.length() == 0)) return false
+        val lengthMs = details?.optString("lengthSeconds")?.toLongOrNull()?.times(1000) ?: return true
+        if (lengthMs <= 0 || formats == null) return true
+        val longestAudioMs = (0 until formats.length()).mapNotNull { index ->
+            formats.optJSONObject(index)?.takeIf { it.optString("mimeType").startsWith("audio/") }
+                ?.optString("approxDurationMs")?.toLongOrNull()
+        }.maxOrNull() ?: return true
+        return longestAudioMs >= lengthMs / 2
     }
 
     fun directStreams(root: JSONObject, now: Long): List<YouTubeAudioStream> {

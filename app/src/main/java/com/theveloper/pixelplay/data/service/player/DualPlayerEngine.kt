@@ -1460,18 +1460,35 @@ class DualPlayerEngine @Inject constructor(
      * With [headBytes] 0 only the manifest (a few KB) is fetched, for songs further ahead.
      */
     suspend fun prewarmNextStream(item: MediaItem, headBytes: Int = NEXT_SONG_HEAD_BYTES) {
-        val uri = item.localConfiguration?.uri ?: return
-        if (!connectivityStateHolder.isOnline.value) return
-        val videoId = when (uri.scheme) {
-            "youtube" -> uri.host?.removePrefix("yt_")
-            // Match the next catalog song ahead of time, so its transition is not a search.
-            in CATALOG_SCHEMES -> catalogPlaybackResolver.videoIdFor(uri.toString())
-            else -> null
-        } ?: return
+        val videoId = streamedVideoIdFor(item) ?: return
         withContext(Dispatchers.IO) {
             if (cloudSongDao.getDownloadsByVideoId(videoId).any { it.downloadedAudioFile() != null }) return@withContext
             // Also cache the next song's first bytes so its transition needs no network wait.
             youTubeStreamProxy.prewarm(videoId, headBytes = headBytes)
+        }
+    }
+
+    /**
+     * Puts all of the next song into the proxy's song cache (unmetered networks only), so it
+     * starts instantly and keeps playing even if the connection drops during it.
+     */
+    suspend fun prefetchNextStreamFully(item: MediaItem) {
+        val videoId = streamedVideoIdFor(item) ?: return
+        withContext(Dispatchers.IO) {
+            if (cloudSongDao.getDownloadsByVideoId(videoId).any { it.downloadedAudioFile() != null }) return@withContext
+            youTubeStreamProxy.prefetchWhole(videoId)
+        }
+    }
+
+    /** The YouTube video [item] streams from, when it is an online song and we're online. */
+    private suspend fun streamedVideoIdFor(item: MediaItem): String? {
+        val uri = item.localConfiguration?.uri ?: return null
+        if (!connectivityStateHolder.isOnline.value) return null
+        return when (uri.scheme) {
+            "youtube" -> uri.host?.removePrefix("yt_")
+            // Match the next catalog song ahead of time, so its transition is not a search.
+            in CATALOG_SCHEMES -> catalogPlaybackResolver.videoIdFor(uri.toString())
+            else -> null
         }
     }
 
@@ -1507,14 +1524,16 @@ class DualPlayerEngine @Inject constructor(
                 ?.let { Uri.fromFile(it) }
         }
         downloaded?.let { return@withContext it }
-        if (!connectivityStateHolder.isOnline.value) {
+        // A song kept whole in the stream cache plays from disk, even offline.
+        val cachedWhole = youTubeStreamProxy.hasCachedBody(videoId)
+        if (!cachedWhole && !connectivityStateHolder.isOnline.value) {
             connectivityStateHolder.triggerOfflineBlockedEvent()
             return@withContext null
         }
         if (!youTubeStreamProxy.ensureReady(5_000L)) return@withContext null
         // A song with cached leading bytes starts from them while the proxy resolves its URL
         // in parallel, so don't wait for the manifest here.
-        if (!youTubeStreamProxy.hasCachedHead(videoId)) youTubeStreamProxy.prewarm(videoId)
+        if (!cachedWhole && !youTubeStreamProxy.hasCachedHead(videoId)) youTubeStreamProxy.prewarm(videoId)
         youTubeStreamProxy.resolveUri(uriString)?.toUri()
     }
 

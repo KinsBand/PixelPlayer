@@ -1,0 +1,2758 @@
+From 7489e846e5513326b1f9a790480a7de6f42cce54 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 28 Sep 2026 19:20:37 +1000
+Subject: [PATCH] Tabs: real instrument sounds and interactive notation help
+
+- New SoundFont sample engine (data/soundfont): SF2 reader (memory-mapped),
+  General MIDI sample synth (envelopes, mod env, LFOs, filter, exclusive
+  classes, pitch bend, reverb, limiter), MIDI file reader, and a sampled
+  score engine that plays guitar/bass StringScore events (bends, slides,
+  hammer-ons, pull-offs, taps, vibrato, whammy, harmonics, palm mutes, dead
+  notes, let ring) on recorded guitar/bass samples, one voice per string.
+- GeneralUser GS 2.0.3 (32 MB) is downloaded once from this repo's release,
+  SHA-256 verified, and loaded in the background. Synth then plays every part
+  from samples; the MIDI player is muted and only keeps time. Falls back to
+  the previous engines when not downloaded or switched off.
+- Notation Help lists every mark for the part's instrument (39 guitar, 37
+  bass, 31 kit pieces + drum techniques, 10 for other instruments), highlights
+  the ones this song uses with the bar they first appear in, and plays a demo
+  of any mark (or that bar of the song) on tap, through the same pipeline as
+  playback.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EzyBeBJGG55RsMKWmRWTnP
+---
+ .../data/songsterr/NotationCatalog.kt         | 374 ++++++++++
+ .../pixelplay/data/songsterr/StringSynth.kt   |   9 +-
+ .../pixelplay/data/songsterr/TabParser.kt     |   3 +
+ .../pixelplay/data/soundfont/MidiEvents.kt    | 109 +++
+ .../data/soundfont/SampledScoreEngine.kt      | 210 ++++++
+ .../pixelplay/data/soundfont/SoundFont.kt     | 346 ++++++++++
+ .../data/soundfont/SoundFontStore.kt          | 170 +++++
+ .../data/soundfont/SoundFontSynth.kt          | 637 ++++++++++++++++++
+ .../components/tabs/NotationAuditionPlayer.kt | 143 ++++
+ .../components/tabs/NotationHelpSheet.kt      | 305 +++++++++
+ .../components/tabs/StringSynthPlayer.kt      |  24 +-
+ .../components/tabs/TabPracticeController.kt  |  52 +-
+ .../components/tabs/TabPracticePanel.kt       | 129 ++--
+ 13 files changed, 2430 insertions(+), 81 deletions(-)
+ create mode 100644 app/src/main/java/com/theveloper/pixelplay/data/songsterr/NotationCatalog.kt
+ create mode 100644 app/src/main/java/com/theveloper/pixelplay/data/soundfont/MidiEvents.kt
+ create mode 100644 app/src/main/java/com/theveloper/pixelplay/data/soundfont/SampledScoreEngine.kt
+ create mode 100644 app/src/main/java/com/theveloper/pixelplay/data/soundfont/SoundFont.kt
+ create mode 100644 app/src/main/java/com/theveloper/pixelplay/data/soundfont/SoundFontStore.kt
+ create mode 100644 app/src/main/java/com/theveloper/pixelplay/data/soundfont/SoundFontSynth.kt
+ create mode 100644 app/src/main/java/com/theveloper/pixelplay/presentation/components/tabs/NotationAuditionPlayer.kt
+ create mode 100644 app/src/main/java/com/theveloper/pixelplay/presentation/components/tabs/NotationHelpSheet.kt
+
+diff --git a/app/src/main/java/com/theveloper/pixelplay/data/songsterr/NotationCatalog.kt b/app/src/main/java/com/theveloper/pixelplay/data/songsterr/NotationCatalog.kt
+new file mode 100644
+index 0000000..93f2360
+--- /dev/null
++++ b/app/src/main/java/com/theveloper/pixelplay/data/songsterr/NotationCatalog.kt
+@@ -0,0 +1,374 @@
++package com.theveloper.pixelplay.data.songsterr
++
++/**
++ * Every notation mark the tab view can show, per instrument family, with:
++ *  - [usedIn]: which of them the loaded part actually uses (for "in this song" highlights), and
++ *  - [demoTrack]: a short example bar of each one, built from the same render model as a real tab,
++ *    so it plays through exactly the same path as the song (tab → [TabMidi] → strings / samples).
++ */
++object NotationCatalog {
++
++    enum class Group(val title: String) {
++        NOTES("Notes"),
++        LEGATO("Legato & slides"),
++        BENDS("Bends & vibrato"),
++        HARMONICS("Harmonics"),
++        MUTING("Muting & sustain"),
++        PICKING("Picking & articulation"),
++        RHYTHM("Rhythm & structure"),
++        KIT("Drum kit"),
++    }
++
++    data class Item(
++        val id: String,
++        /** What the mark looks like in the tab. */
++        val symbol: String,
++        val name: String,
++        val description: String,
++        val group: Group,
++        /** Drum kit pieces: the Songsterr articulation id. */
++        val drumId: Int? = null,
++    )
++
++    private val STRING_ITEMS = listOf(
++        Item("fret", "5", "Fretted note", "Play the string at that fret.", Group.NOTES),
++        Item("open", "0", "Open string", "Play the string without fretting it.", Group.NOTES),
++        Item("chord", "5 · 7 · 7", "Chord", "Several strings struck together.", Group.NOTES),
++        Item("tie", "5 ⁀ 5", "Tied note", "Keep the note ringing into the next beat; don't pick it again.", Group.NOTES),
++        Item("ghost", "(5)", "Ghost note", "Played very softly, felt more than heard.", Group.NOTES),
++        Item("dead", "x", "Dead note", "Rest the fretting hand on the string and pick: a percussive click with no pitch.", Group.NOTES),
++        Item("grace", "⁵7", "Grace note", "A very quick note just before the main one.", Group.NOTES),
++
++        Item("hammer", "H", "Hammer-on", "Sound the higher note by fretting it firmly, without picking.", Group.LEGATO),
++        Item("pull", "P", "Pull-off", "Sound the lower note by pulling the finger off the string, without picking.", Group.LEGATO),
++        Item("slide_legato", "5 / 7", "Legato slide", "Slide to the next note and let the slide sound it; no second pick.", Group.LEGATO),
++        Item("slide_shift", "5 S 7", "Shift slide", "Slide to the next note, then pick it again.", Group.LEGATO),
++        Item("slide_in", "/7", "Slide in", "Arrive at the note by sliding up (or down) into it.", Group.LEGATO),
++        Item("slide_out", "7\\", "Slide out", "After playing the note, slide away from it as it fades.", Group.LEGATO),
++        Item("tapping", "T", "Tapping", "Hammer the note onto the fretboard with a picking-hand finger.", Group.LEGATO),
++        Item("trill", "tr", "Trill", "Alternate quickly between the note and the one above with hammer-ons and pull-offs.", Group.LEGATO),
++
++        Item("bend", "↑ full", "Bend", "Push the string sideways to raise the pitch: ½ = one fret, full = two frets.", Group.BENDS),
++        Item("bend_release", "↑ ↓", "Bend and release", "Bend up, then let the string come back to the fretted pitch.", Group.BENDS),
++        Item("prebend", "pre ↑", "Pre-bend", "Bend the string before picking it, then (usually) release it.", Group.BENDS),
++        Item("vibrato", "~", "Vibrato", "Gently shake the pitch by rocking the string.", Group.BENDS),
++        Item("wide_vibrato", "~~~", "Wide vibrato", "A wider, slower vibrato.", Group.BENDS),
++        Item("whammy", "w/bar", "Whammy bar", "Dip the pitch with the tremolo arm and bring it back.", Group.BENDS),
++
++        Item("harmonic_natural", "<12>", "Natural harmonic", "Touch the string lightly over the fret (not pressing it) and pick: a bell-like tone.", Group.HARMONICS),
++        Item("harmonic_artificial", "A.H.", "Artificial harmonic", "Fret the note and touch the string 12 frets higher with the picking hand.", Group.HARMONICS),
++        Item("harmonic_pinch", "P.H.", "Pinch harmonic", "Let the thumb graze the string right after the pick: a squeal.", Group.HARMONICS),
++        Item("harmonic_tapped", "T.H.", "Tapped harmonic", "Tap the string 12 frets above the fretted note.", Group.HARMONICS),
++        Item("harmonic_semi", "S.H.", "Semi harmonic", "A pinch harmonic mixed with the plain note.", Group.HARMONICS),
++
++        Item("palm_mute", "P.M. - - -", "Palm mute", "Rest the picking hand's palm on the strings near the bridge: a tight, chunky sound.", Group.MUTING),
++        Item("let_ring", "let ring", "Let ring", "Let every note keep sounding over the next ones.", Group.MUTING),
++        Item("staccato", "·", "Staccato", "Cut the note short.", Group.MUTING),
++
++        Item("accent", ">", "Accent", "Play the note louder.", Group.PICKING),
++        Item("heavy_accent", "^", "Heavy accent", "Play the note much louder.", Group.PICKING),
++        Item("pick_down", "⊓", "Downstroke", "Pick towards the floor.", Group.PICKING),
++        Item("pick_up", "V", "Upstroke", "Pick towards the ceiling.", Group.PICKING),
++        Item("strum_down", "↓ chord", "Strum down", "Strum the chord from the low strings to the high ones.", Group.PICKING),
++        Item("strum_up", "↑ chord", "Strum up", "Strum the chord from the high strings to the low ones.", Group.PICKING),
++        Item("tremolo_picking", "≡", "Tremolo picking", "Pick the same note as fast and evenly as possible.", Group.PICKING),
++        Item("dynamics", "p · mf · ff", "Dynamics", "How loud to play: p soft, mf medium, ff very loud.", Group.PICKING),
++
++        Item("triplet", "⌐ 3 ¬", "Triplet", "Three notes in the time of two.", Group.RHYTHM),
++        Item("repeat", "‖: :‖", "Repeat", "Play the bars between the repeat signs again (×2 = twice).", Group.RHYTHM),
++    )
++
++    private val DRUM_TECHNIQUES = listOf(
++        Item("accent", ">", "Accent", "Hit the drum harder.", Group.PICKING),
++        Item("ghost", "(●)", "Ghost note", "A very soft hit, usually on the snare.", Group.PICKING),
++        Item("grace", "flam", "Flam", "A soft grace hit just before the main hit.", Group.PICKING),
++        Item("dynamics", "p · mf · ff", "Dynamics", "How loud to play.", Group.PICKING),
++        Item("triplet", "⌐ 3 ¬", "Triplet", "Three hits in the time of two.", Group.RHYTHM),
++        Item("repeat", "‖: :‖", "Repeat", "Play the bars between the repeat signs again.", Group.RHYTHM),
++    )
++
++    private val OTHER_ITEMS = listOf(
++        Item("fret", "♩", "Note", "A note on the staff; its height is its pitch.", Group.NOTES),
++        Item("chord", "♩♩♩", "Chord", "Several notes played together.", Group.NOTES),
++        Item("tie", "♩⁀♩", "Tie", "Hold the note into the next one.", Group.NOTES),
++        Item("grace", "♪ small", "Grace note", "A very quick note just before the main one.", Group.NOTES),
++        Item("staccato", "·", "Staccato", "Cut the note short.", Group.MUTING),
++        Item("accent", ">", "Accent", "Play the note louder.", Group.PICKING),
++        Item("heavy_accent", "^", "Heavy accent", "Play the note much louder.", Group.PICKING),
++        Item("dynamics", "p · mf · ff", "Dynamics", "How loud to play.", Group.PICKING),
++        Item("triplet", "⌐ 3 ¬", "Triplet", "Three notes in the time of two.", Group.RHYTHM),
++        Item("repeat", "‖: :‖", "Repeat", "Play the bars between the repeat signs again.", Group.RHYTHM),
++    )
++
++    /** The full list for an instrument family, in reading order. */
++    fun itemsFor(family: TabParser.InstrumentFamily): List<Item> = when (family) {
++        TabParser.InstrumentFamily.GUITAR -> STRING_ITEMS
++        TabParser.InstrumentFamily.BASS -> STRING_ITEMS.filterNot { it.id == "whammy" || it.id == "harmonic_semi" }
++        TabParser.InstrumentFamily.DRUMS ->
++            TabParser.drumArticulations.map {
++                Item("drum:${it.id}", "", it.name, "General MIDI sound ${it.gm}", Group.KIT, drumId = it.id)
++            } + DRUM_TECHNIQUES
++        TabParser.InstrumentFamily.OTHER -> OTHER_ITEMS
++    }
++
++    // ── Which marks the part uses ─────────────────────────────────────────────
++
++    /** First bar (measure index) each notation appears in. */
++    fun usedIn(track: RenderedTrack): Map<String, Int> {
++        val found = LinkedHashMap<String, Int>()
++        fun mark(id: String, measure: Int) { if (id !in found) found[id] = measure }
++        for (m in track.measures) {
++            val mi = m.index
++            if (m.repeatStart || (m.repeatCount ?: 0) > 1) mark("repeat", mi)
++            for (slot in m.slots) if (slot.graces.any { it.notes.isNotEmpty() }) mark("grace", mi)
++            for (b in m.beats) {
++                if (b.isRest) continue
++                if (b.tuplet != null && b.tuplet > 1) mark("triplet", mi)
++                if (b.velocity != null) mark("dynamics", mi)
++                if (track.isDrums) {
++                    for (n in b.notes) {
++                        mark("drum:${n.fret}", mi)
++                        if (n.isAccented) mark("accent", mi)
++                        if (n.isGhost) mark("ghost", mi)
++                    }
++                    continue
++                }
++                if (b.notes.size >= 2) mark("chord", mi)
++                if (b.palmMute) mark("palm_mute", mi)
++                if (b.letRing) mark("let_ring", mi)
++                if (b.vibrato) mark("vibrato", mi)
++                if (b.wideVibrato) mark("wide_vibrato", mi)
++                if (b.tapping) mark("tapping", mi)
++                if (b.tremoloPicking) mark("tremolo_picking", mi)
++                if (b.tremoloBar) mark("whammy", mi)
++                if (b.downStroke) mark("strum_down", mi)
++                if (b.upStroke) mark("strum_up", mi)
++                b.pickStroke?.let { ps ->
++                    if (ps.contains("down", ignoreCase = true)) mark("pick_down", mi)
++                    if (ps.contains("up", ignoreCase = true)) mark("pick_up", mi)
++                }
++                for (n in b.notes) {
++                    if (!n.isDead) mark("fret", mi)
++                    if (n.fret == 0 && !n.isDead && n.harmonic == null) mark("open", mi)
++                    if (n.isTie) mark("tie", mi)
++                    if (n.isGhost) mark("ghost", mi)
++                    if (n.isDead) mark("dead", mi)
++                    when (n.hpLabel) { "h" -> mark("hammer", mi); "p" -> mark("pull", mi) }
++                    n.slide?.let { s ->
++                        when {
++                            s.endsWith("legato") && !s.startsWith("below") && !s.startsWith("above") -> mark("slide_legato", mi)
++                            s.endsWith("shift") && !s.startsWith("below") && !s.startsWith("above") -> mark("slide_shift", mi)
++                            s.startsWith("below") || s.startsWith("above") -> mark("slide_in", mi)
++                            s == "downwards" || s == "upwards" -> mark("slide_out", mi)
++                            else -> mark("slide_legato", mi)
++                        }
++                    }
++                    if (n.bendTone > 0) when {
++                        n.preBend -> mark("prebend", mi)
++                        n.bendRelease -> mark("bend_release", mi)
++                        else -> mark("bend", mi)
++                    }
++                    if (n.vibrato) mark("vibrato", mi)
++                    if (n.wideVibrato) mark("wide_vibrato", mi)
++                    if (n.trill) mark("trill", mi)
++                    if (n.staccato) mark("staccato", mi)
++                    when (n.accent) { 1 -> mark("accent", mi); 2 -> mark("heavy_accent", mi) }
++                    when (n.harmonic) {
++                        null -> Unit
++                        "natural" -> mark("harmonic_natural", mi)
++                        "artificial" -> mark("harmonic_artificial", mi)
++                        "pinch" -> mark("harmonic_pinch", mi)
++                        "tapped" -> mark("harmonic_tapped", mi)
++                        "semi" -> mark("harmonic_semi", mi)
++                        else -> mark("harmonic_artificial", mi)
++                    }
++                }
++            }
++        }
++        return found
++    }
++
++    // ── Demo bars ─────────────────────────────────────────────────────────────
++
++    private const val Q = TabParser.TICKS_PER_QUARTER
++
++    /** A note in a demo bar: fret on string [row] of [ref] (pitch from its tuning). */
++    private class DemoNote(
++        val row: Int, val fret: Int,
++        val tie: Boolean = false, val ghost: Boolean = false, val dead: Boolean = false,
++        val accent: Int = 0, val hp: String? = null, val slide: String? = null, val nextFret: Int? = null,
++        val harmonic: String? = null, val harmonicFret: Double? = null,
++        val bend: List<Int> = emptyList(), val bendRelease: Boolean = false, val preBend: Boolean = false,
++        val staccato: Boolean = false, val vibrato: Boolean = false, val wideVibrato: Boolean = false, val trill: Boolean = false,
++        val drumId: Int? = null,
++    )
++
++    private class DemoBeat(
++        val quarters: Double,
++        val notes: List<DemoNote>,
++        val palmMute: Boolean = false, val letRing: Boolean = false, val vibrato: Boolean = false,
++        val tapping: Boolean = false, val tremolo: Boolean = false, val whammy: Boolean = false,
++        val down: Boolean = false, val up: Boolean = false, val pick: String? = null,
++        val velocity: String? = null, val tuplet: Int? = null,
++        val graces: List<DemoNote> = emptyList(),
++    )
++
++    /**
++     * A one- or two-bar example of [item], for the instrument of [ref] (its program, tuning and
++     * capo). Returns null when there's nothing to hear (it can't happen for listed items).
++     */
++    fun demoTrack(item: Item, ref: RenderedTrack): RenderedTrack? {
++        val family = ref.family
++        val drums = ref.isDrums
++        val bass = family == TabParser.InstrumentFamily.BASS
++        val strings = ref.numStrings.coerceAtLeast(1)
++        // A middle string (G on guitar, D on bass) at a comfortable fret.
++        val row = if (drums) 0 else if (bass) (strings - 3).coerceAtLeast(0) else (strings / 2 - 1).coerceIn(0, strings - 1)
++        val f = if (bass) 5 else 7
++        fun n(fret: Int = f, r: Int = row) = DemoNote(r, fret)
++        val beats: List<DemoBeat> = if (drums) {
++            val id = item.drumId
++            val snare = 38
++            when {
++                id != null -> listOf(DemoBeat(1.0, listOf(DemoNote(0, id, drumId = id))), DemoBeat(1.0, listOf(DemoNote(0, id, drumId = id))))
++                item.id == "accent" -> listOf(DemoBeat(1.0, listOf(DemoNote(0, snare, drumId = snare))), DemoBeat(1.0, listOf(DemoNote(0, snare, accent = 2, drumId = snare))))
++                item.id == "ghost" -> listOf(DemoBeat(0.5, listOf(DemoNote(0, snare, drumId = snare))), DemoBeat(0.5, listOf(DemoNote(0, snare, ghost = true, drumId = snare))), DemoBeat(0.5, listOf(DemoNote(0, snare, ghost = true, drumId = snare))), DemoBeat(0.5, listOf(DemoNote(0, snare, drumId = snare))))
++                item.id == "grace" -> listOf(DemoBeat(1.0, listOf(DemoNote(0, snare, drumId = snare)), graces = listOf(DemoNote(0, snare, drumId = snare))), DemoBeat(1.0, listOf(DemoNote(0, snare, drumId = snare)), graces = listOf(DemoNote(0, snare, drumId = snare))))
++                item.id == "dynamics" -> listOf(DemoBeat(1.0, listOf(DemoNote(0, snare, drumId = snare)), velocity = "p"), DemoBeat(1.0, listOf(DemoNote(0, snare, drumId = snare)), velocity = "mf"), DemoBeat(1.0, listOf(DemoNote(0, snare, drumId = snare)), velocity = "ff"))
++                item.id == "triplet" -> List(3) { DemoBeat(2.0 / 3.0, listOf(DemoNote(0, snare, drumId = snare)), tuplet = 3) } + DemoBeat(1.0, listOf(DemoNote(0, 36, drumId = 36)))
++                else -> listOf(DemoBeat(1.0, listOf(DemoNote(0, 36, drumId = 36))), DemoBeat(1.0, listOf(DemoNote(0, snare, drumId = snare))))
++            }
++        } else when (item.id) {
++            "fret" -> listOf(DemoBeat(1.0, listOf(n(f))), DemoBeat(1.0, listOf(n(f + 2))), DemoBeat(1.0, listOf(n(f + 4))))
++            "open" -> listOf(DemoBeat(1.5, listOf(n(0))), DemoBeat(1.5, listOf(n(0, (row + 1).coerceAtMost(strings - 1)))))
++            "chord" -> listOf(DemoBeat(2.0, chordNotes(strings, bass)), DemoBeat(2.0, chordNotes(strings, bass)))
++            "tie" -> listOf(DemoBeat(1.0, listOf(n())), DemoBeat(2.0, listOf(DemoNote(row, f, tie = true))))
++            "ghost" -> listOf(DemoBeat(0.5, listOf(n())), DemoBeat(0.5, listOf(DemoNote(row, f, ghost = true))), DemoBeat(0.5, listOf(DemoNote(row, f, ghost = true))), DemoBeat(0.5, listOf(n())))
++            "dead" -> listOf(DemoBeat(0.5, listOf(n())), DemoBeat(0.5, listOf(DemoNote(row, f, dead = true))), DemoBeat(0.5, listOf(n())), DemoBeat(0.5, listOf(DemoNote(row, f, dead = true))))
++            "grace" -> listOf(DemoBeat(1.5, listOf(n(f + 2)), graces = listOf(n(f))), DemoBeat(1.5, listOf(n(f + 2)), graces = listOf(n(f))))
++            "hammer" -> listOf(DemoBeat(1.0, listOf(DemoNote(row, f, hp = "h", nextFret = f + 2))), DemoBeat(1.0, listOf(n(f + 2))))
++            "pull" -> listOf(DemoBeat(1.0, listOf(DemoNote(row, f + 2, hp = "p", nextFret = f))), DemoBeat(1.0, listOf(n(f))))
++            "slide_legato" -> listOf(DemoBeat(1.0, listOf(DemoNote(row, f, slide = "legato", nextFret = f + 5))), DemoBeat(1.5, listOf(n(f + 5))))
++            "slide_shift" -> listOf(DemoBeat(1.0, listOf(DemoNote(row, f, slide = "shift", nextFret = f + 5))), DemoBeat(1.5, listOf(n(f + 5))))
++            "slide_in" -> listOf(DemoBeat(1.5, listOf(DemoNote(row, f + 2, slide = "below"))), DemoBeat(1.5, listOf(DemoNote(row, f + 2, slide = "below"))))
++            "slide_out" -> listOf(DemoBeat(2.0, listOf(DemoNote(row, f + 5, slide = "downwards"))))
++            "tapping" -> listOf(DemoBeat(0.5, listOf(DemoNote(row, f + 7, hp = "p", nextFret = f + 3)), tapping = true), DemoBeat(0.5, listOf(DemoNote(row, f + 3, hp = "p", nextFret = f))), DemoBeat(0.5, listOf(DemoNote(row, f, hp = "h", nextFret = f + 7))), DemoBeat(0.5, listOf(DemoNote(row, f + 7)), tapping = true))
++            "trill" -> listOf(DemoBeat(2.0, listOf(DemoNote(row, f, trill = true))))
++            "bend" -> listOf(DemoBeat(2.0, listOf(DemoNote(row, f, bend = listOf(0, 0, 15, 100, 60, 100)))))
++            "bend_release" -> listOf(DemoBeat(2.5, listOf(DemoNote(row, f, bend = listOf(0, 0, 12, 100, 30, 100, 45, 0, 60, 0), bendRelease = true))))
++            "prebend" -> listOf(DemoBeat(2.0, listOf(DemoNote(row, f, bend = listOf(0, 100, 25, 100, 45, 0, 60, 0), preBend = true))))
++            "vibrato" -> listOf(DemoBeat(2.0, listOf(DemoNote(row, f, vibrato = true))))
++            "wide_vibrato" -> listOf(DemoBeat(2.0, listOf(DemoNote(row, f, wideVibrato = true))))
++            "whammy" -> listOf(DemoBeat(2.0, listOf(n()), whammy = true))
++            "harmonic_natural" -> listOf(DemoBeat(1.5, listOf(DemoNote(row, 12, harmonic = "natural"))), DemoBeat(1.5, listOf(DemoNote((row + 1).coerceAtMost(strings - 1), 12, harmonic = "natural"))))
++            "harmonic_artificial" -> listOf(DemoBeat(2.0, listOf(DemoNote(row, 5, harmonic = "artificial", harmonicFret = 17.0))))
++            "harmonic_pinch" -> listOf(DemoBeat(2.0, listOf(DemoNote(row, f, harmonic = "pinch", vibrato = true))))
++            "harmonic_tapped" -> listOf(DemoBeat(2.0, listOf(DemoNote(row, 5, harmonic = "tapped", harmonicFret = 17.0))))
++            "harmonic_semi" -> listOf(DemoBeat(2.0, listOf(DemoNote(row, f, harmonic = "semi"))))
++            "palm_mute" -> List(6) { DemoBeat(0.5, listOf(n(0, strings - 1)), palmMute = true) }
++            "let_ring" -> List(4) { k -> DemoBeat(0.5, listOf(n(listOf(0, 2, 2, 0)[k], (strings - 1 - k).coerceAtLeast(0))), letRing = true) }
++            "staccato" -> List(4) { DemoBeat(0.5, listOf(DemoNote(row, f, staccato = true))) }
++            "accent" -> List(4) { k -> DemoBeat(0.5, listOf(DemoNote(row, f, accent = if (k % 2 == 0) 1 else 0))) }
++            "heavy_accent" -> List(4) { k -> DemoBeat(0.5, listOf(DemoNote(row, f, accent = if (k == 0) 2 else 0))) }
++            "pick_down" -> List(4) { DemoBeat(0.5, listOf(n()), pick = "down") }
++            "pick_up" -> List(4) { DemoBeat(0.5, listOf(n()), pick = "up") }
++            "strum_down" -> listOf(DemoBeat(2.0, chordNotes(strings, bass), down = true))
++            "strum_up" -> listOf(DemoBeat(2.0, chordNotes(strings, bass), up = true))
++            "tremolo_picking" -> listOf(DemoBeat(2.0, listOf(n()), tremolo = true))
++            "dynamics" -> listOf(DemoBeat(1.0, listOf(n()), velocity = "p"), DemoBeat(1.0, listOf(n()), velocity = "mf"), DemoBeat(1.0, listOf(n()), velocity = "ff"))
++            "triplet" -> List(3) { k -> DemoBeat(2.0 / 3.0, listOf(n(f + k * 2)), tuplet = 3) } + DemoBeat(1.0, listOf(n(f + 5)))
++            "repeat" -> listOf(DemoBeat(1.0, listOf(n(f))), DemoBeat(1.0, listOf(n(f + 2))))
++            else -> listOf(DemoBeat(1.0, listOf(n())))
++        }
++        return build(ref, beats, repeat = item.id == "repeat")
++    }
++
++    /** A playable chord on the lowest strings (power chord on bass). */
++    private fun chordNotes(strings: Int, bass: Boolean): List<DemoNote> {
++        val low = strings - 1
++        return if (bass) listOf(DemoNote(low, 3), DemoNote(low - 1, 5))
++        else listOf(DemoNote(low, 3), DemoNote(low - 1, 2), DemoNote(low - 2, 0), DemoNote(low - 3, 0), DemoNote(low - 4, 3).takeIf { strings >= 6 }).filterNotNull()
++    }
++
++    private fun build(ref: RenderedTrack, beats: List<DemoBeat>, repeat: Boolean): RenderedTrack {
++        val drums = ref.isDrums
++        val capo = ref.capo ?: 0
++        fun pitchOf(d: DemoNote): Int =
++            if (drums) TabParser.drumArticulation(d.drumId ?: d.fret).gm
++            else ((ref.tuning.getOrNull(d.row) ?: listOf(64, 59, 55, 50, 45, 40, 35, 30).getOrElse(d.row) { 40 }) + capo + d.fret).coerceIn(0, 127)
++        fun note(d: DemoNote): RenderedNote {
++            val art = if (drums) TabParser.drumArticulation(d.drumId ?: d.fret) else null
++            return RenderedNote(
++                row = d.row,
++                fret = d.fret,
++                label = if (drums) "" else if (d.dead) "x" else d.fret.toString(),
++                staffPos = art?.staffPos ?: 0f,
++                pitch = pitchOf(d),
++                isDead = d.dead,
++                isGhost = d.ghost,
++                isTie = d.tie,
++                accent = d.accent,
++                hpLabel = d.hp,
++                slide = d.slide,
++                harmonic = d.harmonic,
++                bendTone = d.bend.filterIndexed { i, _ -> i % 2 == 1 }.maxOrNull() ?: 0,
++                bendRelease = d.bendRelease,
++                preBend = d.preBend,
++                staccato = d.staccato,
++                vibrato = d.vibrato,
++                wideVibrato = d.wideVibrato,
++                trill = d.trill,
++                drumGlyph = art?.glyph ?: TabParser.DrumGlyph.HEAD,
++                bendPoints = d.bend,
++                nextFret = d.nextFret,
++                harmonicFret = d.harmonicFret,
++            )
++        }
++        val measures = ArrayList<RenderedMeasure>()
++        val slots = ArrayList<BeatSlot>()
++        val allBeats = ArrayList<RenderedBeat>()
++        var tick = 0L
++        beats.forEachIndexed { i, b ->
++            val dur = (b.quarters * Q).toLong()
++            val beat = RenderedBeat(
++                index = i,
++                onsetTicks = tick,
++                durationTicks = dur,
++                durationFraction = b.quarters / 4.0,
++                dots = 0,
++                tuplet = b.tuplet,
++                isRest = false,
++                palmMute = b.palmMute,
++                letRing = b.letRing,
++                vibrato = b.vibrato,
++                pickStroke = b.pick,
++                velocity = b.velocity,
++                tapping = b.tapping,
++                upStroke = b.up,
++                downStroke = b.down,
++                tremoloPicking = b.tremolo,
++                tremoloBar = b.whammy,
++                notes = b.notes.map(::note),
++            )
++            val graces = b.graces.map { g ->
++                RenderedBeat(index = i, onsetTicks = tick, durationTicks = Q / 8, durationFraction = 1.0 / 32, dots = 0, tuplet = null,
++                    isRest = false, isGrace = true, palmMute = false, vibrato = false, pickStroke = null, velocity = null, notes = listOf(note(g)))
++            }
++            slots += BeatSlot(tick, dur, listOf(beat), graces)
++            allBeats += beat
++            tick += dur
++        }
++        // Round the bar up to whole quarters, with a short tail so the last note can ring.
++        val quarters = ((tick + Q - 1) / Q + 1).coerceIn(2, 8)
++        val bpm = 96.0
++        measures += RenderedMeasure(
++            index = 0, timeSignature = listOf(quarters.toInt(), 4), marker = null,
++            repeatStart = repeat, repeatCount = if (repeat) 2 else null,
++            bpm = bpm, lengthTicks = quarters * Q, slots = slots, beats = allBeats,
++        )
++        return RenderedTrack(
++            name = "demo", instrument = ref.instrument, instrumentId = ref.instrumentId, family = ref.family,
++            numStrings = ref.numStrings, tuning = ref.tuning, capo = ref.capo, bpm = bpm.toInt(), measures = measures,
++        )
++    }
++}
+diff --git a/app/src/main/java/com/theveloper/pixelplay/data/songsterr/StringSynth.kt b/app/src/main/java/com/theveloper/pixelplay/data/songsterr/StringSynth.kt
+index f212fd8..117c24c 100644
+--- a/app/src/main/java/com/theveloper/pixelplay/data/songsterr/StringSynth.kt
++++ b/app/src/main/java/com/theveloper/pixelplay/data/songsterr/StringSynth.kt
+@@ -441,10 +441,11 @@ class StringScoreBuilder(private val pitchShift: Int) {
+ /**
+  * Renders a [StringScore] in real time. Call [render] from the audio thread only.
+  */
+-class StringSynthEngine(private val score: StringScore, private val sr: Int = StringSynth.SAMPLE_RATE) {
++class StringSynthEngine(private val score: StringScore, private val sr: Int = StringSynth.SAMPLE_RATE) :
++    com.theveloper.pixelplay.data.soundfont.ScorePcmSource {
+ 
+     /** Score time of the next rendered frame (ms). Shifted by [nudge] to follow the MIDI player. */
+-    @Volatile var shiftMs: Double = 0.0
++    @Volatile override var shiftMs: Double = 0.0
+     private var frame: Long = 0
+ 
+     private val block = 32
+@@ -455,7 +456,7 @@ class StringSynthEngine(private val score: StringScore, private val sr: Int = St
+     private var limEnv = 0f
+ 
+     /** Frames rendered so far. */
+-    val framesRendered: Long get() = frame
++    override val framesRendered: Long get() = frame
+ 
+     /** Score ms at output frame [f] (with the current shift). */
+     fun scoreMsAt(f: Long): Double = f * 1000.0 / sr + shiftMs
+@@ -466,7 +467,7 @@ class StringSynthEngine(private val score: StringScore, private val sr: Int = St
+     }
+ 
+     /** Fills [out] with interleaved stereo 16-bit frames. */
+-    fun render(out: ShortArray, frames: Int) {
++    override fun render(out: ShortArray, frames: Int) {
+         var done = 0
+         while (done < frames) {
+             val n = min(block, frames - done)
+diff --git a/app/src/main/java/com/theveloper/pixelplay/data/songsterr/TabParser.kt b/app/src/main/java/com/theveloper/pixelplay/data/songsterr/TabParser.kt
+index a1c732c..5826d5b 100644
+--- a/app/src/main/java/com/theveloper/pixelplay/data/songsterr/TabParser.kt
++++ b/app/src/main/java/com/theveloper/pixelplay/data/songsterr/TabParser.kt
+@@ -88,6 +88,9 @@ object TabParser {
+         DrumArticulation(56, "Cowbell", 56, DrumGlyph.TRIANGLE, 0.5f),
+     ).associateBy { it.id }
+ 
++    /** Every named kit piece, in kit order (bass drums, snares, toms, hi-hats, cymbals, percussion). */
++    val drumArticulations: List<DrumArticulation> get() = ARTICULATIONS.values.toList()
++
+     fun drumArticulation(id: Int): DrumArticulation = ARTICULATIONS[id]
+         ?: DrumArticulation(id, "Percussion $id", if (id in 27..87) id else 38, DrumGlyph.HEAD, 1.5f)
+ 
+diff --git a/app/src/main/java/com/theveloper/pixelplay/data/soundfont/MidiEvents.kt b/app/src/main/java/com/theveloper/pixelplay/data/soundfont/MidiEvents.kt
+new file mode 100644
+index 0000000..5049861
+--- /dev/null
++++ b/app/src/main/java/com/theveloper/pixelplay/data/soundfont/MidiEvents.kt
+@@ -0,0 +1,109 @@
++package com.theveloper.pixelplay.data.soundfont
++
++/**
++ * Channel events of a Standard MIDI File, in playback order with their time in ms (tempo changes
++ * applied). Meta and SysEx events are dropped. Format 0 and 1 files are both read.
++ */
++class MidiEvents private constructor(
++    val timesMs: DoubleArray,
++    /** status | d1 << 8 | d2 << 16 */
++    val packed: IntArray,
++) {
++    val size: Int get() = timesMs.size
++
++    fun status(i: Int) = packed[i] and 0xFF
++    fun data1(i: Int) = (packed[i] shr 8) and 0xFF
++    fun data2(i: Int) = (packed[i] shr 16) and 0xFF
++
++    /** Index of the first event at or after [ms]. */
++    fun indexAt(ms: Double): Int {
++        var lo = 0
++        var hi = timesMs.size
++        while (lo < hi) {
++            val mid = (lo + hi) ushr 1
++            if (timesMs[mid] < ms) lo = mid + 1 else hi = mid
++        }
++        return lo
++    }
++
++    companion object {
++        fun parse(bytes: ByteArray): MidiEvents {
++            fun u8(i: Int) = bytes[i].toInt() and 0xFF
++            fun u16(i: Int) = (u8(i) shl 8) or u8(i + 1)
++            fun u32(i: Int) = (u8(i) shl 24) or (u8(i + 1) shl 16) or (u8(i + 2) shl 8) or u8(i + 3)
++            require(bytes.size >= 14 && String(bytes, 0, 4, Charsets.US_ASCII) == "MThd") { "Not a MIDI file" }
++            val headerLen = u32(4)
++            val tracks = u16(10)
++            val division = u16(12)
++            require(division and 0x8000 == 0) { "SMPTE time is not supported" }
++            val ppq = division.coerceAtLeast(1)
++
++            // (tick, order, packed) for channel events; (tick, usPerQuarter) for tempo.
++            class Raw(val tick: Long, val seq: Int, val packed: Int)
++            val raws = ArrayList<Raw>()
++            val tempos = ArrayList<Pair<Long, Int>>()
++            var p = 8 + headerLen
++            var seq = 0
++            repeat(tracks) {
++                if (p + 8 > bytes.size || String(bytes, p, 4, Charsets.US_ASCII) != "MTrk") return@repeat
++                val len = u32(p + 4)
++                var i = p + 8
++                val end = minOf(bytes.size, i + len)
++                var tick = 0L
++                var running = 0
++                fun vlq(): Long {
++                    var v = 0L
++                    while (i < end) {
++                        val b = u8(i++)
++                        v = (v shl 7) or (b and 0x7F).toLong()
++                        if (b and 0x80 == 0) break
++                    }
++                    return v
++                }
++                while (i < end) {
++                    tick += vlq()
++                    if (i >= end) break
++                    var status = u8(i)
++                    if (status < 0x80) status = running else i++
++                    when {
++                        status == 0xFF -> {
++                            val type = u8(i++)
++                            val l = vlq().toInt()
++                            if (type == 0x51 && l == 3 && i + 3 <= end) tempos += tick to ((u8(i) shl 16) or (u8(i + 1) shl 8) or u8(i + 2))
++                            i += l
++                            if (type == 0x2F) i = end
++                        }
++                        status == 0xF0 || status == 0xF7 -> { val l = vlq().toInt(); i += l }
++                        status >= 0x80 -> {
++                            running = status
++                            val type = status and 0xF0
++                            val d1 = if (i < end) u8(i++) else 0
++                            val d2 = if (type != 0xC0 && type != 0xD0 && i < end) u8(i++) else 0
++                            raws += Raw(tick, seq++, status or (d1 shl 8) or (d2 shl 16))
++                        }
++                        else -> i++
++                    }
++                }
++                p += 8 + len
++            }
++            raws.sortWith(compareBy<Raw>({ it.tick }, { it.seq }))
++            tempos.sortBy { it.first }
++
++            val times = DoubleArray(raws.size)
++            var tIdx = 0
++            var usPerQ = 500_000
++            var lastTick = 0L
++            var ms = 0.0
++            for ((k, r) in raws.withIndex()) {
++                while (tIdx < tempos.size && tempos[tIdx].first <= r.tick) {
++                    ms += (tempos[tIdx].first - lastTick) * usPerQ / 1000.0 / ppq
++                    lastTick = tempos[tIdx].first
++                    usPerQ = tempos[tIdx].second
++                    tIdx++
++                }
++                times[k] = ms + (r.tick - lastTick) * usPerQ / 1000.0 / ppq
++            }
++            return MidiEvents(times, IntArray(raws.size) { raws[it].packed })
++        }
++    }
++}
+diff --git a/app/src/main/java/com/theveloper/pixelplay/data/soundfont/SampledScoreEngine.kt b/app/src/main/java/com/theveloper/pixelplay/data/soundfont/SampledScoreEngine.kt
+new file mode 100644
+index 0000000..2d08622
+--- /dev/null
++++ b/app/src/main/java/com/theveloper/pixelplay/data/soundfont/SampledScoreEngine.kt
+@@ -0,0 +1,210 @@
++package com.theveloper.pixelplay.data.soundfont
++
++import com.theveloper.pixelplay.data.songsterr.Attack
++import com.theveloper.pixelplay.data.songsterr.StringEvent
++import com.theveloper.pixelplay.data.songsterr.StringPartScore
++import com.theveloper.pixelplay.data.songsterr.StringScore
++import com.theveloper.pixelplay.data.songsterr.StringSynth
++import kotlin.math.roundToInt
++
++/**
++ * Something that renders a song's audio on its own score clock (file ms), which a player keeps in
++ * step with the MIDI player's clock through [shiftMs].
++ */
++interface ScorePcmSource {
++    /** Score time of the next rendered frame minus its frame time (ms); nudged to follow the clock. */
++    var shiftMs: Double
++    /** Frames rendered so far. */
++    val framesRendered: Long
++    /** Fills [out] with interleaved stereo 16-bit frames. Audio thread only. */
++    fun render(out: ShortArray, frames: Int)
++}
++
++/**
++ * Plays a tab with recorded instrument samples from a [SoundFont]:
++ *  - every MIDI part of the file (drums, keys, strings, vocals, clicks, count-in) through the
++ *    General MIDI presets, and
++ *  - guitar and bass parts from their [StringScore]: the same per-string events the modelled
++ *    strings use (bends, releases, vibrato, slides, hammer-ons, pull-offs, taps, harmonics, palm
++ *    mutes, dead and ghost notes, let ring), played on real guitar / bass samples whose pitch
++ *    glides continuously, one voice per string like a real instrument.
++ */
++class SampledScoreEngine(
++    font: SoundFont,
++    private val midi: MidiEvents?,
++    strings: StringScore?,
++    private val sr: Int = 44_100,
++) : ScorePcmSource {
++
++    private val synth = SoundFontSynth(font, sr)
++
++    @Volatile override var shiftMs: Double = 0.0
++    private var frame = 0L
++    override val framesRendered: Long get() = frame
++
++    private var midiIndex = 0
++    private val strings: List<StringVoice> = strings?.parts.orEmpty().flatMap { part ->
++        part.strings.mapIndexed { s, events -> StringVoice(part, s, events) }
++    }
++
++    private val bufL = FloatArray(SoundFontSynth.BLOCK)
++    private val bufR = FloatArray(SoundFontSynth.BLOCK)
++
++    private fun scoreMsAt(f: Long): Double = f * 1000.0 / sr + shiftMs
++
++    override fun render(out: ShortArray, frames: Int) {
++        var done = 0
++        while (done < frames) {
++            val n = minOf(SoundFontSynth.BLOCK, frames - done)
++            val t = scoreMsAt(frame)
++            val tEnd = scoreMsAt(frame + n)
++            dispatchMidi(tEnd)
++            for (sv in strings) sv.update(t, tEnd)
++            java.util.Arrays.fill(bufL, 0, n, 0f)
++            java.util.Arrays.fill(bufR, 0, n, 0f)
++            synth.render(bufL, bufR, 0, n)
++            for (i in 0 until n) {
++                val o = (done + i) * 2
++                out[o] = (bufL[i].coerceIn(-1f, 1f) * 32767f).toInt().toShort()
++                out[o + 1] = (bufR[i].coerceIn(-1f, 1f) * 32767f).toInt().toShort()
++            }
++            frame += n
++            done += n
++        }
++    }
++
++    /** Float render for tests and offline use (adds into the arrays). */
++    fun renderFloat(outL: FloatArray, outR: FloatArray, frames: Int) {
++        var done = 0
++        while (done < frames) {
++            val n = minOf(SoundFontSynth.BLOCK, frames - done)
++            val t = scoreMsAt(frame)
++            val tEnd = scoreMsAt(frame + n)
++            dispatchMidi(tEnd)
++            for (sv in strings) sv.update(t, tEnd)
++            synth.render(outL, outR, done, n)
++            frame += n
++            done += n
++        }
++    }
++
++    private fun dispatchMidi(untilMs: Double) {
++        val m = midi ?: return
++        while (midiIndex < m.size && m.timesMs[midiIndex] < untilMs) {
++            synth.midi(m.status(midiIndex), m.data1(midiIndex), m.data2(midiIndex))
++            midiIndex++
++        }
++    }
++
++    /** One string of one part: at most one sounding note, like the real string. */
++    private inner class StringVoice(val part: StringPartScore, val stringIndex: Int, val events: List<StringEvent>) {
++        private var next = 0
++        private var note: SoundFontSynth.Note? = null
++        private var current: StringEvent? = null
++        private var stopped = true
++        /** Semitones added to the event pitch for the preset playing it (see [GUITAR_HARMONICS]). */
++        private var transpose = 0f
++        private val bass = with(StringSynth) { part.tone.isBass }
++
++        fun update(t: Double, tEnd: Double) {
++            // Start every event that begins in this block (several in a fast trill).
++            while (next < events.size && events[next].startMs < tEnd) {
++                val e = events[next++]
++                // Already over (the clock jumped past it): skip without sounding.
++                if (e.endMs < t - 5.0 && e.endMs.isFinite()) continue
++                start(e)
++            }
++            val e = current ?: return
++            val n = note ?: return
++            if (!stopped) {
++                n.setPitch(e.pitch + transpose + e.offsetAt((t - e.startMs).coerceAtLeast(0.0), e.nominalMs))
++                if (e.endMs.isFinite() && t >= e.endMs) {
++                    // The fretting hand lifts: a quick, click-free stop.
++                    n.damp(if (bass) 90f else 70f)
++                    stopped = true
++                }
++            }
++        }
++
++        private fun start(e: StringEvent) {
++            val prev = note
++            val continues = (e.attack == Attack.TIE || e.attack == Attack.SLIDE) && prev != null && prev.isActive && !stopped
++            if (continues) {
++                current = e
++                return
++            }
++            val legato = e.attack == Attack.HAMMER || e.attack == Attack.PULL || e.attack == Attack.SLIDE || e.attack == Attack.TIE
++            prev?.damp(if (legato) 6f else 12f)
++
++            val tone = part.tone
++            var program = programFor(tone)
++            var gain = part.gain
++            var darken = 0f
++            var choke = 0f
++            var velocity = e.velocity
++            when {
++                e.dead -> {
++                    // A muted "chk": the string's own sound, choked almost at once.
++                    if (!bass && tone != StringSynth.Tone.OVERDRIVE && tone != StringSynth.Tone.DISTORTION) program = MUTED_GUITAR
++                    darken = -2400f
++                    choke = if (bass) 45f else 30f
++                    velocity *= 0.8f
++                }
++                e.harmonic -> {
++                    // Distorted pinch harmonics squeal on the amp; clean ones ring bell-like.
++                    if (tone != StringSynth.Tone.OVERDRIVE && tone != StringSynth.Tone.DISTORTION) program = GUITAR_HARMONICS
++                    gain *= 1.1f
++                }
++                e.palmMute -> when {
++                    bass -> { darken = -1500f; choke = 220f }
++                    tone == StringSynth.Tone.OVERDRIVE || tone == StringSynth.Tone.DISTORTION -> { darken = -1800f; choke = 150f }
++                    else -> program = MUTED_GUITAR
++                }
++            }
++            when (e.attack) {
++                Attack.HAMMER, Attack.PULL, Attack.SLIDE, Attack.TIE -> velocity *= 0.78f
++                Attack.TAP -> velocity *= 0.9f
++                else -> Unit
++            }
++            // General MIDI "Guitar Harmonics" sounds two octaves above the key it's given, while
++            // the event already carries the harmonic's real pitch.
++            transpose = if (program == GUITAR_HARMONICS) -24f else 0f
++            val key = (e.pitch + transpose).roundToInt().coerceIn(0, 127)
++            val midiVel = (28 + velocity.coerceIn(0f, 1f) * 99f).roundToInt().coerceIn(1, 127)
++            val style = SoundFontSynth.NoteStyle(
++                pan = part.pan,
++                gain = gain,
++                // Legato notes have no pick attack: start past the sample's pick transient.
++                skipMs = when (e.attack) { Attack.HAMMER, Attack.PULL, Attack.SLIDE, Attack.TIE -> 28f; Attack.TAP -> 12f; else -> 0f },
++                fadeInMs = when (e.attack) { Attack.HAMMER, Attack.PULL, Attack.SLIDE, Attack.TIE -> 5f; Attack.TAP -> 3f; else -> 0f },
++                darkenCents = darken,
++                chokeMs = choke,
++                reverbSend = if (bass) 0.08f else 0.2f,
++            )
++            val startPitch = e.pitch + transpose + e.offsetAt(0.0, e.nominalMs)
++            note = synth.startNote(0, program, key, midiVel, startPitch, style)
++            current = e
++            stopped = false
++        }
++    }
++
++    companion object {
++        const val MUTED_GUITAR = 28
++        const val GUITAR_HARMONICS = 31
++
++        /** General MIDI program for a modelled string tone. */
++        fun programFor(tone: StringSynth.Tone): Int = when (tone) {
++            StringSynth.Tone.NYLON -> 24
++            StringSynth.Tone.STEEL -> 25
++            StringSynth.Tone.JAZZ -> 26
++            StringSynth.Tone.CLEAN -> 27
++            StringSynth.Tone.MUTED -> 28
++            StringSynth.Tone.OVERDRIVE -> 29
++            StringSynth.Tone.DISTORTION -> 30
++            StringSynth.Tone.BASS_FINGER -> 33
++            StringSynth.Tone.BASS_PICK -> 34
++            StringSynth.Tone.FRETLESS -> 35
++            StringSynth.Tone.SLAP -> 36
++        }
++    }
++}
+diff --git a/app/src/main/java/com/theveloper/pixelplay/data/soundfont/SoundFont.kt b/app/src/main/java/com/theveloper/pixelplay/data/soundfont/SoundFont.kt
+new file mode 100644
+index 0000000..a79d77d
+--- /dev/null
++++ b/app/src/main/java/com/theveloper/pixelplay/data/soundfont/SoundFont.kt
+@@ -0,0 +1,346 @@
++package com.theveloper.pixelplay.data.soundfont
++
++import java.io.File
++import java.io.RandomAccessFile
++import java.nio.ByteBuffer
++import java.nio.ByteOrder
++import java.nio.ShortBuffer
++import java.nio.channels.FileChannel
++
++/**
++ * A SoundFont 2 bank (for example GeneralUser GS): recorded instrument samples plus the zones
++ * that say which sample plays which key, and how (tuning, loop, envelope, filter, pan).
++ *
++ * The sample data is memory-mapped, not copied: a 30 MB bank costs almost no heap and pages in
++ * only what is played. Every preset is flattened at load into [Region]s, so finding the samples
++ * for a note is a short scan with no allocation on the audio thread.
++ *
++ * Pure JVM (no Android), so it can be tested off-device.
++ */
++class SoundFont private constructor(
++    /** 16-bit mono sample points, little-endian, for the whole bank. */
++    internal val samples: ShortBuffer,
++    private val presets: Map<Int, Preset>,
++    val name: String,
++) {
++
++    /** A playable sample zone: the result of combining a preset zone with an instrument zone. */
++    class Region(
++        val keyLo: Int, val keyHi: Int,
++        val velLo: Int, val velHi: Int,
++        /** Every generator value (SoundFont 2.01 §8.1.3), preset values already added. */
++        val gen: IntArray,
++        val sample: SampleHeader,
++    ) {
++        fun matches(key: Int, vel: Int) = key in keyLo..keyHi && vel in velLo..velHi
++    }
++
++    class SampleHeader(
++        val name: String,
++        val start: Int, val end: Int,
++        val loopStart: Int, val loopEnd: Int,
++        val sampleRate: Int,
++        val originalPitch: Int,
++        val pitchCorrection: Int,
++        val type: Int,
++    )
++
++    class Preset(val name: String, val bank: Int, val program: Int, val regions: List<Region>)
++
++    /** Bank/program lookup with General MIDI fallbacks (drums: bank 128). */
++    fun preset(bank: Int, program: Int): Preset? =
++        presets[key(bank, program)]
++            ?: if (bank == DRUM_BANK) presets[key(DRUM_BANK, 0)] else presets[key(0, program)]
++            ?: presets[key(0, 0)]
++
++    fun hasPreset(bank: Int, program: Int): Boolean = presets.containsKey(key(bank, program))
++
++    /** Regions of [preset] that play [key] at [vel], into [out] (cleared first). */
++    fun regionsFor(preset: Preset, key: Int, vel: Int, out: MutableList<Region>) {
++        out.clear()
++        for (r in preset.regions) if (r.matches(key, vel)) out += r
++    }
++
++    val sampleCount: Int get() = samples.limit()
++
++    companion object {
++        const val DRUM_BANK = 128
++        private fun key(bank: Int, program: Int) = bank * 1000 + program
++
++        // Generator ids used below (SoundFont 2.01 §8.1.2).
++        const val START_OFFSET = 0
++        const val END_OFFSET = 1
++        const val START_LOOP_OFFSET = 2
++        const val END_LOOP_OFFSET = 3
++        const val START_COARSE = 4
++        const val MOD_LFO_TO_PITCH = 5
++        const val VIB_LFO_TO_PITCH = 6
++        const val MOD_ENV_TO_PITCH = 7
++        const val FILTER_FC = 8
++        const val FILTER_Q = 9
++        const val MOD_LFO_TO_FILTER = 10
++        const val MOD_ENV_TO_FILTER = 11
++        const val END_COARSE = 12
++        const val MOD_LFO_TO_VOLUME = 13
++        const val REVERB_SEND = 16
++        const val PAN = 17
++        const val DELAY_MOD_LFO = 21
++        const val FREQ_MOD_LFO = 22
++        const val DELAY_VIB_LFO = 23
++        const val FREQ_VIB_LFO = 24
++        const val DELAY_MOD_ENV = 25
++        const val ATTACK_MOD_ENV = 26
++        const val HOLD_MOD_ENV = 27
++        const val DECAY_MOD_ENV = 28
++        const val SUSTAIN_MOD_ENV = 29
++        const val RELEASE_MOD_ENV = 30
++        const val KEY_TO_MOD_ENV_HOLD = 31
++        const val KEY_TO_MOD_ENV_DECAY = 32
++        const val DELAY_VOL_ENV = 33
++        const val ATTACK_VOL_ENV = 34
++        const val HOLD_VOL_ENV = 35
++        const val DECAY_VOL_ENV = 36
++        const val SUSTAIN_VOL_ENV = 37
++        const val RELEASE_VOL_ENV = 38
++        const val KEY_TO_VOL_ENV_HOLD = 39
++        const val KEY_TO_VOL_ENV_DECAY = 40
++        const val INSTRUMENT = 41
++        const val KEY_RANGE = 43
++        const val VEL_RANGE = 44
++        const val START_LOOP_COARSE = 45
++        const val KEYNUM = 46
++        const val VELOCITY = 47
++        const val ATTENUATION = 48
++        const val END_LOOP_COARSE = 50
++        const val COARSE_TUNE = 51
++        const val FINE_TUNE = 52
++        const val SAMPLE_ID = 53
++        const val SAMPLE_MODES = 54
++        const val SCALE_TUNING = 56
++        const val EXCLUSIVE_CLASS = 57
++        const val ROOT_KEY = 58
++        private const val GEN_COUNT = 61
++
++        /** Generators that only exist at instrument level, or are ranges / links: never summed. */
++        private val NON_ADDITIVE = intArrayOf(
++            START_OFFSET, END_OFFSET, START_LOOP_OFFSET, END_LOOP_OFFSET, START_COARSE, END_COARSE,
++            START_LOOP_COARSE, END_LOOP_COARSE, INSTRUMENT, KEY_RANGE, VEL_RANGE, KEYNUM, VELOCITY,
++            SAMPLE_ID, SAMPLE_MODES, EXCLUSIVE_CLASS, ROOT_KEY,
++        ).toHashSet()
++
++        private fun defaults(): IntArray = IntArray(GEN_COUNT).also {
++            it[FILTER_FC] = 13500
++            for (g in intArrayOf(
++                DELAY_MOD_LFO, DELAY_VIB_LFO, DELAY_MOD_ENV, ATTACK_MOD_ENV, HOLD_MOD_ENV, DECAY_MOD_ENV,
++                RELEASE_MOD_ENV, DELAY_VOL_ENV, ATTACK_VOL_ENV, HOLD_VOL_ENV, DECAY_VOL_ENV, RELEASE_VOL_ENV,
++            )) it[g] = -12000
++            it[KEY_RANGE] = 127 shl 8 // lo = 0, hi = 127 (packed hi<<8 | lo)
++            it[VEL_RANGE] = 127 shl 8
++            it[KEYNUM] = -1
++            it[VELOCITY] = -1
++            it[SCALE_TUNING] = 100
++            it[ROOT_KEY] = -1
++        }
++
++        /** Opens and indexes an .sf2 file. Throws on a file that isn't a valid SoundFont 2. */
++        fun load(file: File): SoundFont {
++            RandomAccessFile(file, "r").use { raf ->
++                val channel = raf.channel
++                val map = channel.map(FileChannel.MapMode.READ_ONLY, 0, channel.size()).order(ByteOrder.LITTLE_ENDIAN)
++                return parse(map)
++            }
++        }
++
++        fun parse(buf: ByteBuffer): SoundFont {
++            val b = buf.duplicate().order(ByteOrder.LITTLE_ENDIAN)
++            require(fourcc(b, 0) == "RIFF" && fourcc(b, 8) == "sfbk") { "Not a SoundFont 2 file" }
++            var name = "SoundFont"
++            var smplOffset = -1
++            var smplSize = 0
++            val pdta = HashMap<String, Pair<Int, Int>>() // chunk id -> (offset, size)
++            var pos = 12
++            val end = minOf(b.limit(), 8 + b.getInt(4))
++            while (pos + 8 <= end) {
++                val id = fourcc(b, pos)
++                val size = b.getInt(pos + 4)
++                if (id == "LIST") {
++                    val kind = fourcc(b, pos + 8)
++                    var p = pos + 12
++                    val listEnd = pos + 8 + size
++                    while (p + 8 <= listEnd) {
++                        val sub = fourcc(b, p)
++                        val subSize = b.getInt(p + 4)
++                        when {
++                            kind == "INFO" && sub == "INAM" -> name = string(b, p + 8, subSize)
++                            kind == "sdta" && sub == "smpl" -> { smplOffset = p + 8; smplSize = subSize }
++                            kind == "pdta" -> pdta[sub] = (p + 8) to subSize
++                        }
++                        p += 8 + subSize + (subSize and 1)
++                    }
++                }
++                pos += 8 + size + (size and 1)
++            }
++            require(smplOffset >= 0) { "SoundFont has no sample data" }
++            for (c in listOf("phdr", "pbag", "pgen", "inst", "ibag", "igen", "shdr")) require(c in pdta) { "SoundFont is missing $c" }
++
++            val samplesBuf = b.duplicate().order(ByteOrder.LITTLE_ENDIAN).apply {
++                position(smplOffset)
++                limit(smplOffset + smplSize)
++            }.slice().order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
++
++            // ── Sample headers ──
++            val (shdrOff, shdrSize) = pdta.getValue("shdr")
++            val sampleHeaders = (0 until shdrSize / 46 - 1).map { i ->
++                val o = shdrOff + i * 46
++                SampleHeader(
++                    name = string(b, o, 20),
++                    start = b.getInt(o + 20), end = b.getInt(o + 24),
++                    loopStart = b.getInt(o + 28), loopEnd = b.getInt(o + 32),
++                    sampleRate = b.getInt(o + 36).takeIf { it in 400..200_000 } ?: 44_100,
++                    originalPitch = (b.get(o + 40).toInt() and 0xFF).let { if (it > 127) 60 else it },
++                    pitchCorrection = b.get(o + 41).toInt(),
++                    type = b.getShort(o + 44).toInt() and 0xFFFF,
++                )
++            }
++
++            fun bags(chunk: String): IntArray {
++                val (off, size) = pdta.getValue(chunk)
++                return IntArray(size / 4) { i -> b.getShort(off + i * 4).toInt() and 0xFFFF }
++            }
++            fun gens(chunk: String): List<Pair<Int, Int>> {
++                val (off, size) = pdta.getValue(chunk)
++                return (0 until size / 4).map { i ->
++                    val o = off + i * 4
++                    (b.getShort(o).toInt() and 0xFFFF) to b.getShort(o + 2).toInt()
++                }
++            }
++            val ibag = bags("ibag")
++            val igen = gens("igen")
++            val pbag = bags("pbag")
++            val pgen = gens("pgen")
++
++            /** Generator list of a zone: (id, raw 16-bit amount). Ranges keep lo/hi bytes. */
++            fun zoneGens(bagList: IntArray, genList: List<Pair<Int, Int>>, zone: Int): List<Pair<Int, Int>> {
++                val from = bagList[zone]
++                val to = if (zone + 1 < bagList.size) bagList[zone + 1] else genList.size
++                return (from until to.coerceAtMost(genList.size)).map { genList[it] }
++            }
++            fun apply(target: IntArray, list: List<Pair<Int, Int>>) {
++                for ((id, amount) in list) if (id < GEN_COUNT) {
++                    target[id] = if (id == KEY_RANGE || id == VEL_RANGE) {
++                        // lo byte = low, hi byte = high
++                        val lo = amount and 0xFF
++                        val hi = (amount shr 8) and 0xFF
++                        (hi shl 8) or lo
++                    } else amount
++                }
++            }
++            fun lo(range: Int) = range and 0xFF
++            fun hi(range: Int) = (range shr 8) and 0xFF
++
++            // ── Instruments: each flattened into zones with a sample ──
++            class InstZone(val gen: IntArray, val set: BooleanArray)
++            val (instOff, instSize) = pdta.getValue("inst")
++            val instCount = instSize / 22 - 1
++            val instruments = (0 until instCount).map { i ->
++                val o = instOff + i * 22
++                val firstBag = b.getShort(o + 20).toInt() and 0xFFFF
++                val lastBag = b.getShort(o + 22 + 20).toInt() and 0xFFFF
++                var global: List<Pair<Int, Int>> = emptyList()
++                val zones = ArrayList<InstZone>()
++                for (z in firstBag until lastBag) {
++                    if (z >= ibag.size) break
++                    val list = zoneGens(ibag, igen, z)
++                    val hasSample = list.any { it.first == SAMPLE_ID }
++                    if (!hasSample) {
++                        if (z == firstBag) global = list
++                        continue
++                    }
++                    val g = defaults()
++                    val set = BooleanArray(GEN_COUNT)
++                    apply(g, global); global.forEach { if (it.first < GEN_COUNT) set[it.first] = true }
++                    apply(g, list); list.forEach { if (it.first < GEN_COUNT) set[it.first] = true }
++                    zones += InstZone(g, set)
++                }
++                zones
++            }
++
++            // ── Presets ──
++            val (phdrOff, phdrSize) = pdta.getValue("phdr")
++            val presetCount = phdrSize / 38 - 1
++            val presets = HashMap<Int, Preset>()
++            for (i in 0 until presetCount) {
++                val o = phdrOff + i * 38
++                val presetName = string(b, o, 20)
++                val program = b.getShort(o + 20).toInt() and 0xFFFF
++                val bank = b.getShort(o + 22).toInt() and 0xFFFF
++                val firstBag = b.getShort(o + 24).toInt() and 0xFFFF
++                val lastBag = b.getShort(o + 38 + 24).toInt() and 0xFFFF
++                var global: List<Pair<Int, Int>> = emptyList()
++                val regions = ArrayList<Region>()
++                for (z in firstBag until lastBag) {
++                    if (z >= pbag.size) break
++                    val list = zoneGens(pbag, pgen, z)
++                    val instId = list.firstOrNull { it.first == INSTRUMENT }?.second?.and(0xFFFF)
++                    if (instId == null) {
++                        if (z == firstBag) global = list
++                        continue
++                    }
++                    if (instId !in instruments.indices) continue
++                    // Preset-level values: relative offsets added to the instrument's.
++                    val pg = IntArray(GEN_COUNT)
++                    val pRange = intArrayOf(127 shl 8, 127 shl 8)
++                    for ((id, amount) in global + list) {
++                        if (id >= GEN_COUNT) continue
++                        when (id) {
++                            KEY_RANGE -> pRange[0] = ((amount shr 8 and 0xFF) shl 8) or (amount and 0xFF)
++                            VEL_RANGE -> pRange[1] = ((amount shr 8 and 0xFF) shl 8) or (amount and 0xFF)
++                            else -> pg[id] = amount
++                        }
++                    }
++                    // A zone's own value replaces the global one (not summed twice).
++                    val pZone = IntArray(GEN_COUNT)
++                    val pSet = BooleanArray(GEN_COUNT)
++                    for ((id, amount) in global) if (id < GEN_COUNT && id != KEY_RANGE && id != VEL_RANGE) { pZone[id] = amount; pSet[id] = true }
++                    for ((id, amount) in list) if (id < GEN_COUNT && id != KEY_RANGE && id != VEL_RANGE) { pZone[id] = amount; pSet[id] = true }
++
++                    for (iz in instruments[instId]) {
++                        val g = iz.gen.copyOf()
++                        for (id in 0 until GEN_COUNT) {
++                            if (pSet[id] && id !in NON_ADDITIVE) g[id] += pZone[id]
++                        }
++                        val sampleId = g[SAMPLE_ID] and 0xFFFF
++                        val sh = sampleHeaders.getOrNull(sampleId) ?: continue
++                        if (sh.type and 0x8000 != 0) continue // ROM sample: not in the file
++                        val keyLo = maxOf(lo(g[KEY_RANGE]), lo(pRange[0]))
++                        val keyHi = minOf(hi(g[KEY_RANGE]), hi(pRange[0]))
++                        val velLo = maxOf(lo(g[VEL_RANGE]), lo(pRange[1]))
++                        val velHi = minOf(hi(g[VEL_RANGE]), hi(pRange[1]))
++                        if (keyLo > keyHi || velLo > velHi) continue
++                        regions += Region(keyLo, keyHi, velLo, velHi, g, sh)
++                    }
++                }
++                if (regions.isNotEmpty()) presets.putIfAbsent(key(bank, program), Preset(presetName, bank, program, regions))
++            }
++            require(presets.isNotEmpty()) { "SoundFont has no presets" }
++            return SoundFont(samplesBuf, presets, name)
++        }
++
++        private fun fourcc(b: ByteBuffer, at: Int): String {
++            if (at + 4 > b.limit()) return ""
++            val chars = CharArray(4) { (b.get(at + it).toInt() and 0xFF).toChar() }
++            return String(chars)
++        }
++
++        private fun string(b: ByteBuffer, at: Int, len: Int): String {
++            val sb = StringBuilder()
++            for (i in 0 until len) {
++                if (at + i >= b.limit()) break
++                val c = b.get(at + i).toInt() and 0xFF
++                if (c == 0) break
++                sb.append(c.toChar())
++            }
++            return sb.toString().trim()
++        }
++    }
++}
+diff --git a/app/src/main/java/com/theveloper/pixelplay/data/soundfont/SoundFontStore.kt b/app/src/main/java/com/theveloper/pixelplay/data/soundfont/SoundFontStore.kt
+new file mode 100644
+index 0000000..e690c89
+--- /dev/null
++++ b/app/src/main/java/com/theveloper/pixelplay/data/soundfont/SoundFontStore.kt
+@@ -0,0 +1,170 @@
++package com.theveloper.pixelplay.data.soundfont
++
++import android.content.Context
++import android.util.Log
++import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.Job
++import kotlinx.coroutines.SupervisorJob
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.StateFlow
++import kotlinx.coroutines.flow.asStateFlow
++import kotlinx.coroutines.isActive
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.sync.Mutex
++import kotlinx.coroutines.sync.withLock
++import kotlinx.coroutines.withContext
++import java.io.File
++import java.net.HttpURLConnection
++import java.net.URL
++import java.security.MessageDigest
++
++/**
++ * The recorded-instrument bank used by the tab Synth and the notation demos: GeneralUser GS
++ * 2.0.3 by S. Christian Collins (free for any use, see its license). It isn't shipped in the APK;
++ * it's downloaded once (about 31 MB) from this app's own release, checked against its SHA-256,
++ * and kept in app storage. Until then the older engines keep working.
++ */
++object SoundFontStore {
++    private const val TAG = "SoundFontStore"
++
++    /** This app's own copy (the author asks not to link his download files directly). */
++    const val DOWNLOAD_URL =
++        "https://github.com/KinsBand/PixelPlayer/releases/download/soundfont-generaluser-gs-2.0.3/GeneralUser-GS.sf2"
++    private const val SHA256 = "9575028c7a1f589f5770fccc8cff2734566af40cd26ed836944e9a5152688cfe"
++    const val SIZE_BYTES = 32_319_396L
++    private const val FILE_NAME = "GeneralUser-GS-2.0.3.sf2"
++
++    sealed interface State {
++        data object Missing : State
++        data class Downloading(val progress: Float) : State
++        /** File present; [SoundFont] loading or loaded. */
++        data object Ready : State
++        data class Failed(val message: String) : State
++    }
++
++    private val _state = MutableStateFlow<State>(State.Missing)
++    val state: StateFlow<State> = _state.asStateFlow()
++
++    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
++    private var download: Job? = null
++    private val loadMutex = Mutex()
++    @Volatile private var font: SoundFont? = null
++    @Volatile private var checked = false
++
++    private fun file(context: Context) = File(File(context.applicationContext.filesDir, "soundfonts"), FILE_NAME)
++
++    /** The loaded bank, or null if it isn't downloaded / loaded yet. Never blocks. */
++    fun fontOrNull(): SoundFont? = font
++
++    /**
++     * Looks for the downloaded file once and starts loading it in the background, so the first
++     * Synth play doesn't wait. Cheap to call often.
++     */
++    fun prepare(context: Context) {
++        if (checked) return
++        checked = true
++        val f = file(context)
++        if (f.isFile && f.length() == SIZE_BYTES) {
++            _state.value = State.Ready
++            scope.launch { load(context) }
++        }
++    }
++
++    /** Loads (maps and indexes) the bank; null if it isn't downloaded or is unreadable. */
++    suspend fun load(context: Context): SoundFont? = withContext(Dispatchers.IO) {
++        font?.let { return@withContext it }
++        loadMutex.withLock {
++            font?.let { return@withLock it }
++            val f = file(context)
++            if (!f.isFile) return@withLock null
++            runCatching { SoundFont.load(f) }
++                .onSuccess { font = it; _state.value = State.Ready }
++                .onFailure {
++                    Log.w(TAG, "SoundFont unreadable, removing it: ${it.message}")
++                    f.delete()
++                    _state.value = State.Failed("The instrument sounds were damaged. Download them again.")
++                }
++                .getOrNull()
++        }
++    }
++
++    /** Downloads the bank (no-op while a download runs or once it's there). [from] is for tests. */
++    fun download(context: Context, from: String = DOWNLOAD_URL) {
++        if (download?.isActive == true || font != null) return
++        val app = context.applicationContext
++        download = scope.launch {
++            val target = file(app)
++            if (target.isFile && target.length() == SIZE_BYTES) {
++                load(app)
++                return@launch
++            }
++            target.parentFile?.mkdirs()
++            val part = File(target.parentFile, "$FILE_NAME.part")
++            _state.value = State.Downloading(0f)
++            try {
++                var url = URL(from)
++                var conn: HttpURLConnection
++                var hops = 0
++                // GitHub release downloads redirect to a storage host; follow at most a few hops.
++                while (true) {
++                    conn = (url.openConnection() as HttpURLConnection).apply {
++                        connectTimeout = 15_000
++                        readTimeout = 30_000
++                        instanceFollowRedirects = false
++                        setRequestProperty("User-Agent", "PixelPlayer")
++                    }
++                    val code = conn.responseCode
++                    if (code in 300..399 && hops < 5) {
++                        val next = conn.getHeaderField("Location") ?: error("Redirect without a location")
++                        conn.disconnect()
++                        url = URL(url, next)
++                        hops++
++                        continue
++                    }
++                    if (code != 200) error("Server replied $code")
++                    break
++                }
++                val digest = MessageDigest.getInstance("SHA-256")
++                var got = 0L
++                conn.inputStream.use { input ->
++                    part.outputStream().buffered(1 shl 16).use { out ->
++                        val buf = ByteArray(1 shl 16)
++                        var lastReport = 0L
++                        while (isActive) {
++                            val n = input.read(buf)
++                            if (n < 0) break
++                            out.write(buf, 0, n)
++                            digest.update(buf, 0, n)
++                            got += n
++                            if (got - lastReport > 256 * 1024) {
++                                lastReport = got
++                                _state.value = State.Downloading((got.toFloat() / SIZE_BYTES).coerceIn(0f, 1f))
++                            }
++                        }
++                    }
++                }
++                conn.disconnect()
++                val hash = digest.digest().joinToString("") { "%02x".format(it) }
++                if (got != SIZE_BYTES || hash != SHA256) {
++                    part.delete()
++                    error("The download was incomplete or damaged")
++                }
++                if (!part.renameTo(target)) error("Couldn't save the instrument sounds")
++                if (load(app) == null) error("Couldn't open the instrument sounds")
++            } catch (e: Exception) {
++                part.delete()
++                Log.w(TAG, "SoundFont download failed: ${e.message}")
++                _state.value = State.Failed(e.message?.takeIf { it.isNotBlank() } ?: "Download failed")
++            }
++        }
++    }
++
++    /** Deletes the downloaded bank (frees about 31 MB). */
++    fun delete(context: Context) {
++        download?.cancel()
++        font = null
++        file(context).delete()
++        _state.value = State.Missing
++    }
++}
+diff --git a/app/src/main/java/com/theveloper/pixelplay/data/soundfont/SoundFontSynth.kt b/app/src/main/java/com/theveloper/pixelplay/data/soundfont/SoundFontSynth.kt
+new file mode 100644
+index 0000000..6d0299d
+--- /dev/null
++++ b/app/src/main/java/com/theveloper/pixelplay/data/soundfont/SoundFontSynth.kt
+@@ -0,0 +1,637 @@
++package com.theveloper.pixelplay.data.soundfont
++
++import com.theveloper.pixelplay.data.soundfont.SoundFont.Companion as G
++import kotlin.math.PI
++import kotlin.math.abs
++import kotlin.math.cos
++import kotlin.math.exp
++import kotlin.math.log10
++import kotlin.math.max
++import kotlin.math.min
++import kotlin.math.pow
++import kotlin.math.sin
++import kotlin.math.sqrt
++
++/**
++ * A General MIDI sample player for a [SoundFont]: 16 MIDI channels plus direct notes whose pitch
++ * can glide continuously (used by the sampled guitar / bass strings and the notation demos).
++ *
++ * Per voice: 4-point interpolated sample playback with the SoundFont loop, the volume envelope
++ * (delay / attack / hold / decay / sustain / release), the modulation envelope and both LFOs
++ * (to pitch, filter and volume), a resonant low-pass filter, pan, exclusive classes (an open
++ * hi-hat is choked by a closed one) and a reverb send. The mix goes through a stereo reverb and a
++ * soft peak limiter, so dense parts never clip.
++ *
++ * Call [render] from one thread only (the audio thread); MIDI and note calls must be made on that
++ * same thread, between renders.
++ */
++class SoundFontSynth(
++    val font: SoundFont,
++    val sampleRate: Int = 44_100,
++    maxVoices: Int = 96,
++) {
++    private val sr = sampleRate.toFloat()
++
++    class Channel(val index: Int) {
++        var program = 0
++        var bank = if (index == 9) SoundFont.DRUM_BANK else 0
++        var volume = 100
++        var expression = 127
++        var pan = 64
++        var reverb = 40
++        var bendSemis = 0f
++        var bendRange = 2f
++        var sustain = false
++        internal var rpnMsb = 127
++        internal var rpnLsb = 127
++        fun reset() {
++            program = 0; bank = if (index == 9) SoundFont.DRUM_BANK else 0
++            volume = 100; expression = 127; pan = 64; reverb = 40
++            bendSemis = 0f; bendRange = 2f; sustain = false; rpnMsb = 127; rpnLsb = 127
++        }
++    }
++
++    val channels = Array(16) { Channel(it) }
++    private val voices = Array(maxVoices) { Voice() }
++    private val scratch = ArrayList<SoundFont.Region>(8)
++    private var serialCounter = 0L
++
++    /** Overall level before the limiter. */
++    var masterGain = 1.0f
++    var reverbLevel = 0.9f
++
++    private val reverb = Freeverb(sampleRate)
++    private val blockL = FloatArray(BLOCK)
++    private val blockR = FloatArray(BLOCK)
++    private val sendL = FloatArray(BLOCK)
++    private val sendR = FloatArray(BLOCK)
++    private var limGain = 1f
++
++    // ── MIDI ──────────────────────────────────────────────────────────────────
++
++    fun midi(status: Int, d1: Int, d2: Int) {
++        val ch = status and 0x0F
++        when (status and 0xF0) {
++            0x80 -> noteOff(ch, d1)
++            0x90 -> if (d2 == 0) noteOff(ch, d1) else noteOn(ch, d1, d2)
++            0xB0 -> controlChange(ch, d1, d2)
++            0xC0 -> programChange(ch, d1)
++            0xE0 -> pitchBend(ch, (d2 shl 7) or d1)
++        }
++    }
++
++    fun programChange(ch: Int, program: Int) {
++        channels[ch and 15].program = program and 127
++    }
++
++    fun controlChange(ch: Int, cc: Int, value: Int) {
++        val c = channels[ch and 15]
++        when (cc) {
++            0 -> if (c.index != 9) c.bank = value
++            7 -> c.volume = value
++            10 -> c.pan = value
++            11 -> c.expression = value
++            64 -> {
++                c.sustain = value >= 64
++                if (!c.sustain) for (v in voices) if (v.active && v.channel == c.index && v.sustained) { v.sustained = false; v.release() }
++            }
++            91 -> c.reverb = value
++            101 -> c.rpnMsb = value
++            100 -> c.rpnLsb = value
++            6 -> if (c.rpnMsb == 0 && c.rpnLsb == 0) c.bendRange = value.toFloat().coerceIn(0f, 24f)
++            120 -> for (v in voices) if (v.active && v.channel == c.index) v.kill()
++            121 -> { val keep = c.program; c.reset(); c.program = keep }
++            123 -> for (v in voices) if (v.active && v.channel == c.index) v.release()
++        }
++    }
++
++    fun pitchBend(ch: Int, value14: Int) {
++        val c = channels[ch and 15]
++        c.bendSemis = (value14 - 8192) / 8192f * c.bendRange
++    }
++
++    fun noteOn(ch: Int, key: Int, vel: Int) {
++        val c = channels[ch and 15]
++        val preset = font.preset(c.bank, c.program) ?: return
++        startVoices(preset, key, vel.coerceIn(1, 127), key.toFloat(), c, null)
++    }
++
++    fun noteOff(ch: Int, key: Int) {
++        val c = channels[ch and 15]
++        for (v in voices) {
++            if (!v.active || v.channel != c.index || v.key != key || v.released) continue
++            if (c.sustain) v.sustained = true else v.release()
++        }
++    }
++
++    fun allSoundOff() {
++        for (v in voices) if (v.active) v.kill()
++        for (c in channels) c.reset()
++    }
++
++    // ── Direct notes (sampled strings, notation demos) ─────────────────────────
++
++    /** Extra shaping for a direct note. */
++    class NoteStyle(
++        /** Stereo position −1 … 1. */
++        val pan: Float = 0f,
++        val gain: Float = 1f,
++        /** Skip this much of the sample's start (a legato note has no pick attack). */
++        val skipMs: Float = 0f,
++        /** Lowers the filter (palm mute, dead note); cents, ≤ 0. */
++        val darkenCents: Float = 0f,
++        /** Extra decay time constant in ms (palm mute, dead note); 0 = the sample's own. */
++        val chokeMs: Float = 0f,
++        /** Fades the attack in over this many ms (legato, soft onsets); 0 = the sample's own. */
++        val fadeInMs: Float = 0f,
++        val reverbSend: Float = 0.25f,
++    )
++
++    /** A group of voices started together (a stereo pair, layered zones). */
++    inner class Note internal constructor() {
++        internal val idx = IntArray(6)
++        internal val serial = LongArray(6)
++        internal var count = 0
++
++        private inline fun each(block: (Voice) -> Unit) {
++            for (i in 0 until count) {
++                val v = voices[idx[i]]
++                if (v.active && v.serial == serial[i]) block(v)
++            }
++        }
++
++        val isActive: Boolean
++            get() {
++                for (i in 0 until count) {
++                    val v = voices[idx[i]]
++                    if (v.active && v.serial == serial[i]) return true
++                }
++                return false
++            }
++
++        /** Sounding pitch in (fractional) MIDI notes. */
++        fun setPitch(pitch: Float) = each { it.pitch = pitch }
++
++        fun release() = each { it.release() }
++
++        /** Stops quickly (a new pick on the same string damps the old note). */
++        fun damp(ms: Float) = each { it.releaseIn(ms) }
++    }
++
++    fun startNote(bank: Int, program: Int, key: Int, vel: Int, pitch: Float, style: NoteStyle): Note? {
++        val preset = font.preset(bank, program) ?: return null
++        return startVoices(preset, key.coerceIn(0, 127), vel.coerceIn(1, 127), pitch, null, style)
++    }
++
++    private fun startVoices(preset: SoundFont.Preset, key: Int, vel: Int, pitch: Float, ch: Channel?, style: NoteStyle?): Note? {
++        font.regionsFor(preset, key, vel, scratch)
++        if (scratch.isEmpty()) return null
++        val note = Note()
++        for (r in scratch) {
++            val excl = r.gen[G.EXCLUSIVE_CLASS]
++            if (excl != 0) {
++                for (v in voices) if (v.active && v.exclusiveClass == excl && v.channel == (ch?.index ?: -1) && v.presetId == preset.hashCode()) v.releaseIn(8f)
++            }
++            val vi = allocate()
++            val v = voices[vi]
++            v.start(r, key, vel, pitch, ch, style, ++serialCounter, preset.hashCode())
++            if (note.count < note.idx.size) {
++                note.idx[note.count] = vi
++                note.serial[note.count] = v.serial
++                note.count++
++            }
++        }
++        return note
++    }
++
++    private fun allocate(): Int {
++        var best = -1
++        for (i in voices.indices) if (!voices[i].active) return i
++        // Steal: the quietest released voice, else the oldest.
++        var bestScore = Float.MAX_VALUE
++        for (i in voices.indices) {
++            val v = voices[i]
++            val score = (if (v.released) 0f else 10f) + v.amp + v.serial.toFloat() * 1e-9f
++            if (score < bestScore) { bestScore = score; best = i }
++        }
++        voices[best].kill()
++        return best
++    }
++
++    val activeVoices: Int get() = voices.count { it.active }
++
++    // ── Rendering ─────────────────────────────────────────────────────────────
++
++    /** Adds [frames] stereo frames into [outL] / [outR] starting at [offset] (the arrays are not cleared). */
++    fun render(outL: FloatArray, outR: FloatArray, offset: Int, frames: Int) {
++        var done = 0
++        while (done < frames) {
++            val n = min(BLOCK, frames - done)
++            java.util.Arrays.fill(blockL, 0, n, 0f)
++            java.util.Arrays.fill(blockR, 0, n, 0f)
++            java.util.Arrays.fill(sendL, 0, n, 0f)
++            java.util.Arrays.fill(sendR, 0, n, 0f)
++            for (v in voices) if (v.active) v.render(n)
++            reverb.process(sendL, sendR, blockL, blockR, n, reverbLevel)
++            for (i in 0 until n) {
++                var l = blockL[i] * masterGain
++                var r = blockR[i] * masterGain
++                // Soft peak limiter: instant attack, ~120 ms release, ceiling −1 dBFS.
++                val peak = max(abs(l), abs(r))
++                val target = if (peak * limGain > CEILING) CEILING / peak else 1f
++                limGain = if (target < limGain) target else limGain + (target - limGain) * LIM_RELEASE
++                l *= limGain
++                r *= limGain
++                outL[offset + done + i] += l
++                outR[offset + done + i] += r
++            }
++            done += n
++        }
++    }
++
++    // ── Voice ─────────────────────────────────────────────────────────────────
++
++    internal inner class Voice {
++        var active = false
++        var serial = 0L
++        var channel = -1
++        var key = 0
++        var presetId = 0
++        var exclusiveClass = 0
++        var released = false
++        var sustained = false
++        var pitch = 60f
++        var amp = 0f
++
++        private var chan: Channel? = null
++        private lateinit var gen: IntArray
++        private var vel = 100
++        private var pos = 0.0
++        private var start = 0
++        private var end = 0
++        private var loopStart = 0
++        private var loopEnd = 0
++        private var loopMode = 0
++        private var rootKey = 60
++        private var scaleTuning = 1f
++        private var tuneCents = 0f
++        private var rateRatio = 1.0
++        private var baseGain = 1f
++        private var panL = 0.707f
++        private var panR = 0.707f
++        private var sendGain = 0.2f
++        private var styleGain = 1f
++
++        // Volume envelope
++        private var vStage = 0
++        private var vTime = 0f
++        private var vDelay = 0f; private var vAttack = 0f; private var vHold = 0f; private var vDecay = 0f
++        private var vSustainDb = 0f; private var vRelease = 0f
++        private var vDb = 0f // attenuation in the decay / sustain / release stages
++        private var releaseStartDb = 0f
++        private var releaseLen = 0f
++        private var fadeIn = 0f
++        private var chokeCoef = 1f
++        private var chokeAmp = 1f
++
++        // Modulation envelope (0..1)
++        private var mStage = 0
++        private var mTime = 0f
++        private var mDelay = 0f; private var mAttack = 0f; private var mHold = 0f; private var mDecay = 0f
++        private var mSustain = 1f; private var mRelease = 0f
++        private var mVal = 0f; private var mRelStart = 0f
++
++        // LFOs
++        private var modLfoPhase = 0f; private var modLfoInc = 0f; private var modLfoDelay = 0f
++        private var vibLfoPhase = 0f; private var vibLfoInc = 0f; private var vibLfoDelay = 0f
++        private var lfoTime = 0f
++
++        // Filter
++        private var filterOn = false
++        private var fcBase = 13500f
++        private var qLin = 0.707f
++        private var b0 = 1f; private var b1 = 0f; private var b2 = 0f; private var a1 = 0f; private var a2 = 0f
++        private var z1 = 0f; private var z2 = 0f
++        private var lastFc = -1f
++
++        fun start(r: SoundFont.Region, k: Int, velocity: Int, p: Float, ch: Channel?, style: NoteStyle?, s: Long, preset: Int) {
++            active = true; released = false; sustained = false
++            serial = s; presetId = preset
++            gen = r.gen; chan = ch; channel = ch?.index ?: -1
++            key = k; vel = velocity; pitch = p
++            val sh = r.sample
++            start = sh.start + gen[G.START_OFFSET] + gen[G.START_COARSE] * 32768
++            end = sh.end + gen[G.END_OFFSET] + gen[G.END_COARSE] * 32768
++            loopStart = sh.loopStart + gen[G.START_LOOP_OFFSET] + gen[G.START_LOOP_COARSE] * 32768
++            loopEnd = sh.loopEnd + gen[G.END_LOOP_OFFSET] + gen[G.END_LOOP_COARSE] * 32768
++            val limit = font.sampleCount - 1
++            start = start.coerceIn(0, limit); end = end.coerceIn(start + 1, limit)
++            loopStart = loopStart.coerceIn(start, end); loopEnd = loopEnd.coerceIn(loopStart, end)
++            loopMode = gen[G.SAMPLE_MODES] and 3
++            if (loopMode == 2 || loopEnd - loopStart < 4) loopMode = 0
++            rootKey = if (gen[G.ROOT_KEY] in 0..127) gen[G.ROOT_KEY] else sh.originalPitch
++            if (gen[G.KEYNUM] in 0..127) { key = gen[G.KEYNUM] }
++            scaleTuning = gen[G.SCALE_TUNING] / 100f
++            tuneCents = gen[G.COARSE_TUNE] * 100f + gen[G.FINE_TUNE] + sh.pitchCorrection
++            rateRatio = sh.sampleRate.toDouble() / sampleRate
++            exclusiveClass = gen[G.EXCLUSIVE_CLASS]
++            val v = if (gen[G.VELOCITY] in 1..127) gen[G.VELOCITY] else vel
++
++            // Level: initial attenuation (cB) and the default velocity curve (≈ 40·log10). Like
++            // FluidSynth (and the EMU hardware SoundFonts were made on), attenuation counts at 0.4×:
++            // GeneralUser GS and most banks are voiced for that.
++            val attenCb = gen[G.ATTENUATION].coerceIn(0, 1440) * 0.4f
++            val velGain = (v / 127f).let { it * it }
++            baseGain = 10f.pow(-attenCb / 200f) * velGain
++            styleGain = style?.gain ?: 1f
++            var panPos = gen[G.PAN].coerceIn(-500, 500) / 500f
++            style?.let { panPos = (panPos + it.pan).coerceIn(-1f, 1f) }
++            ch?.let { panPos = (panPos + (it.pan - 64) / 64f).coerceIn(-1f, 1f) }
++            val angle = (panPos + 1f) * 0.25f * PI.toFloat()
++            panL = cos(angle); panR = sin(angle)
++            val chanSend = (ch?.reverb ?: 40) / 127f
++            sendGain = max(gen[G.REVERB_SEND].coerceIn(0, 1000) / 1000f, style?.reverbSend ?: chanSend * 0.6f)
++
++            // Envelopes (timecents → samples).
++            fun tc(g: Int, keyScale: Int = 0): Float {
++                val t = gen[g] + gen.getOrElse(keyScale) { 0 }.let { if (keyScale == 0) 0 else it * (60 - key) }
++                return (2.0.pow(t.coerceIn(-12000, 8000) / 1200.0) * sampleRate).toFloat()
++            }
++            vDelay = tc(G.DELAY_VOL_ENV); vAttack = tc(G.ATTACK_VOL_ENV)
++            vHold = tc(G.HOLD_VOL_ENV, G.KEY_TO_VOL_ENV_HOLD); vDecay = tc(G.DECAY_VOL_ENV, G.KEY_TO_VOL_ENV_DECAY)
++            vSustainDb = gen[G.SUSTAIN_VOL_ENV].coerceIn(0, 1440) / 10f
++            vRelease = max(tc(G.RELEASE_VOL_ENV), 0.006f * sampleRate)
++            vStage = STAGE_DELAY; vTime = 0f; vDb = 0f; amp = 0f
++            fadeIn = (style?.fadeInMs ?: 0f) * sampleRate / 1000f
++            chokeCoef = style?.chokeMs?.takeIf { it > 0f }?.let { exp(-BLOCK / (it * sampleRate / 1000f)) } ?: 1f
++            chokeAmp = 1f
++
++            mDelay = tc(G.DELAY_MOD_ENV); mAttack = tc(G.ATTACK_MOD_ENV)
++            mHold = tc(G.HOLD_MOD_ENV, G.KEY_TO_MOD_ENV_HOLD); mDecay = tc(G.DECAY_MOD_ENV, G.KEY_TO_MOD_ENV_DECAY)
++            mSustain = 1f - gen[G.SUSTAIN_MOD_ENV].coerceIn(0, 1000) / 1000f
++            mRelease = max(tc(G.RELEASE_MOD_ENV), 0.006f * sampleRate)
++            mStage = STAGE_DELAY; mTime = 0f; mVal = 0f
++
++            fun lfoInc(g: Int) = (8.176 * 2.0.pow(gen[g].coerceIn(-16000, 4500) / 1200.0) / sampleRate).toFloat()
++            modLfoInc = lfoInc(G.FREQ_MOD_LFO); vibLfoInc = lfoInc(G.FREQ_VIB_LFO)
++            modLfoDelay = tc(G.DELAY_MOD_LFO); vibLfoDelay = tc(G.DELAY_VIB_LFO)
++            modLfoPhase = 0f; vibLfoPhase = 0f; lfoTime = 0f
++
++            // Filter: soft notes are darker (default velocity → cutoff), plus any style darkening.
++            fcBase = gen[G.FILTER_FC].coerceIn(1500, 13500).toFloat() - 1200f * (1f - v / 127f) + (style?.darkenCents ?: 0f)
++            val qDb = gen[G.FILTER_Q].coerceIn(0, 960) / 10f
++            qLin = max(0.707f, 10f.pow(qDb / 20f) * 0.707f)
++            filterOn = fcBase < 13400f || gen[G.MOD_ENV_TO_FILTER] != 0 || gen[G.MOD_LFO_TO_FILTER] != 0
++            z1 = 0f; z2 = 0f; lastFc = -1f
++
++            pos = start.toDouble()
++            style?.skipMs?.takeIf { it > 0f }?.let { skip ->
++                val jump = skip / 1000.0 * sh.sampleRate
++                val limitPos = if (loopMode != 0) loopStart.toDouble() else end - 2.0
++                pos = min(start + jump, max(start.toDouble(), limitPos))
++            }
++        }
++
++        fun release() {
++            if (released) return
++            released = true
++            beginRelease(vRelease)
++        }
++
++        fun releaseIn(ms: Float) {
++            released = true
++            beginRelease(max(1f, ms) * sampleRate / 1000f)
++        }
++
++        private fun beginRelease(len: Float) {
++            releaseStartDb = when (vStage) {
++                STAGE_DELAY -> 100f
++                STAGE_ATTACK -> -20f * log10(max(amp, 1e-5f))
++                else -> vDb
++            }
++            releaseLen = len
++            vStage = STAGE_RELEASE; vTime = 0f
++            mRelStart = mVal; mStage = STAGE_RELEASE; mTime = 0f
++        }
++
++        fun kill() { active = false; amp = 0f }
++
++        /** Volume envelope amplitude after advancing [n] frames. */
++        private fun volEnv(n: Int): Float {
++            vTime += n
++            while (true) {
++                when (vStage) {
++                    STAGE_DELAY -> if (vTime >= vDelay) { vTime -= vDelay; vStage = STAGE_ATTACK } else return 0f
++                    STAGE_ATTACK -> if (vTime >= vAttack) { vTime -= vAttack; vStage = STAGE_HOLD } else return vTime / max(vAttack, 1f)
++                    STAGE_HOLD -> if (vTime >= vHold) { vTime -= vHold; vStage = STAGE_DECAY } else { vDb = 0f; return 1f }
++                    STAGE_DECAY -> {
++                        vDb = 100f * vTime / max(vDecay, 1f)
++                        if (vDb >= vSustainDb) { vDb = vSustainDb; vStage = STAGE_SUSTAIN }
++                        return dbToAmp(vDb)
++                    }
++                    STAGE_SUSTAIN -> { vDb = vSustainDb; return dbToAmp(vDb) }
++                    else -> {
++                        val db = releaseStartDb + 100f * vTime / max(releaseLen, 1f)
++                        if (db >= 96f) { active = false; return 0f }
++                        vDb = db
++                        return dbToAmp(db)
++                    }
++                }
++            }
++        }
++
++        private fun modEnv(n: Int): Float {
++            mTime += n
++            while (true) {
++                when (mStage) {
++                    STAGE_DELAY -> if (mTime >= mDelay) { mTime -= mDelay; mStage = STAGE_ATTACK } else { mVal = 0f; return 0f }
++                    STAGE_ATTACK -> if (mTime >= mAttack) { mTime -= mAttack; mStage = STAGE_HOLD } else { mVal = mTime / max(mAttack, 1f); return mVal }
++                    STAGE_HOLD -> if (mTime >= mHold) { mTime -= mHold; mStage = STAGE_DECAY } else { mVal = 1f; return 1f }
++                    STAGE_DECAY -> {
++                        mVal = 1f - (1f - mSustain) * min(1f, mTime / max(mDecay, 1f))
++                        if (mTime >= mDecay) mStage = STAGE_SUSTAIN
++                        return mVal
++                    }
++                    STAGE_SUSTAIN -> { mVal = mSustain; return mVal }
++                    else -> { mVal = mRelStart * max(0f, 1f - mTime / max(mRelease, 1f)); return mVal }
++                }
++            }
++        }
++
++        private fun tri(phase: Float): Float = if (phase < 0.5f) 4f * phase - 1f else 3f - 4f * phase
++
++        fun render(n: Int) {
++            val env0 = amp
++            var env = volEnv(n)
++            if (!active) { amp = 0f; return }
++            if (fadeIn > 0f) env *= min(1f, (vStage.let { if (it == STAGE_DELAY) 0f else lfoTime + n } / fadeIn))
++            if (chokeCoef < 1f) { chokeAmp *= chokeCoef; env *= chokeAmp; if (chokeAmp < 1e-4f) { active = false; amp = 0f; return } }
++            val menv = modEnv(n)
++            lfoTime += n
++            var modLfo = 0f
++            var vibLfo = 0f
++            if (lfoTime > modLfoDelay) { modLfoPhase = (modLfoPhase + modLfoInc * n) % 1f; modLfo = tri(modLfoPhase) }
++            if (lfoTime > vibLfoDelay) { vibLfoPhase = (vibLfoPhase + vibLfoInc * n) % 1f; vibLfo = tri(vibLfoPhase) }
++
++            val c = chan
++            val bend = c?.bendSemis ?: 0f
++            val cents = scaleTuning * (pitch + bend - rootKey) * 100f + tuneCents +
++                menv * gen[G.MOD_ENV_TO_PITCH] + modLfo * gen[G.MOD_LFO_TO_PITCH] + vibLfo * gen[G.VIB_LFO_TO_PITCH]
++            val inc = rateRatio * 2.0.pow(cents / 1200.0)
++
++            var chanGain = 1f
++            if (c != null) {
++                val vol = c.volume / 127f
++                val expr = c.expression / 127f
++                chanGain = vol * vol * expr * expr
++            }
++            val lfoVol = if (gen[G.MOD_LFO_TO_VOLUME] != 0) dbToAmp(-modLfo * gen[G.MOD_LFO_TO_VOLUME] / 10f) else 1f
++            val target = env * baseGain * styleGain * chanGain * lfoVol
++            amp = target
++
++            if (filterOn) {
++                val fc = fcBase + menv * gen[G.MOD_ENV_TO_FILTER] + modLfo * gen[G.MOD_LFO_TO_FILTER]
++                if (abs(fc - lastFc) > 2f) { setFilter(fc); lastFc = fc }
++            }
++
++            // Ramp the gain across the block (no zipper noise).
++            val g0 = if (env0 == 0f && vStage != STAGE_RELEASE) 0f else env0
++            var g = g0
++            val gStep = (target - g0) / n
++            val lg = panL; val rg = panR
++            val send = sendGain
++            val data = font.samples
++            val lastIndex = font.sampleCount - 1
++            for (i in 0 until n) {
++                val ip = pos.toInt()
++                val frac = (pos - ip).toFloat()
++                val xm1 = data.get((ip - 1).coerceIn(0, lastIndex)).toFloat()
++                val x0 = data.get(ip.coerceIn(0, lastIndex)).toFloat()
++                var i1 = ip + 1
++                var i2 = ip + 2
++                if (loopMode != 0 && !(loopMode == 3 && released)) {
++                    if (i1 >= loopEnd) i1 -= loopEnd - loopStart
++                    if (i2 >= loopEnd) i2 -= loopEnd - loopStart
++                }
++                val x1 = data.get(i1.coerceIn(0, lastIndex)).toFloat()
++                val x2 = data.get(i2.coerceIn(0, lastIndex)).toFloat()
++                // 4-point Hermite interpolation.
++                val c1 = 0.5f * (x1 - xm1)
++                val c2 = xm1 - 2.5f * x0 + 2f * x1 - 0.5f * x2
++                val c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1)
++                var s = ((c3 * frac + c2) * frac + c1) * frac + x0
++                s *= (1f / 32768f)
++                if (filterOn) {
++                    val y = b0 * s + z1
++                    z1 = b1 * s - a1 * y + z2
++                    z2 = b2 * s - a2 * y
++                    s = y
++                }
++                g += gStep
++                val out = s * g
++                blockL[i] += out * lg
++                blockR[i] += out * rg
++                sendL[i] += out * lg * send
++                sendR[i] += out * rg * send
++
++                pos += inc
++                if (loopMode == 1 || (loopMode == 3 && !released)) {
++                    if (pos >= loopEnd) pos -= (loopEnd - loopStart)
++                } else if (pos >= end - 1) {
++                    active = false
++                    amp = 0f
++                    return
++                }
++            }
++        }
++
++        private fun setFilter(fcCents: Float) {
++            val hz = (8.176 * 2.0.pow(fcCents.coerceIn(1500f, 13500f) / 1200.0)).toFloat().coerceAtMost(sr * 0.45f)
++            val w = 2f * PI.toFloat() * hz / sr
++            val cw = cos(w)
++            val alpha = sin(w) / (2f * qLin)
++            val a0 = 1f + alpha
++            b0 = (1f - cw) / 2f / a0
++            b1 = (1f - cw) / a0
++            b2 = b0
++            a1 = -2f * cw / a0
++            a2 = (1f - alpha) / a0
++        }
++    }
++
++    private fun dbToAmp(db: Float): Float = if (db >= 96f) 0f else 10f.pow(-db / 20f)
++
++    companion object {
++        const val BLOCK = 32
++        private const val STAGE_DELAY = 0
++        private const val STAGE_ATTACK = 1
++        private const val STAGE_HOLD = 2
++        private const val STAGE_DECAY = 3
++        private const val STAGE_SUSTAIN = 4
++        private const val STAGE_RELEASE = 5
++        private const val CEILING = 0.89f
++        private const val LIM_RELEASE = 0.0002f
++    }
++}
++
++/** Freeverb (Jezar's public-domain design), stereo, a light room. */
++internal class Freeverb(sampleRate: Int) {
++    private val scale = sampleRate / 44_100f
++    private val combL = COMBS.map { Comb((it * scale).toInt()) }
++    private val combR = COMBS.map { Comb(((it + SPREAD) * scale).toInt()) }
++    private val apL = ALLPASSES.map { Allpass((it * scale).toInt()) }
++    private val apR = ALLPASSES.map { Allpass(((it + SPREAD) * scale).toInt()) }
++
++    fun process(inL: FloatArray, inR: FloatArray, outL: FloatArray, outR: FloatArray, n: Int, level: Float) {
++        if (level <= 0f) return
++        for (i in 0 until n) {
++            val input = (inL[i] + inR[i]) * 0.015f
++            var l = 0f
++            var r = 0f
++            for (c in combL) l += c.process(input)
++            for (c in combR) r += c.process(input)
++            for (a in apL) l = a.process(l)
++            for (a in apR) r = a.process(r)
++            val wet = level * 0.5f
++            outL[i] += (l * (1f + WIDTH) / 2f + r * (1f - WIDTH) / 2f) * wet
++            outR[i] += (r * (1f + WIDTH) / 2f + l * (1f - WIDTH) / 2f) * wet
++        }
++    }
++
++    private class Comb(size: Int) {
++        private val buf = FloatArray(max(1, size))
++        private var idx = 0
++        private var store = 0f
++        fun process(x: Float): Float {
++            val out = buf[idx]
++            store = out * (1f - DAMP) + store * DAMP
++            buf[idx] = x + store * FEEDBACK
++            if (++idx >= buf.size) idx = 0
++            return out
++        }
++    }
++
++    private class Allpass(size: Int) {
++        private val buf = FloatArray(max(1, size))
++        private var idx = 0
++        fun process(x: Float): Float {
++            val b = buf[idx]
++            val out = -x + b
++            buf[idx] = x + b * 0.5f
++            if (++idx >= buf.size) idx = 0
++            return out
++        }
++    }
++
++    companion object {
++        private val COMBS = intArrayOf(1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617)
++        private val ALLPASSES = intArrayOf(556, 441, 341, 225)
++        private const val SPREAD = 23
++        private const val FEEDBACK = 0.80f // room size
++        private const val DAMP = 0.35f
++        private const val WIDTH = 0.8f
++    }
++}
++
++@Suppress("unused")
++private fun rms(a: FloatArray, n: Int): Float { var s = 0.0; for (i in 0 until n) s += a[i] * a[i]; return sqrt(s / max(1, n)).toFloat() }
+diff --git a/app/src/main/java/com/theveloper/pixelplay/presentation/components/tabs/NotationAuditionPlayer.kt b/app/src/main/java/com/theveloper/pixelplay/presentation/components/tabs/NotationAuditionPlayer.kt
+new file mode 100644
+index 0000000..03ae494
+--- /dev/null
++++ b/app/src/main/java/com/theveloper/pixelplay/presentation/components/tabs/NotationAuditionPlayer.kt
+@@ -0,0 +1,143 @@
++package com.theveloper.pixelplay.presentation.components.tabs
++
++import android.media.AudioAttributes
++import android.media.AudioFormat
++import android.media.AudioTrack
++import android.os.Handler
++import android.os.Looper
++import android.os.Process
++import android.util.Log
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.mutableStateOf
++import androidx.compose.runtime.setValue
++import com.theveloper.pixelplay.data.soundfont.MidiEvents
++import com.theveloper.pixelplay.data.soundfont.SampledScoreEngine
++import com.theveloper.pixelplay.data.soundfont.ScorePcmSource
++import com.theveloper.pixelplay.data.soundfont.SoundFont
++import com.theveloper.pixelplay.data.songsterr.RenderedTrack
++import com.theveloper.pixelplay.data.songsterr.StringSynth
++import com.theveloper.pixelplay.data.songsterr.StringSynthEngine
++import com.theveloper.pixelplay.data.songsterr.TabMidi
++import com.theveloper.pixelplay.data.songsterr.TabTimeline
++import kotlin.math.max
++
++/**
++ * Plays notation examples for the Notation Help sheet: a demo bar of one mark, or a bar of the
++ * song itself. Each is rendered through the same path as tab playback (tab → [TabMidi] →
++ * recorded instruments, or the modelled strings before the instrument sounds are downloaded).
++ *
++ * The audio track stays open while the sheet is showing, so a tap sounds at once; [release] it
++ * when the sheet closes.
++ */
++internal class NotationAuditionPlayer {
++    private val sr = StringSynth.SAMPLE_RATE
++    private val main = Handler(Looper.getMainLooper())
++    private var track: AudioTrack? = null
++    private var thread: Thread? = null
++    @Volatile private var running = false
++    @Volatile private var source: ScorePcmSource? = null
++    @Volatile private var endFrame = 0L
++    @Volatile private var generation = 0
++
++    /** Key of the example playing now (for the row's play / stop icon), or null. */
++    var playingKey by mutableStateOf<String?>(null)
++        private set
++
++    /**
++     * Plays [entries] (timeline entries; all by default) of [track] as the only part. Returns
++     * false when nothing can sound it (no instrument sounds yet and not a guitar / bass).
++     */
++    fun play(key: String, track: RenderedTrack, font: SoundFont?, entries: List<Int>? = null): Boolean {
++        val tl = TabTimeline(track)
++        val seq = entries ?: tl.entries.indices.toList()
++        if (seq.isEmpty()) return false
++        val res = runCatching {
++            TabMidi.build(tl, seq, TabMidi.Options(realStrings = true), listOf(TabMidi.Part(track)))
++        }.getOrElse { Log.w(TAG, "Demo build failed: ${it.message}"); return false }
++        val src: ScorePcmSource = when {
++            font != null -> SampledScoreEngine(font, MidiEvents.parse(res.bytes), res.strings, sr)
++            res.strings != null -> StringSynthEngine(res.strings, sr)
++            else -> return false
++        }
++        if (!ensureStarted()) return false
++        endFrame = ((res.totalMs + TAIL_MS) * sr / 1000.0).toLong()
++        val gen = ++generation
++        source = src
++        playingKey = key
++        // Clear the playing mark when this example ends (unless another one replaced it).
++        main.postDelayed({ if (generation == gen) { source = null; playingKey = null } }, (res.totalMs + TAIL_MS).toLong())
++        return true
++    }
++
++    fun stop() {
++        generation++
++        source = null
++        playingKey = null
++    }
++
++    fun release() {
++        stop()
++        running = false
++        runCatching { thread?.join(300) }
++        thread = null
++        track?.let { t ->
++            runCatching { t.pause() }
++            runCatching { t.flush() }
++            runCatching { t.release() }
++        }
++        track = null
++    }
++
++    private fun ensureStarted(): Boolean {
++        if (running && track != null) return true
++        val t = runCatching {
++            val minBuf = AudioTrack.getMinBufferSize(sr, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
++            AudioTrack.Builder()
++                .setAudioAttributes(
++                    AudioAttributes.Builder()
++                        .setUsage(AudioAttributes.USAGE_MEDIA)
++                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
++                        .build(),
++                )
++                .setAudioFormat(
++                    AudioFormat.Builder()
++                        .setSampleRate(sr)
++                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
++                        .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
++                        .build(),
++                )
++                // Small buffer: a tap should sound at once.
++                .setBufferSizeInBytes(max(minBuf, sr * 4 * 60 / 1000))
++                .setTransferMode(AudioTrack.MODE_STREAM)
++                .build()
++        }.getOrElse { Log.w(TAG, "Audition track unavailable: ${it.message}"); return false }
++        track = t
++        running = true
++        t.play()
++        thread = Thread({
++            Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
++            val frames = 256
++            val chunk = ShortArray(frames * 2)
++            while (running) {
++                val src = source
++                if (src != null && src.framesRendered < endFrame) {
++                    src.render(chunk, frames)
++                } else {
++                    java.util.Arrays.fill(chunk, 0)
++                }
++                var off = 0
++                while (running && off < chunk.size) {
++                    val r = t.write(chunk, off, chunk.size - off)
++                    if (r < 0) { running = false; break }
++                    off += r
++                }
++            }
++        }, "NotationAudition").apply { start() }
++        return true
++    }
++
++    private companion object {
++        const val TAG = "NotationAudition"
++        const val TAIL_MS = 1200.0
++    }
++}
+diff --git a/app/src/main/java/com/theveloper/pixelplay/presentation/components/tabs/NotationHelpSheet.kt b/app/src/main/java/com/theveloper/pixelplay/presentation/components/tabs/NotationHelpSheet.kt
+new file mode 100644
+index 0000000..406e9ca
+--- /dev/null
++++ b/app/src/main/java/com/theveloper/pixelplay/presentation/components/tabs/NotationHelpSheet.kt
+@@ -0,0 +1,305 @@
++package com.theveloper.pixelplay.presentation.components.tabs
++
++import androidx.compose.foundation.Canvas
++import androidx.compose.foundation.background
++import androidx.compose.foundation.clickable
++import androidx.compose.foundation.horizontalScroll
++import androidx.compose.foundation.layout.Arrangement
++import androidx.compose.foundation.layout.Box
++import androidx.compose.foundation.layout.Column
++import androidx.compose.foundation.layout.Row
++import androidx.compose.foundation.layout.Spacer
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.height
++import androidx.compose.foundation.layout.heightIn
++import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.layout.size
++import androidx.compose.foundation.layout.width
++import androidx.compose.foundation.rememberScrollState
++import androidx.compose.foundation.shape.CircleShape
++import androidx.compose.foundation.shape.RoundedCornerShape
++import androidx.compose.foundation.verticalScroll
++import androidx.compose.material.icons.Icons
++import androidx.compose.material.icons.rounded.CloudDownload
++import androidx.compose.material.icons.rounded.PlayArrow
++import androidx.compose.material.icons.rounded.Stop
++import androidx.compose.material3.Icon
++import androidx.compose.material3.LinearProgressIndicator
++import androidx.compose.material3.Text
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.DisposableEffect
++import androidx.compose.runtime.LaunchedEffect
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.mutableStateOf
++import androidx.compose.runtime.remember
++import androidx.compose.runtime.setValue
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.draw.clip
++import androidx.compose.ui.geometry.Offset
++import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
++import androidx.compose.ui.graphics.nativeCanvas
++import androidx.compose.ui.graphics.toArgb
++import androidx.compose.ui.platform.LocalContext
++import androidx.compose.ui.semantics.Role
++import androidx.compose.ui.semantics.contentDescription
++import androidx.compose.ui.semantics.role
++import androidx.compose.ui.semantics.semantics
++import androidx.compose.ui.text.font.FontFamily
++import androidx.compose.ui.text.font.FontWeight
++import androidx.compose.ui.text.style.TextAlign
++import androidx.compose.ui.unit.dp
++import androidx.compose.ui.unit.sp
++import androidx.lifecycle.compose.collectAsStateWithLifecycle
++import com.theveloper.pixelplay.data.songsterr.NotationCatalog
++import com.theveloper.pixelplay.data.songsterr.TabParser
++import com.theveloper.pixelplay.data.soundfont.SoundFontStore
++
++/**
++ * Notation Help: every mark for the loaded part's instrument, the ones this song uses
++ * highlighted (with the bar they first appear in), and a tap on any of them plays it.
++ */
++@Composable
++internal fun NotationHelpSheet(controller: TabPracticeController, onBg: Color, accent: Color, onAccent: Color) {
++    val context = LocalContext.current
++    val ready = controller.state as? TabUiState.Ready
++    Text("Notation Help", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = onBg)
++    if (ready == null) return
++    val track = ready.track
++    val family = track.family
++    val items = remember(family) { NotationCatalog.itemsFor(family) }
++    val used = remember(track) { NotationCatalog.usedIn(track) }
++    val usedCount = items.count { it.id in used }
++    val player = remember { NotationAuditionPlayer() }
++    DisposableEffect(player) { onDispose { player.release() } }
++
++    val soundState by SoundFontStore.state.collectAsStateWithLifecycle()
++    LaunchedEffect(soundState) {
++        if (soundState == SoundFontStore.State.Ready && SoundFontStore.load(context) != null) controller.onSampledSoundsReady()
++    }
++    var onlyUsed by remember { mutableStateOf(false) }
++    var hint by remember { mutableStateOf<String?>(null) }
++
++    val familyName = when (family) {
++        TabParser.InstrumentFamily.GUITAR -> "guitar"
++        TabParser.InstrumentFamily.BASS -> "bass"
++        TabParser.InstrumentFamily.DRUMS -> "drums"
++        TabParser.InstrumentFamily.OTHER -> track.instrument.ifBlank { "this instrument" }.lowercase()
++    }
++    Text(
++        "All ${items.size} marks for $familyName. Tap one to hear it; the ones in this song are highlighted.",
++        color = onBg.copy(alpha = 0.7f), fontSize = 13.sp, textAlign = TextAlign.Center,
++    )
++
++    fun play(key: String, block: () -> Boolean) {
++        if (player.playingKey == key) { player.stop(); return }
++        if (controller.isPlaying) controller.pauseAll()
++        val ok = block()
++        hint = if (ok) null else "Download the instrument sounds above to hear ${if (family == TabParser.InstrumentFamily.DRUMS) "the drums" else "this instrument"}."
++    }
++    val font = if (controller.sampledSounds) SoundFontStore.fontOrNull() else null
++
++    Column(
++        Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
++        verticalArrangement = Arrangement.spacedBy(8.dp),
++    ) {
++        InstrumentSoundsCard(soundState, onBg, accent, onAccent, hint) { SoundFontStore.download(context) }
++
++        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
++            FilterPill("All · ${items.size}", !onlyUsed, onBg, accent, onAccent) { onlyUsed = false }
++            FilterPill("In this song · $usedCount", onlyUsed, onBg, accent, onAccent) { onlyUsed = true }
++        }
++
++        val shown = if (onlyUsed) items.filter { it.id in used } else items
++        if (shown.isEmpty()) {
++            Text("This part doesn't use any of these marks.", color = onBg.copy(alpha = 0.6f), fontSize = 13.sp)
++        }
++        var lastGroup: NotationCatalog.Group? = null
++        for (item in shown) {
++            if (item.group != lastGroup) {
++                lastGroup = item.group
++                Text(
++                    item.group.title, color = accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
++                    modifier = Modifier.padding(top = 6.dp, start = 4.dp),
++                )
++            }
++            val bar = used[item.id]
++            NotationRow(
++                item = item,
++                usedAtBar = bar?.let { m -> track.measures.getOrNull(m)?.number ?: (m + 1) },
++                playing = player.playingKey == item.id,
++                playingBar = player.playingKey == "bar:${item.id}",
++                onBg = onBg,
++                accent = accent,
++                onPlay = {
++                    play(item.id) {
++                        val demo = NotationCatalog.demoTrack(item, track) ?: return@play false
++                        player.play(item.id, demo, font)
++                    }
++                },
++                onPlayBar = bar?.let { m ->
++                    {
++                        play("bar:${item.id}") {
++                            val tl = ready.timeline
++                            val entry = tl.entries.indexOfFirst { it.measure == m }
++                            entry >= 0 && player.play("bar:${item.id}", track, font, listOf(entry))
++                        }
++                    }
++                },
++            )
++        }
++    }
++}
++
++@Composable
++private fun InstrumentSoundsCard(
++    state: SoundFontStore.State,
++    onBg: Color, accent: Color, onAccent: Color,
++    hint: String?,
++    onDownload: () -> Unit,
++) {
++    if (state == SoundFontStore.State.Ready) {
++        hint?.let { Text(it, color = onBg.copy(alpha = 0.7f), fontSize = 12.sp) }
++        return
++    }
++    Column(
++        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(accent.copy(alpha = 0.12f)).padding(14.dp),
++        verticalArrangement = Arrangement.spacedBy(8.dp),
++    ) {
++        Text("Real instrument sounds", color = onBg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
++        Text(
++            "Download recorded guitars, basses, drums and keys (${SoundFontStore.SIZE_BYTES / 1_000_000} MB, once) to hear every mark and to make Synth playback sound real.",
++            color = onBg.copy(alpha = 0.75f), fontSize = 12.sp,
++        )
++        when (state) {
++            is SoundFontStore.State.Downloading -> {
++                LinearProgressIndicator(
++                    progress = { state.progress },
++                    modifier = Modifier.fillMaxWidth(),
++                    color = accent,
++                    trackColor = accent.copy(alpha = 0.2f),
++                )
++                Text("Downloading… ${(state.progress * 100).toInt()}%", color = onBg.copy(alpha = 0.7f), fontSize = 12.sp)
++            }
++            else -> {
++                if (state is SoundFontStore.State.Failed) Text(state.message, color = onBg, fontSize = 12.sp)
++                Row(
++                    Modifier.clip(CircleShape).background(accent).clickable(onClick = onDownload).padding(horizontal = 16.dp, vertical = 8.dp),
++                    verticalAlignment = Alignment.CenterVertically,
++                ) {
++                    Icon(Icons.Rounded.CloudDownload, contentDescription = null, tint = onAccent, modifier = Modifier.size(18.dp))
++                    Spacer(Modifier.width(8.dp))
++                    Text(if (state is SoundFontStore.State.Failed) "Try again" else "Download", color = onAccent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
++                }
++            }
++        }
++        hint?.let { Text(it, color = onBg, fontSize = 12.sp) }
++        Text("Sounds: GeneralUser GS by S. Christian Collins", color = onBg.copy(alpha = 0.5f), fontSize = 11.sp)
++    }
++}
++
++@Composable
++private fun FilterPill(label: String, selected: Boolean, onBg: Color, accent: Color, onAccent: Color, onClick: () -> Unit) {
++    Text(
++        label,
++        color = if (selected) onAccent else onBg,
++        fontSize = 13.sp,
++        fontWeight = FontWeight.SemiBold,
++        modifier = Modifier
++            .clip(CircleShape)
++            .background(if (selected) accent else onBg.copy(alpha = 0.08f))
++            .clickable(onClick = onClick)
++            .padding(horizontal = 14.dp, vertical = 8.dp),
++    )
++}
++
++@Composable
++private fun NotationRow(
++    item: NotationCatalog.Item,
++    usedAtBar: Int?,
++    playing: Boolean,
++    playingBar: Boolean,
++    onBg: Color,
++    accent: Color,
++    onPlay: () -> Unit,
++    onPlayBar: (() -> Unit)?,
++) {
++    val used = usedAtBar != null
++    Row(
++        Modifier
++            .fillMaxWidth()
++            .clip(RoundedCornerShape(14.dp))
++            .background(if (used) accent.copy(alpha = 0.14f) else onBg.copy(alpha = 0.05f))
++            .clickable(onClick = onPlay)
++            .semantics {
++                role = Role.Button
++                contentDescription = "${item.name}${if (used) ", used in this song" else ""}. Play example"
++            }
++            .padding(horizontal = 12.dp, vertical = 10.dp),
++        verticalAlignment = Alignment.CenterVertically,
++    ) {
++        Box(Modifier.width(72.dp), contentAlignment = Alignment.Center) {
++            val drumId = item.drumId
++            if (drumId != null) {
++                DrumSymbol(TabParser.drumArticulation(drumId), onBg)
++            } else {
++                Text(
++                    item.symbol, color = if (used) accent else onBg, fontWeight = FontWeight.Bold,
++                    fontFamily = FontFamily.Monospace, fontSize = 15.sp, textAlign = TextAlign.Center,
++                )
++            }
++        }
++        Spacer(Modifier.width(10.dp))
++        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
++            Text(item.name, color = onBg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
++            if (item.drumId == null) Text(item.description, color = onBg.copy(alpha = 0.7f), fontSize = 12.sp)
++            if (usedAtBar != null) {
++                Text(
++                    if (playingBar) "■ Playing bar $usedAtBar" else "In this song · hear bar $usedAtBar",
++                    color = accent,
++                    fontSize = 12.sp,
++                    fontWeight = FontWeight.SemiBold,
++                    modifier = Modifier
++                        .padding(top = 2.dp)
++                        .clip(CircleShape)
++                        .let { m -> if (onPlayBar != null) m.clickable(onClick = onPlayBar) else m }
++                        .padding(vertical = 2.dp),
++                )
++            }
++        }
++        Spacer(Modifier.width(8.dp))
++        Box(
++            Modifier.size(36.dp).clip(CircleShape).background(if (playing) accent else onBg.copy(alpha = 0.08f)),
++            contentAlignment = Alignment.Center,
++        ) {
++            Icon(
++                if (playing) Icons.Rounded.Stop else Icons.Rounded.PlayArrow,
++                contentDescription = null,
++                tint = if (playing) Color.White else onBg,
++                modifier = Modifier.size(20.dp),
++            )
++        }
++    }
++}
++
++/** The kit piece's notehead on a small staff, as in the score. */
++@Composable
++private fun DrumSymbol(art: TabParser.DrumArticulation, onBg: Color) {
++    val painter = remember { AndroidScorePainter() }
++    Canvas(Modifier.width(64.dp).height(52.dp)) {
++        val gap = 6.dp.toPx()
++        val top = (size.height - 4 * gap) / 2
++        val ink = onBg.toArgb()
++        for (i in 0 until 5) drawLine(onBg.copy(alpha = 0.45f), Offset(0f, top + i * gap), Offset(size.width, top + i * gap), 1.dp.toPx())
++        drawIntoCanvas { c ->
++            painter.canvas = c.nativeCanvas
++            val pos = art.staffPos
++            val cx = size.width / 2
++            if (pos <= -1f) { var l = -1; while (l >= pos) { painter.line(cx - gap, top + l * gap, cx + gap, top + l * gap, 1.dp.toPx(), ink); l-- } }
++            if (pos >= 5f) { var l = 5; while (l <= pos) { painter.line(cx - gap, top + l * gap, cx + gap, top + l * gap, 1.dp.toPx(), ink); l++ } }
++            legendHead(painter, art.glyph, cx, top + pos * gap, gap, ink)
++            painter.canvas = null
++        }
++    }
++}
+diff --git a/app/src/main/java/com/theveloper/pixelplay/presentation/components/tabs/StringSynthPlayer.kt b/app/src/main/java/com/theveloper/pixelplay/presentation/components/tabs/StringSynthPlayer.kt
+index 2be5e82..b6dac37 100644
+--- a/app/src/main/java/com/theveloper/pixelplay/presentation/components/tabs/StringSynthPlayer.kt
++++ b/app/src/main/java/com/theveloper/pixelplay/presentation/components/tabs/StringSynthPlayer.kt
+@@ -8,6 +8,10 @@ import android.media.MediaPlayer
+ import android.os.Build
+ import android.os.Process
+ import android.util.Log
++import com.theveloper.pixelplay.data.soundfont.MidiEvents
++import com.theveloper.pixelplay.data.soundfont.SampledScoreEngine
++import com.theveloper.pixelplay.data.soundfont.ScorePcmSource
++import com.theveloper.pixelplay.data.soundfont.SoundFont
+ import com.theveloper.pixelplay.data.songsterr.StringScore
+ import com.theveloper.pixelplay.data.songsterr.StringSynth
+ import com.theveloper.pixelplay.data.songsterr.StringSynthEngine
+@@ -15,8 +19,11 @@ import kotlin.math.abs
+ import kotlin.math.max
+ 
+ /**
+- * Streams [StringSynthEngine] (the modelled guitar / bass strings) to an [AudioTrack] next to
+- * the MIDI [MediaPlayer] that plays the drums, keys, clicks and count-in.
++ * Streams a [ScorePcmSource] to an [AudioTrack] next to the MIDI [MediaPlayer]:
++ *  - [StringSynthEngine]: the modelled guitar / bass strings, while the MIDI player plays the
++ *    drums, keys, clicks and count-in; or
++ *  - [SampledScoreEngine]: every part on recorded SoundFont instruments (the MIDI player is then
++ *    muted and only serves as the clock).
+  *
+  * The MIDI player stays the master clock (the cursor follows it). Every frame [follow] compares
+  * what the strings are playing *now* (AudioTrack timestamp) with what the MIDI player is
+@@ -24,10 +31,9 @@ import kotlin.math.max
+  * together within a few ms. A nudge only moves when future notes start; notes already ringing
+  * are untouched, so nothing clicks.
+  */
+-internal class StringSynthPlayer(score: StringScore) {
++internal class StringSynthPlayer(private val engine: ScorePcmSource) {
+ 
+     private val sr = StringSynth.SAMPLE_RATE
+-    private val engine = StringSynthEngine(score, sr)
+     private val track: AudioTrack
+     private val chunkFrames = 256
+     private val chunk = ShortArray(chunkFrames * 2)
+@@ -166,8 +172,16 @@ internal class StringSynthPlayer(score: StringScore) {
+         }
+ 
+         fun create(score: StringScore): StringSynthPlayer? =
+-            runCatching { StringSynthPlayer(score) }
++            runCatching { StringSynthPlayer(StringSynthEngine(score, StringSynth.SAMPLE_RATE)) }
+                 .onFailure { Log.w(TAG, "String synth unavailable: ${it.message}") }
+                 .getOrNull()
++
++        /** Every part on recorded instruments: the MIDI file's parts plus guitar / bass [strings]. */
++        fun createSampled(font: SoundFont, midiFile: ByteArray, strings: StringScore?): StringSynthPlayer? =
++            runCatching {
++                StringSynthPlayer(SampledScoreEngine(font, MidiEvents.parse(midiFile), strings, StringSynth.SAMPLE_RATE))
++            }
++                .onFailure { Log.w(TAG, "Sampled synth unavailable: ${it.message}") }
++                .getOrNull()
+     }
+ }
+diff --git a/app/src/main/java/com/theveloper/pixelplay/presentation/components/tabs/TabPracticeController.kt b/app/src/main/java/com/theveloper/pixelplay/presentation/components/tabs/TabPracticeController.kt
+index 489f9a7..4e9070d 100644
+--- a/app/src/main/java/com/theveloper/pixelplay/presentation/components/tabs/TabPracticeController.kt
++++ b/app/src/main/java/com/theveloper/pixelplay/presentation/components/tabs/TabPracticeController.kt
+@@ -89,6 +89,11 @@ class TabPracticeController(context: Context) {
+     private val appContext = context.applicationContext
+     private val prefs = appContext.getSharedPreferences("songsterr_tabs", Context.MODE_PRIVATE)
+ 
++    init {
++        // Start loading the recorded instruments (if downloaded) before the first Synth play.
++        com.theveloper.pixelplay.data.soundfont.SoundFontStore.prepare(appContext)
++    }
++
+     // ── Song and part ──
+     var title by mutableStateOf("")
+         private set
+@@ -166,6 +171,12 @@ class TabPracticeController(context: Context) {
+      */
+     var realStrings by mutableStateOf(prefs.getBoolean("real_strings", true))
+         private set
++    /**
++     * SYNTH plays every part on recorded instruments (the downloaded SoundFont) instead of
++     * Android's General MIDI synth and the modelled strings. Saved in prefs `sampled_sounds`.
++     */
++    var sampledSounds by mutableStateOf(prefs.getBoolean("sampled_sounds", true))
++        private set
+     /** Parts (track index) with a note sounding right now, for the live speaker animation. */
+     var soundingParts by mutableStateOf<Set<Int>>(emptySet())
+         private set
+@@ -692,6 +703,21 @@ class TabPracticeController(context: Context) {
+         restartSynthIfPlaying()
+     }
+ 
++    fun toggleSampledSounds() {
++        sampledSounds = !sampledSounds
++        prefs.edit().putBoolean("sampled_sounds", sampledSounds).apply()
++        restartSynthIfPlaying()
++    }
++
++    /** Recorded instruments are available and switched on. */
++    val usesSampledSounds: Boolean
++        get() = sampledSounds && com.theveloper.pixelplay.data.soundfont.SoundFontStore.fontOrNull() != null
++
++    /** The instrument sounds finished downloading / loading: switch a playing Synth over. */
++    fun onSampledSoundsReady() {
++        if (sampledSounds) restartSynthIfPlaying()
++    }
++
+     fun toggleMetronome() {
+         metronome = !metronome
+         restartSynthIfPlaying()
+@@ -1118,11 +1144,26 @@ class TabPracticeController(context: Context) {
+             ),
+             partList,
+         )
+-        var result = buildFile(realStrings)
+-        // Guitar / bass on modelled strings; if the audio track can't open, fall back to MIDI.
+-        val score = result.strings
+-        val strings = if (score != null) StringSynthPlayer.create(score) else null
+-        if (score != null && strings == null) result = buildFile(false)
++        // Recorded instruments (downloaded SoundFont): every part is rendered from samples, guitars
++        // and basses with their full articulation; the MIDI player only keeps time (muted).
++        val font = if (sampledSounds) com.theveloper.pixelplay.data.soundfont.SoundFontStore.fontOrNull() else null
++        var result: TabMidi.Result
++        var strings: StringSynthPlayer? = null
++        var sampled = false
++        if (font != null) {
++            result = buildFile(true)
++            strings = StringSynthPlayer.createSampled(font, result.bytes, result.strings)
++            sampled = strings != null
++        } else {
++            result = buildFile(realStrings)
++        }
++        if (!sampled) {
++            if (font != null) result = buildFile(realStrings)
++            // Guitar / bass on modelled strings; if the audio track can't open, fall back to MIDI.
++            val score = result.strings
++            strings = if (score != null) StringSynthPlayer.create(score) else null
++            if (score != null && strings == null) result = buildFile(false)
++        }
+         val file = File(appContext.cacheDir, "tab_synth.mid")
+         runCatching {
+             file.writeBytes(result.bytes)
+@@ -1136,6 +1177,7 @@ class TabPracticeController(context: Context) {
+             mp.setDataSource(file.absolutePath)
+             mp.setOnCompletionListener { onSynthComplete() }
+             mp.prepare()
++            if (sampled) mp.setVolume(0f, 0f)
+             strings?.prime()
+             mp.start()
+             strings?.start()
+diff --git a/app/src/main/java/com/theveloper/pixelplay/presentation/components/tabs/TabPracticePanel.kt b/app/src/main/java/com/theveloper/pixelplay/presentation/components/tabs/TabPracticePanel.kt
+index da0455b..18228f7 100644
+--- a/app/src/main/java/com/theveloper/pixelplay/presentation/components/tabs/TabPracticePanel.kt
++++ b/app/src/main/java/com/theveloper/pixelplay/presentation/components/tabs/TabPracticePanel.kt
+@@ -40,6 +40,8 @@ import androidx.compose.material3.CircularProgressIndicator
+ import androidx.compose.material3.SheetState
+ import androidx.compose.material.icons.rounded.MusicNote
+ import androidx.compose.material3.Switch
++import androidx.compose.material.icons.rounded.CloudDownload
++import androidx.lifecycle.compose.collectAsStateWithLifecycle
+ import androidx.compose.material3.SwitchDefaults
+ import androidx.compose.ui.text.style.TextOverflow
+ import com.theveloper.pixelplay.data.songsterr.SongsterrJson
+@@ -318,7 +320,7 @@ fun TabPracticePanel(
+                     }
+                 }
+                 PracticeSheet.SHARE -> ShareSheet(controller, onBackgroundColor) { sheet = null }
+-                PracticeSheet.HELP -> NotationHelp(controller, onBackgroundColor)
++                PracticeSheet.HELP -> NotationHelpSheet(controller, onBackgroundColor, accentColor, onAccentColor)
+                 PracticeSheet.DRUMS -> DrumKitSheet(controller, onBackgroundColor, accentColor, onAccentColor)
+             }
+         }
+@@ -1029,72 +1031,8 @@ private fun RowScope.ShareButton(label: String, icon: ImageVector, onBg: Color,
+     }
+ }
+ 
+-/** Legend of what each symbol means, for the loaded part. */
+-@Composable
+-private fun ColumnScope.NotationHelp(controller: TabPracticeController, onBg: Color) {
+-    Text("Notation Help", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = onBg)
+-    val ready = controller.state as? TabUiState.Ready ?: return
+-    if (ready.track.isDrums) {
+-        // Every kit piece this part uses, at its staff position.
+-        val used = ready.track.measures.asSequence()
+-            .flatMap { it.beats.asSequence() }
+-            .flatMap { it.notes.asSequence() }
+-            .groupBy { it.fret }
+-            .map { (id, notes) -> Triple(id, notes.groupingBy { it.staffPos }.eachCount().maxByOrNull { it.value }?.key ?: 0f, notes.first().drumGlyph) }
+-            .sortedBy { it.second }
+-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+-            used.forEach { (id, pos, glyph) -> DrumLegendItem(TabParser.drumArticulation(id).name, pos, glyph, onBg) }
+-        }
+-    } else {
+-        val rows = listOf(
+-            "5" to "Fret on that string", "(5)" to "Tied or ghost note", "x" to "Dead (muted) note",
+-            "H / P" to "Hammer-on / pull-off", "/  \\" to "Slide up / down", "<12>" to "Natural harmonic",
+-            "P.H." to "Pinch harmonic", "↑ full" to "Bend (¼, ½, full…)", "~~" to "Vibrato",
+-            "P.M. - - -" to "Palm mute", "let ring" to "Let the notes ring", ">" to "Accent",
+-            "⊓ / V" to "Down / up pick", "T" to "Tapping", "×2" to "Play the bars between repeat signs twice",
+-        )
+-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+-            rows.forEach { (sym, meaning) ->
+-                Row(verticalAlignment = Alignment.CenterVertically) {
+-                    Text(sym, modifier = Modifier.width(96.dp), color = onBg, fontWeight = FontWeight.Bold)
+-                    Text(meaning, color = onBg.copy(alpha = 0.75f), fontSize = 13.sp)
+-                }
+-            }
+-        }
+-    }
+-}
+-
+-@Composable
+-private fun DrumLegendItem(name: String, pos: Float, glyph: TabParser.DrumGlyph, onBg: Color) {
+-    val density = LocalDensity.current
+-    val painter = remember { AndroidScorePainter() }
+-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(78.dp)) {
+-        Text(name, color = onBg, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.height(48.dp))
+-        Canvas(Modifier.width(78.dp).height(96.dp)) {
+-            val gap = 9.dp.toPx()
+-            val top = 30.dp.toPx()
+-            val ink = onBg.toArgb()
+-            for (i in 0 until 5) drawLine(onBg.copy(alpha = 0.5f), Offset(0f, top + i * gap), Offset(size.width, top + i * gap), 1.dp.toPx())
+-            drawIntoCanvas { c ->
+-                painter.canvas = c.nativeCanvas
+-                val y = top + pos * gap
+-                if (pos <= -1f) {
+-                    var l = -1
+-                    while (l >= pos) { painter.line(size.width / 2 - gap, top + l * gap, size.width / 2 + gap, top + l * gap, 1.dp.toPx(), ink); l-- }
+-                }
+-                if (pos >= 5f) {
+-                    var l = 5
+-                    while (l <= pos) { painter.line(size.width / 2 - gap, top + l * gap, size.width / 2 + gap, top + l * gap, 1.dp.toPx(), ink); l++ }
+-                }
+-                legendHead(painter, glyph, size.width / 2, y, gap, ink)
+-                painter.canvas = null
+-            }
+-        }
+-    }
+-}
+-
+ /** Same noteheads as the score. */
+-private fun legendHead(p: ScorePainter, glyph: TabParser.DrumGlyph, x: Float, y: Float, u: Float, color: Int) {
++internal fun legendHead(p: ScorePainter, glyph: TabParser.DrumGlyph, x: Float, y: Float, u: Float, color: Int) {
+     val st = 0.13f * u
+     val xh = u * 0.46f
+     fun cross() {
+@@ -1147,7 +1085,9 @@ fun TabOptionsSection(
+                 OptionPill("Back to tab", contentColor, itemBackgroundColor, Modifier.weight(1f)) { controller.pdfUri = null }
+             }
+         }
+-        Row(
++        InstrumentSoundsOption(controller, contentColor, accentColor, itemBackgroundColor)
++        // The modelled strings are the fallback when recorded sounds are off or not downloaded.
++        if (!controller.usesSampledSounds) Row(
+             Modifier
+                 .fillMaxWidth()
+                 .clip(RoundedCornerShape(18.dp))
+@@ -1280,3 +1220,58 @@ private fun TimingButton(label: String, contentColor: Color, onClick: () -> Unit
+         contentAlignment = Alignment.Center,
+     ) { Text(label, color = contentColor, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
+ }
++
++/** "Real instrument sounds": download the recorded instruments, then switch them on or off. */
++@Composable
++private fun InstrumentSoundsOption(
++    controller: TabPracticeController,
++    contentColor: Color,
++    accentColor: Color,
++    itemBackgroundColor: Color,
++) {
++    val context = LocalContext.current
++    val state by com.theveloper.pixelplay.data.soundfont.SoundFontStore.state.collectAsStateWithLifecycle()
++    androidx.compose.runtime.LaunchedEffect(state) {
++        if (state == com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Ready &&
++            com.theveloper.pixelplay.data.soundfont.SoundFontStore.load(context) != null
++        ) controller.onSampledSoundsReady()
++    }
++    val ready = state == com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Ready
++    Row(
++        Modifier
++            .fillMaxWidth()
++            .clip(RoundedCornerShape(18.dp))
++            .background(itemBackgroundColor)
++            .clickable {
++                if (ready) controller.toggleSampledSounds()
++                else com.theveloper.pixelplay.data.soundfont.SoundFontStore.download(context)
++            }
++            .padding(horizontal = 16.dp, vertical = 8.dp),
++        verticalAlignment = Alignment.CenterVertically,
++    ) {
++        Column(Modifier.weight(1f)) {
++            Text("Real instrument sounds", color = contentColor, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
++            val sub = when (val st = state) {
++                com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Ready ->
++                    "SYNTH plays recorded guitars, basses, drums and keys, with bends, slides, harmonics and palm mutes"
++                is com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Downloading ->
++                    "Downloading… ${(st.progress * 100).toInt()}%"
++                is com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Failed -> "${st.message}. Tap to try again"
++                com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Missing ->
++                    "Tap to download recorded instruments (${com.theveloper.pixelplay.data.soundfont.SoundFontStore.SIZE_BYTES / 1_000_000} MB, once)"
++            }
++            Text(sub, color = contentColor.copy(alpha = 0.6f), fontSize = 12.sp)
++        }
++        Spacer(Modifier.width(12.dp))
++        when (state) {
++            com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Ready -> Switch(
++                checked = controller.sampledSounds,
++                onCheckedChange = { controller.toggleSampledSounds() },
++                colors = SwitchDefaults.colors(checkedTrackColor = accentColor),
++            )
++            is com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Downloading ->
++                CircularProgressIndicator(modifier = Modifier.size(24.dp), color = accentColor, strokeWidth = 3.dp)
++            else -> Icon(androidx.compose.material.icons.Icons.Rounded.CloudDownload, contentDescription = null, tint = accentColor)
++        }
++    }
++}
+-- 
+2.43.0
+

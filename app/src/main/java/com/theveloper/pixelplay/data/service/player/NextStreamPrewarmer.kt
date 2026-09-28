@@ -15,12 +15,18 @@ import kotlinx.coroutines.withTimeoutOrNull
  * Nothing new starts while the playing song is still loading (`networkBusy`): on a slow
  * connection the next song's bytes would be taken from the song being listened to. Work that
  * already started is left to finish.
+ *
+ * Last, [prepareFully] may fetch the whole next song (e.g. into the song cache on Wi-Fi), so
+ * its transition and playback no longer depend on the network at all. It gets a longer time
+ * budget and is cancelled like the rest when the next song changes.
  */
 internal class NextStreamPrewarmer<T>(
     private val scope: CoroutineScope,
     private val prepare: suspend (T) -> Unit,
     private val onFailure: (Exception) -> Unit = {},
     private val prepareLater: suspend (T) -> Unit = {},
+    private val prepareFully: suspend (T) -> Unit = {},
+    private val fullTimeoutMs: Long = FULL_PREPARE_TIMEOUT_MS,
 ) {
     private var job: Job? = null
     private var preparedId: String? = null
@@ -52,15 +58,21 @@ internal class NextStreamPrewarmer<T>(
             }
             // One at a time and only after the next song: the lookahead never competes with it.
             for (item in later) attempt { prepareLater(item) }
+            attempt(fullTimeoutMs) { prepareFully(next) }
         }
     }
 
-    private suspend fun attempt(block: suspend () -> Unit): Boolean = try {
-        withTimeoutOrNull(10_000) { block() } != null
+    private suspend fun attempt(timeoutMs: Long = PREPARE_TIMEOUT_MS, block: suspend () -> Unit): Boolean = try {
+        withTimeoutOrNull(timeoutMs) { block() } != null
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (failure: Exception) {
         onFailure(failure)
         false
+    }
+
+    private companion object {
+        const val PREPARE_TIMEOUT_MS = 10_000L
+        const val FULL_PREPARE_TIMEOUT_MS = 120_000L
     }
 }

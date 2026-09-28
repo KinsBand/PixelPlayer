@@ -35,12 +35,32 @@ object YouTubeHttp {
         return parsed.host.endsWith("googlevideo.com") && parsed.encodedPath.startsWith("/videoplayback")
     }
 
-    fun userAgentFor(url: String): String =
-        if (runCatching { YoutubeParsingHelper.isVisionOsStreamingUrl(url) }.getOrDefault(false)) {
+    /**
+     * User agents of the clients that minted recent stream URLs, when it isn't what the URL's
+     * `c` parameter implies (both visionOS profiles report `c=VISIONOS`, but only one of them
+     * uses the native app user agent).
+     */
+    private val mintedBy = object : LinkedHashMap<String, String>(64, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>) = size > 256
+    }
+
+    /** Remembers that [url] must be fetched with [userAgent]. */
+    fun rememberUserAgent(url: String, userAgent: String) {
+        synchronized(mintedBy) { mintedBy[url] = userAgent }
+    }
+
+    fun userAgentFor(url: String): String {
+        synchronized(mintedBy) { mintedBy[url] }?.let { return it }
+        val parsed = url.toHttpUrlOrNull()
+        if (parsed?.queryParameter("c") == VisionOsMusicPlayer.CLIENT_NAME &&
+            parsed.queryParameter("cver") == VisionOsMusicPlayer.CLIENT_VERSION
+        ) return VisionOsMusicPlayer.USER_AGENT
+        return if (runCatching { YoutubeParsingHelper.isVisionOsStreamingUrl(url) }.getOrDefault(false)) {
             YoutubeParsingHelper.getVisionOsUserAgent(null)
         } else {
             DESKTOP_USER_AGENT
         }
+    }
 
     /** Total byte size advertised by googlevideo in the `clen` parameter, if present. */
     fun contentLengthOf(url: String): Long? =

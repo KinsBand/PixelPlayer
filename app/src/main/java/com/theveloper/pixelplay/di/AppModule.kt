@@ -340,8 +340,8 @@ object AppModule {
         @ApplicationContext context: Context,
         base: OkHttpClient
     ): ImageLoader {
-        // Share the app's connection pool and dispatcher so covers reuse warm HTTP/2
-        // connections. Interceptors are dropped to keep image loading behaviour unchanged.
+        // Reuse warm connections; artwork gets separate thumbnail and player dispatchers.
+        // Interceptors are dropped to keep image loading behaviour unchanged.
         val okHttpClient = base.newBuilder()
             .apply {
                 interceptors().clear()
@@ -355,7 +355,7 @@ object AppModule {
                 add(com.theveloper.pixelplay.data.image.DisplayArtworkMapper.Strings())
                 add(com.theveloper.pixelplay.data.image.DisplayArtworkMapper())
             }
-            .okHttpClient(okHttpClient)
+            .callFactory(com.theveloper.pixelplay.data.image.ArtworkCallFactory(okHttpClient))
             .dispatcher(Dispatchers.Default) // Use CPU-bound dispatcher for decoding
             .allowHardware(true) // Re-enable hardware bitmaps for better performance
             .memoryCache {

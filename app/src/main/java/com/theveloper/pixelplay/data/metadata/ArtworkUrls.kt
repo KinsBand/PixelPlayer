@@ -19,10 +19,11 @@ object ArtworkUrls {
         val edge = maxOf(widthPx, heightPx)
         if (edge <= 256) youTubeListFrame(url)?.let { return it }
         val size = when {
+            edge <= 128 -> 128
             edge <= 256 -> 256
             edge <= 512 -> 512
             edge <= 1024 -> 1024
-            else -> return url // Keep the original quality for large player artwork.
+            else -> DEFAULT_SIZE
         }
         val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return url
         // Query parameters can sign a URL. Never rewrite those, or local/unknown sources.
@@ -32,8 +33,11 @@ object ArtworkUrls {
         if (!listOf("googleusercontent.com", "ggpht.com", "mzstatic.com", "dzcdn.net", "cdn-images.deezer.com").any(::onDomain)) return url
         val sourceSize = sizeInUrl.findAll(url).lastOrNull()?.groupValues?.drop(1)
             ?.firstOrNull { it.isNotEmpty() }?.toIntOrNull() ?: return url
-        // This optimization only downsizes; it doesn't invent a higher-quality original.
-        return if (sourceSize > size) upgrade(url, size) ?: url else url
+        // Original-quality requests retain large originals but can promote search thumbnails.
+        if (edge > 1024) return if (sourceSize < size) upgrade(url, size) ?: url else url
+        // Tiny catalogue URLs may be all search supplied. Ask the provider for its larger
+        // variant when opening the song, without enlarging downloads for small views.
+        return if (sourceSize > size || size == 1024) upgrade(url, size) ?: url else url
     }
 
     /** Size used for display and for embedding into downloads. */

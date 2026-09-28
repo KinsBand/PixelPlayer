@@ -47,7 +47,8 @@ fun OptimizedAlbumArt(
     title: String,
     modifier: Modifier = Modifier,
     targetSize: Size = SafeOriginalAlbumArtSize,
-    placeholderModel: Any? = null
+    placeholderModel: Any? = null,
+    prioritizeArtwork: Boolean = false
 ) {
     val context = LocalContext.current
     val requestTargetSize = remember(targetSize) {
@@ -81,7 +82,7 @@ fun OptimizedAlbumArt(
     val placeholderMemoryCacheKey = remember(memoryCacheKey, uri) {
         when (uri) {
             is ImageRequest -> uri.placeholderMemoryCacheKey
-                ?: uri.memoryCacheKey
+                ?: smallerArtworkInMemory(context.imageLoader.memoryCache, uri.data)
                 ?: memoryCacheKey?.let { MemoryCache.Key(it) }
             // Show the cover a list row already decoded on the first frame, then crossfade to
             // this larger request. The request's own key can't help: it isn't cached yet.
@@ -89,10 +90,13 @@ fun OptimizedAlbumArt(
                 ?: memoryCacheKey?.let { MemoryCache.Key(it) }
         }
     }
-    val requestModel = remember(context, uri, requestTargetSize) {
+    val requestModel = remember(context, uri, requestTargetSize, prioritizeArtwork) {
         when (uri) {
             is ImageRequest -> uri.newBuilder(context).apply {
                 size(requestTargetSize)
+                if (prioritizeArtwork) {
+                    setHeader(com.theveloper.pixelplay.data.image.ArtworkCallFactory.PRIORITY_HEADER, "player")
+                }
                 if (uri.memoryCacheKey == null) {
                     memoryCacheKey(memoryCacheKey)
                 }
@@ -106,6 +110,9 @@ fun OptimizedAlbumArt(
                 .memoryCachePolicy(CachePolicy.ENABLED)
                 .diskCachePolicy(if (isStableLocalArtwork) CachePolicy.DISABLED else CachePolicy.ENABLED)
                 .apply {
+                    if (prioritizeArtwork) {
+                        setHeader(com.theveloper.pixelplay.data.image.ArtworkCallFactory.PRIORITY_HEADER, "player")
+                    }
                     if (memoryCacheKey != null) {
                         memoryCacheKey(memoryCacheKey)
                     }
@@ -146,7 +153,9 @@ fun OptimizedAlbumArt(
             }
         },
         error = {
-            val cachedPainter = lastSuccessPainter
+            val cachedPainter = lastSuccessPainter ?: placeholderMemoryCacheKey
+                ?.let { context.imageLoader.memoryCache?.get(it)?.bitmap }
+                ?.let { androidx.compose.ui.graphics.painter.BitmapPainter(it.asImageBitmap()) }
             if (cachedPainter != null) {
                 SubcomposeAsyncImageContent(painter = cachedPainter)
             } else {
@@ -242,12 +251,15 @@ internal fun safeAlbumArtTargetSize(targetSize: Size): Size {
  */
 internal fun smallerArtworkKeyCandidates(model: Any?): List<String> {
     val url = when (model) {
+        is ImageRequest -> return smallerArtworkKeyCandidates(model.data)
         is String -> model
         is Uri -> model.toString()
         else -> null
     }?.takeIf { it.isNotBlank() } ?: return emptyList()
     return listOf(
+        albumArtMemoryCacheKey(model, SmartImageListTargetSize) ?: url,
         ArtworkUrls.forDisplay(url, SmartImageListTargetSize.pxOr(128), SmartImageListTargetSize.pxOr(128)),
+        ArtworkUrls.forDisplay(url, 256, 256),
         ArtworkUrls.forDisplay(url, 300, 300),
         url
     ).distinct()

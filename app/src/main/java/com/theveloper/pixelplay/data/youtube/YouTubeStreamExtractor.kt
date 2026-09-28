@@ -18,9 +18,19 @@ import javax.inject.Singleton
  */
 @Singleton
 class YouTubeStreamExtractor @Inject constructor(private val innerTube: InnerTubeClient) {
-    private val directCooldown = object : LinkedHashMap<String, Long>(64, .75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>) = size > 64
+    /** Which clients work lately, and how fast; orders and paces every lookup. */
+    internal val health = StreamClientHealth()
+
+    /** The client whose manifest is cached / was last used per video, to blame it on a 403. */
+    private val lastClient = object : LinkedHashMap<String, String>(64, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>) = size > 128
     }
+
+    /** Direct (no JavaScript) manifest sources, in preferred order when equally healthy. */
+    private val directClients: Map<String, suspend (String) -> List<YouTubeAudioStream>> = linkedMapOf(
+        StreamClients.VISIONOS to { id -> innerTube.directStreams(id) },
+        StreamClients.VISIONOS_MUSIC to { id -> innerTube.musicDirectStreams(id) },
+    )
     private val locks = com.theveloper.pixelplay.utils.KeyedMutex<String>()
     private val related = object : LinkedHashMap<String, List<org.schabi.newpipe.extractor.stream.StreamInfoItem>>(32, .75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<org.schabi.newpipe.extractor.stream.StreamInfoItem>>) = size > 32
@@ -74,7 +84,7 @@ class YouTubeStreamExtractor @Inject constructor(private val innerTube: InnerTub
     fun onNetworkChanged() {
         networkGeneration++
         synchronized(manifests) { manifests.clear() }
-        synchronized(directCooldown) { directCooldown.clear() }
+        health.onNetworkChanged()
     }
 
     suspend fun streamManifest(videoId: String, forceRefresh: Boolean = false): List<YouTubeAudioStream> = withContext(Dispatchers.IO) {
@@ -90,20 +100,15 @@ class YouTubeStreamExtractor @Inject constructor(private val innerTube: InnerTub
             val generation = networkGeneration
             try {
                 val started = System.nanoTime()
-                // A native player request can finish without full watch-page extraction.
-                // Hedge slow responses instead of adding their timeout to fallback latency.
-                val skipDirect = forceRefresh || synchronized(directCooldown) { (directCooldown[id] ?: 0) > now }
-                val resolved = if (skipDirect) {
-                    "newpipe" to extractNewPipeStreams(id, now)
-                } else resolveWithHedgedFallback(
-                    direct = { innerTube.directStreams(id).takeIf { it.isNotEmpty() }?.let { "visionos" to it } },
-                    fallback = { extractNewPipeStreams(id, now).takeIf { it.isNotEmpty() }?.let { "newpipe" to it } }
-                )
+                val resolved = raceHedged(attemptsFor(id, now, fullExtractionOnly = forceRefresh)) { client, outcome ->
+                    record(client, outcome)
+                }
                 val streams = resolved?.second.orEmpty()
                 ensureActive()
                 Timber.tag("StreamingLatency").d("manifest_provider=%s manifest_network_ms=%d streams=%d",
                     resolved?.first ?: "none", (System.nanoTime() - started) / 1_000_000, streams.size)
                 com.theveloper.pixelplay.data.diagnostics.PlaybackTrace.mark("manifest", resolved?.first ?: "none")
+                if (resolved != null) synchronized(lastClient) { lastClient[id] = resolved.first }
                 if (streams.isNotEmpty() && generation == networkGeneration) synchronized(manifests) { manifests[id] = streams }
                 streams
             } catch (e: CancellationException) {
@@ -141,7 +146,7 @@ class YouTubeStreamExtractor @Inject constructor(private val innerTube: InnerTub
             }
             val contentLength = YouTubeHttp.contentLengthOf(stream.content)
                 ?: stream.itagItem?.contentLength?.takeIf { it > 0 } ?: -1L
-            YouTubeAudioStream(stream.content, mimeType, bitrateBps, expiry, contentLength)
+            YouTubeAudioStream(stream.content, mimeType, bitrateBps, expiry, contentLength, StreamClients.NEWPIPE)
         }.distinctBy { it.url }.sortedByDescending { it.bitrate }
     }
 
@@ -160,17 +165,86 @@ class YouTubeStreamExtractor @Inject constructor(private val innerTube: InnerTub
     private companion object {
         /** A watch-page parse can briefly need tens of MB of heap. */
         const val RELATED_MIN_FREE_BYTES = 48L * 1024 * 1024
+        /** Full extraction downloads and parses a watch page; on a weak signal that takes a while. */
+        const val FULL_EXTRACTION_TIMEOUT_MS = 20_000L
+        /** A refused URL whose client isn't known skips direct clients this long (the old cooldown). */
+        const val UNKNOWN_CLIENT_EXCLUSION_MS = 120_000L
     }
 
     /**
-     * Drops the cached manifest. [penalizeDirect] also sends the next lookups to full
-     * extraction for a while; use it only when a URL from the direct client was rejected.
+     * Drops the cached manifest. [penalizeDirect] means its URL was refused: the client that
+     * produced it is then skipped for this song for a while, so the retry goes to the next
+     * client (the other direct one first, full extraction last) instead of the same one.
      */
-    fun invalidate(videoId: String, penalizeDirect: Boolean = true) {
+    fun invalidate(videoId: String, penalizeDirect: Boolean = true) =
+        dropManifest(videoId, if (penalizeDirect) StreamClientHealth.Failure.MEDIA_REJECTED else null)
+
+    /** The URL for [videoId] never sent a first byte: same as a refused one, but counted as a stall. */
+    fun reportStall(videoId: String) = dropManifest(videoId, StreamClientHealth.Failure.STALL)
+
+    private fun dropManifest(videoId: String, failure: StreamClientHealth.Failure?) {
         val id = videoId.removePrefix("yt_")
         synchronized(manifests) { manifests.remove(id) }
-        if (penalizeDirect) {
-            synchronized(directCooldown) { directCooldown[id] = System.currentTimeMillis() + 120_000 }
+        if (failure == null) return
+        val client = synchronized(lastClient) { lastClient[id] }
+        if (client == null) {
+            // Nothing known about where the URL came from: skip the direct clients, as before.
+            StreamClients.DIRECT.forEach { health.excludeForVideo(id, it, UNKNOWN_CLIENT_EXCLUSION_MS) }
+            return
         }
+        health.recordFailure(client, failure)
+        health.excludeForVideo(id, client)
+    }
+
+    /**
+     * The race for one lookup: the healthiest direct client at once, the next one when the
+     * first is slower than it usually is (or failed), and full extraction when both are stuck.
+     * Clients that failed for this song recently are left out, unless that leaves nothing.
+     */
+    private fun attemptsFor(id: String, now: Long, fullExtractionOnly: Boolean): List<HedgedAttempt<List<YouTubeAudioStream>>> {
+        var excluded = health.excludedFor(id)
+        if (excluded.containsAll(StreamClients.DIRECT + StreamClients.NEWPIPE)) {
+            health.clearExclusions(id)
+            excluded = emptySet()
+        }
+        val direct = if (fullExtractionOnly) emptyList()
+            else health.order(directClients.keys.filter { it !in excluded })
+        val attempts = direct.mapIndexed { index, client ->
+            HedgedAttempt(
+                name = client,
+                startAfterMs = if (index == 0) 0L else health.secondaryDelayMs(direct.first()),
+                timeoutMs = health.directTimeoutMs(client),
+                block = { directClients.getValue(client)(id).takeIf { it.isNotEmpty() } },
+            )
+        }
+        if (StreamClients.NEWPIPE in excluded && attempts.isNotEmpty()) return attempts
+        return attempts + HedgedAttempt(
+            name = StreamClients.NEWPIPE,
+            startAfterMs = direct.firstOrNull()?.let(health::fallbackDelayMs) ?: 0L,
+            timeoutMs = FULL_EXTRACTION_TIMEOUT_MS,
+            block = { extractNewPipeStreams(id, now).takeIf { it.isNotEmpty() } },
+        )
+    }
+
+    private fun record(client: String, outcome: HedgedOutcome) {
+        when (outcome) {
+            is HedgedOutcome.Success -> health.recordSuccess(client, outcome.elapsedMs)
+            is HedgedOutcome.Empty -> health.recordFailure(client, StreamClientHealth.Failure.EMPTY)
+            is HedgedOutcome.TimedOut -> health.recordFailure(client, StreamClientHealth.Failure.ERROR)
+            // Being offline says nothing about a client.
+            is HedgedOutcome.Failed -> if (!isOffline(outcome.error)) {
+                health.recordFailure(client, StreamClientHealth.Failure.ERROR)
+            }
+        }
+    }
+
+    private fun isOffline(error: Throwable): Boolean {
+        var cause: Throwable? = error
+        while (cause != null) {
+            if (cause is java.net.UnknownHostException || cause is java.net.ConnectException ||
+                cause is java.net.NoRouteToHostException) return true
+            cause = cause.cause
+        }
+        return false
     }
 }

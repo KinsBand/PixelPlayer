@@ -1,0 +1,45 @@
+From 7cd443e68497160d91a7b0dc9133dfd0b4ba2d2f Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 28 Sep 2026 18:43:24 +1000
+Subject: [PATCH] Video full screen: restore portrait when leaving full screen
+
+The full-screen effect's onDispose read videoFullscreen, which had already
+flipped to false on exit, so the saved orientation was never restored and the
+app stayed locked to landscape until restart. Capture whether full screen was
+entered when the effect starts and use that in onDispose.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EzyBeBJGG55RsMKWmRWTnP
+---
+ .../presentation/components/player/FullPlayerContent.kt   | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/app/src/main/java/com/theveloper/pixelplay/presentation/components/player/FullPlayerContent.kt b/app/src/main/java/com/theveloper/pixelplay/presentation/components/player/FullPlayerContent.kt
+index e480b1c..9feaa61 100644
+--- a/app/src/main/java/com/theveloper/pixelplay/presentation/components/player/FullPlayerContent.kt
++++ b/app/src/main/java/com/theveloper/pixelplay/presentation/components/player/FullPlayerContent.kt
+@@ -367,7 +367,11 @@ fun FullPlayerContent(
+     androidx.activity.compose.BackHandler(enabled = videoFullscreen) { videoFullscreen = false }
+     DisposableEffect(videoFullscreen, hostActivity) {
+         val activity = hostActivity
+-        if (videoFullscreen && activity != null) {
++        // Captured now: by the time onDispose runs for a full-screen exit, videoFullscreen has
++        // already flipped to false, so reading it there skipped the restore and left the app
++        // locked in landscape until it was restarted.
++        val enteredFullscreen = videoFullscreen && activity != null
++        if (enteredFullscreen && activity != null) {
+             if (orientationBeforeFullscreen == null) orientationBeforeFullscreen = activity.requestedOrientation
+             activity.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+             hideSystemBarsForVideo(activity)
+@@ -375,7 +379,7 @@ fun FullPlayerContent(
+         onDispose {
+             // A config-change recreation keeps full screen on (the flag is saved); only a real
+             // exit gives the orientation and the user's bar setting back.
+-            if (videoFullscreen && activity != null && !activity.isChangingConfigurations) {
++            if (enteredFullscreen && activity != null && !activity.isChangingConfigurations) {
+                 activity.requestedOrientation = orientationBeforeFullscreen
+                     ?: android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                 orientationBeforeFullscreen = null
+-- 
+2.43.0
+

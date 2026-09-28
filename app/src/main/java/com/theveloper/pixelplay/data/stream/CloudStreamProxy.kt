@@ -46,13 +46,24 @@ import java.util.concurrent.ConcurrentHashMap
 abstract class CloudStreamProxy<K : Any>(
     private val okHttpClient: OkHttpClient,
     upstreamStallTimeoutMs: Long = UPSTREAM_STALL_TIMEOUT_MS,
-    private val resumeBudgetMs: Long = RESUME_BUDGET_MS
+    private val resumeBudgetMs: Long = RESUME_BUDGET_MS,
+    firstByteTimeoutMs: Long = FIRST_BYTE_TIMEOUT_MS,
 ) {
     private val streamingClient = okHttpClient.newBuilder()
         // No bytes for this long and the connection is treated as stalled (common on a weak
         // mobile signal): a new connection resumes at the same byte sooner than waiting it out.
         .readTimeout(upstreamStallTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
         .callTimeout(0, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
+
+    /**
+     * For requests made before the player has a single byte: a CDN that accepts the request
+     * and then sends nothing is usually a URL that will never work (Metrolist notes clean
+     * sessions of one visionOS profile stalling like this), so give up on it sooner and let
+     * [onFirstByteStall] switch to another source instead of retrying the same URL.
+     */
+    private val firstByteClient = streamingClient.newBuilder()
+        .readTimeout(minOf(firstByteTimeoutMs, upstreamStallTimeoutMs), java.util.concurrent.TimeUnit.MILLISECONDS)
         .build()
 
     // ─── Subclass Configuration ────────────────────────────────────────
@@ -220,6 +231,15 @@ abstract class CloudStreamProxy<K : Any>(
         invalidateStream(id)
     }
 
+    /**
+     * A request made before the player got any byte of [id] went silent (see
+     * [FIRST_BYTE_TIMEOUT_MS]). The default treats it like any transport failure; subclasses
+     * that have more than one source should move to another one.
+     */
+    protected open fun onFirstByteStall(id: K) {
+        onUpstreamFailure(id, null, 1)
+    }
+
     // ─── Internal ──────────────────────────────────────────────────────
 
     protected suspend fun getOrFetchStreamUrl(id: K): String? {
@@ -236,7 +256,12 @@ abstract class CloudStreamProxy<K : Any>(
     // Retry only before downstream headers/bytes are sent. Media3 reopens its original
     // DataSpec after a socket failure, preserving the byte offset; never splice renditions.
     // [mayRetry] is asked before each retry; false gives up with the last failure.
-    private suspend fun openUpstream(id: K, range: String?, mayRetry: () -> Boolean = { true }): Upstream {
+    private suspend fun openUpstream(
+        id: K,
+        range: String?,
+        beforeFirstByte: Boolean = false,
+        mayRetry: () -> Boolean = { true }
+    ): Upstream {
         for (attempt in 0..2) {
             val last = attempt == 2
             try {
@@ -244,7 +269,8 @@ abstract class CloudStreamProxy<K : Any>(
                 if (!CloudStreamSecurity.isSafeRemoteStreamUrl(url, allowedHostSuffixes, true)) {
                     throw java.io.IOException("Rejected upstream URL")
                 }
-                val response = streamingClient.newCall(buildUpstreamRequest(url, range)).awaitResponse()
+                val client = if (beforeFirstByte) firstByteClient else streamingClient
+                val response = client.newCall(buildUpstreamRequest(url, range)).awaitResponse()
                 if (last || !StreamRetryPolicy.retryStatus(response.code) || !mayRetry()) return Upstream(url, response)
                 Timber.tag(proxyTag).w("Upstream HTTP %d (attempt %d), retrying", response.code, attempt + 1)
                 response.close()
@@ -253,7 +279,12 @@ abstract class CloudStreamProxy<K : Any>(
                 throw cancelled
             } catch (error: java.io.IOException) {
                 if (last || !mayRetry()) throw error
-                onUpstreamFailure(id, null, attempt + 1)
+                if (beforeFirstByte && error is java.io.InterruptedIOException) {
+                    Timber.tag(proxyTag).w("No first byte from upstream (attempt %d); switching source", attempt + 1)
+                    onFirstByteStall(id)
+                } else {
+                    onUpstreamFailure(id, null, attempt + 1)
+                }
             }
             delay(StreamRetryPolicy.delayMs(attempt))
         }
@@ -268,9 +299,10 @@ abstract class CloudStreamProxy<K : Any>(
         start: Long,
         endInclusive: Long,
         total: Long,
+        beforeFirstByte: Boolean = false,
         mayRetry: () -> Boolean = { true }
     ): Upstream {
-        val upstream = openUpstream(id, "bytes=$start-$endInclusive", mayRetry)
+        val upstream = openUpstream(id, "bytes=$start-$endInclusive", beforeFirstByte, mayRetry)
         val code = upstream.response.code
         val sameResource = knownContentLength(upstream.url) == total
         if (!sameResource || (code != 206 && !(code == 200 && start == 0L))) {
@@ -297,6 +329,141 @@ abstract class CloudStreamProxy<K : Any>(
     /** The head for [id] could not be continued upstream (the rendition changed or vanished). */
     protected open fun onHeadUnusable(id: K, key: StreamHeadCache.Key) {
         headCache?.remove(key)
+    }
+
+    // ─── Body cache: whole songs, no network at all ────────────────────
+
+    /** Complete songs streamed or prefetched before; null disables it. */
+    protected open val bodyCache: StreamBodyCache? = null
+
+    /** A complete cached song that can be served for [id] without any upstream request. */
+    protected open fun cachedBodyFor(id: K): StreamBodyCache.Entry? = null
+
+    /** [id] is being served from [entry] (e.g. to report what is playing). */
+    protected open fun onServedFromBody(id: K, entry: StreamBodyCache.Entry) {}
+
+    /**
+     * Downloads the rest of [id]'s current rendition into the body cache, continuing a partial
+     * copy, so the song can later play without the network. [pace] returns how long to wait
+     * after reading some bytes (to leave bandwidth to the song that is playing). Returns true
+     * when the whole song is cached.
+     */
+    protected suspend fun prefetchBody(id: K, pace: (bytes: Int, elapsedMs: Long) -> Long = { _, _ -> 0L }): Boolean {
+        val cache = bodyCache ?: return false
+        if (cachedBodyFor(id) != null) return true
+        val url = getOrFetchStreamUrl(id) ?: return false
+        val key = headKeyFor(id, url) ?: return false
+        if (!CloudStreamSecurity.isSafeRemoteStreamUrl(url, allowedHostSuffixes, true)) return false
+        val total = key.contentLength
+        val writer = cache.openWriter(key, cache.storedLength(key)) ?: return cachedBodyFor(id) != null
+        pinRendition(id, key)
+        return withContext(Dispatchers.IO) {
+            try {
+                val buffer = ByteArray(64 * 1024)
+                var position = writer.length
+                while (position < total) {
+                    val end = minOf(position + upstreamChunkBytes - 1, total - 1)
+                    openChunk(id, position, end, total).response.use { response ->
+                        val input = response.body.byteStream()
+                        while (position <= end) {
+                            val started = System.nanoTime()
+                            val read = input.read(buffer, 0, minOf(buffer.size.toLong(), end - position + 1).toInt())
+                            if (read < 0) throw java.io.IOException("Upstream chunk ended early")
+                            if (!writer.append(buffer, 0, read, position)) return@withContext false
+                            position += read
+                            val pause = pace(read, (System.nanoTime() - started) / 1_000_000)
+                            if (pause > 0) delay(pause)
+                        }
+                    }
+                }
+                true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: java.io.IOException) {
+                Timber.tag(proxyTag).d(e, "Song prefetch stopped at %d/%d", writer.length, total)
+                false
+            } finally {
+                runCatching { writer.close() }
+            }
+        }
+    }
+
+    /** Inclusive byte bounds of [validation] in a resource of [total] bytes, or null if unsatisfiable. */
+    private fun rangeBounds(validation: CloudStreamSecurity.RangeHeaderValidation, total: Long): Pair<Long, Long>? {
+        val from: Long
+        val to: Long
+        when {
+            validation.normalizedHeader == null -> { from = 0L; to = total - 1 }
+            validation.isSuffixRange -> {
+                from = (total - (validation.endInclusive ?: 0L)).coerceAtLeast(0L); to = total - 1
+            }
+            else -> {
+                from = validation.startInclusive ?: 0L
+                to = minOf(validation.endInclusive ?: (total - 1), total - 1)
+            }
+        }
+        return if (from >= total || from > to) null else from to to
+    }
+
+    /**
+     * Serves [validation]'s range of a completely cached song straight from disk. Returns false
+     * (nothing sent) when the file can't be opened, so the caller streams it instead.
+     */
+    private suspend fun serveBody(
+        call: ApplicationCall,
+        id: K,
+        entry: StreamBodyCache.Entry,
+        validation: CloudStreamSecurity.RangeHeaderValidation,
+        requestStartedNanos: Long
+    ): Boolean {
+        val total = entry.key.contentLength
+        val bounds = rangeBounds(validation, total)
+        if (bounds == null) {
+            call.response.header("Content-Range", "bytes */$total")
+            call.respond(HttpStatusCode(416, "Range Not Satisfiable"), "Range not satisfiable")
+            return true
+        }
+        val (from, to) = bounds
+        val file = try {
+            withContext(Dispatchers.IO) { java.io.RandomAccessFile(entry.file, "r") }
+        } catch (_: java.io.IOException) {
+            return false
+        }
+        bodyCache?.touch(entry)
+        // Any later network request for this song must continue the very same file.
+        pinRendition(id, entry.key)
+        onServedFromBody(id, entry)
+        val partial = validation.normalizedHeader != null
+        call.response.header("Accept-Ranges", "bytes")
+        if (partial) call.response.header("Content-Range", "bytes $from-$to/$total")
+        file.use { input ->
+            call.respondBytesWriter(
+                contentType = ContentType.parse(entry.key.mimeType),
+                status = if (partial) HttpStatusCode.PartialContent else HttpStatusCode.OK,
+                contentLength = to - from + 1
+            ) {
+                withContext(Dispatchers.IO) {
+                    val buffer = ByteArray(64 * 1024)
+                    var position = from
+                    input.seek(from)
+                    var first = true
+                    while (position <= to) {
+                        val read = input.read(buffer, 0, minOf(buffer.size.toLong(), to - position + 1).toInt())
+                        if (read < 0) throw java.io.IOException("Cached song ended early")
+                        writeFully(buffer, 0, read)
+                        flush()
+                        if (first) {
+                            first = false
+                            Timber.tag("StreamingLatency").d("proxy_first_bytes_ms=%d source=body",
+                                (System.nanoTime() - requestStartedNanos) / 1_000_000)
+                            com.theveloper.pixelplay.data.diagnostics.PlaybackTrace.mark("first_bytes", "body")
+                        }
+                        position += read
+                    }
+                }
+            }
+        }
+        return true
     }
 
     /**
@@ -409,10 +576,13 @@ abstract class CloudStreamProxy<K : Any>(
         var teeKey: StreamHeadCache.Key? = null
         var teeBuffer: ByteArray? = null
         var teeFilled = 0
+        // The whole song, in order, into the body cache (identity from the head or the URL).
+        var bodyKey: StreamHeadCache.Key? = null
 
         if (head != null) {
             val key = head.entry.key
             val headEnd = head.entry.length.toLong()
+            bodyKey = key
             pinRendition(id, key)
             if (to >= headEnd) {
                 val end = minOf(headEnd + initialChunk - 1, to)
@@ -439,8 +609,9 @@ abstract class CloudStreamProxy<K : Any>(
             contentType = ContentType.parse(key.mimeType)
         } else {
             val firstEnd = minOf(position + initialChunk - 1, to)
-            val first = openChunk(id, position, firstEnd, total) { !superseded() }
+            val first = openChunk(id, position, firstEnd, total, beforeFirstByte = true) { !superseded() }
             pending = Pending(first, firstEnd)
+            bodyKey = headKeyFor(id, first.url)
             val contentTypeHeader = first.response.header("Content-Type")
                 ?.takeIf { it.substringBefore(';').trim().startsWith("audio/") }
                 ?: knownContentType(first.url)
@@ -465,6 +636,7 @@ abstract class CloudStreamProxy<K : Any>(
         val partial = validation.normalizedHeader != null
         call.response.header("Accept-Ranges", "bytes")
         if (partial) call.response.header("Content-Range", "bytes $from-$to/$total")
+        val bodyWriter = bodyKey?.takeIf { it.contentLength == total }?.let { bodyCache?.openWriter(it, from) }
 
         try {
             call.respondBytesWriter(
@@ -475,6 +647,7 @@ abstract class CloudStreamProxy<K : Any>(
                 withContext(Dispatchers.IO) {
                     if (head != null) {
                         val count = (minOf(head.entry.length.toLong(), to + 1) - from).toInt()
+                        bodyWriter?.append(head.bytes, 0, count, from)
                         writeFully(head.bytes, 0, count)
                         flush()
                         Timber.tag("StreamingLatency").d("proxy_first_bytes_ms=%d source=head",
@@ -498,7 +671,7 @@ abstract class CloudStreamProxy<K : Any>(
                                     deferred.await().also { openedContinuation.set(null) }
                                 }
                                 ?: minOf(position + chunk - 1, to).let { end ->
-                                    Pending(openChunk(id, position, end, total, mayResume), end)
+                                    Pending(openChunk(id, position, end, total, beforeFirstByte = position == from && head == null, mayRetry = mayResume), end)
                                 }
                             pending = null
                             next.upstream.response.use { response ->
@@ -524,6 +697,7 @@ abstract class CloudStreamProxy<K : Any>(
                                             }
                                         }
                                     }
+                                    bodyWriter?.append(buffer, 0, read, position)
                                     writeFully(buffer, 0, read)
                                     // writeFully alone passes bytes on only once 1 MiB has piled
                                     // up: on a slow connection the player got nothing for tens of
@@ -551,7 +725,12 @@ abstract class CloudStreamProxy<K : Any>(
                             failedAt = position
                             if (++failures > MAX_RESUMES_WITHOUT_PROGRESS || !mayResume()) throw e
                             Timber.tag(proxyTag).w("Chunk failed at %d/%d (%s), resuming", position, total, e.cause ?: e)
-                            onUpstreamFailure(id, null, failures)
+                            // Silent from the very first byte: that source doesn't work, try another.
+                            if (position == from && head == null && e.cause is java.io.InterruptedIOException) {
+                                onFirstByteStall(id)
+                            } else {
+                                onUpstreamFailure(id, null, failures)
+                            }
                             delay(StreamRetryPolicy.delayMs(failures - 1))
                         }
                     }
@@ -561,6 +740,7 @@ abstract class CloudStreamProxy<K : Any>(
             pending?.upstream?.response?.close()
             continuation?.cancel()
             openedContinuation.getAndSet(null)?.upstream?.response?.close()
+            bodyWriter?.let { writer -> runCatching { writer.close() } }
             val key = teeKey
             val tee = teeBuffer
             if (cache != null && key != null && tee != null) {
@@ -596,6 +776,11 @@ abstract class CloudStreamProxy<K : Any>(
                             return@get
                         }
 
+                        // A song kept whole plays from disk: no URL, no CDN, works offline.
+                        cachedBodyFor(id)?.let { entry ->
+                            if (serveBody(call, id, entry, rangeValidation, requestStartedNanos)) return@get
+                        }
+
                         // A song streamed before starts from its cached head at once; its URL is
                         // resolved while those bytes play.
                         val head = headDataFor(id, rangeValidation)
@@ -610,7 +795,7 @@ abstract class CloudStreamProxy<K : Any>(
                             return@get
                         }
 
-                        val response = openUpstream(id, rangeValidation.normalizedHeader) { !superseded() }.response
+                        val response = openUpstream(id, rangeValidation.normalizedHeader, beforeFirstByte = true) { !superseded() }.response
 
                         response.use { upstream ->
                             if (upstream.code != 200 && upstream.code != 206) {
@@ -714,6 +899,12 @@ abstract class CloudStreamProxy<K : Any>(
 
         /** How long a response may go without a byte while the proxy reconnects upstream. */
         const val RESUME_BUDGET_MS = 20_000L
+
+        /**
+         * Upstream silence before the player's first byte after which the source is switched
+         * (see [onFirstByteStall]). googlevideo normally answers in well under a second.
+         */
+        const val FIRST_BYTE_TIMEOUT_MS = 5_000L
 
         /** Consecutive failed connections, with no byte in between, before giving up. */
         private const val MAX_RESUMES_WITHOUT_PROGRESS = 4

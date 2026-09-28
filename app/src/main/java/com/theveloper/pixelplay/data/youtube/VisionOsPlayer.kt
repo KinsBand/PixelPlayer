@@ -58,6 +58,12 @@ internal class VisionOsPlayer(
     }
 
     /**
+     * Visitor data this client already holds, without fetching any. Visitor data is not tied to
+     * one client, so the backup player request reuses it rather than paying for its own.
+     */
+    fun rememberedVisitorData(): String? = current(clock())
+
+    /**
      * Opens the player host's connection ahead of the first tap by renewing visitor data,
      * unless that host was contacted recently enough for its connection to still be pooled.
      */

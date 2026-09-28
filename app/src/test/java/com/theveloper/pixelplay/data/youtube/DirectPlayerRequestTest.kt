@@ -171,17 +171,19 @@ class DirectPlayerRequestTest {
         assertEquals(listOf("/visitor_id", "/player"), requests.map { it.url().toHttpUrl().encodedPath.substringAfterLast("/v1") })
     }
 
-    @Test fun `manifest arriving after the hedge is kept while full extraction is abandoned`() = runBlocking {
-        // Direct takes longer than the 200 ms hedge, so NewPipe's full extraction has started
-        // (and hangs here). The direct manifest must still be returned and cached.
+    @Test fun `manifest arriving after the hedge is kept while the hedged lookups are abandoned`() = runBlocking {
+        // Direct takes longer than the backup client's hedge delay, so the backup has started
+        // (and full extraction may have). The first manifest must still be returned and cached.
         playerAnswer = { request -> Thread.sleep(400); okPlayer(request) }
         val extractor = YouTubeStreamExtractor(InnerTubeClient(OkHttpClient()))
 
         val streams = extractor.streamManifest("abcdefghijk")
 
         assertEquals(1, streams.size)
-        // More than the direct path's two requests: NewPipe's full extraction was under way.
-        assertTrue(requests.size > 2, "full extraction should have started: " + requests.map { it.url().substringBefore("?") })
+        assertEquals(StreamClients.VISIONOS, streams.single().client)
+        // The backup direct client was asked while the primary was still slow.
+        assertTrue(requests.any { it.url().startsWith(VisionOsMusicPlayer.URL) },
+            "the backup should have started: " + requests.map { it.url().substringBefore("?") })
         val playerRequests = requests.count { it.url().contains("/player?") }
         assertEquals(streams, extractor.streamManifest("abcdefghijk"))
         assertEquals(playerRequests, requests.count { it.url().contains("/player?") })

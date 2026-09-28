@@ -1,0 +1,645 @@
+From aaa5eb544b02ace99c9c8fd85d9ba683d948c7ac Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 28 Sep 2026 18:52:30 +1000
+Subject: [PATCH] App Lock: "Lock App to Screen" exit protection for group
+ listening
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- New Settings → General → Group & security → "Lock App to Screen" toggle.
+  Turning it on or off asks for the owner through Android's BiometricPrompt
+  (strong biometric, or the device PIN / pattern / password); a cancelled or
+  failed prompt changes nothing.
+- While on, the app asks Android to pin it (lock task / screen pinning) on each
+  visit. Everything inside the app stays usable with no prompts; Back still
+  walks back through screens and is only held at the app's root.
+- "🔒 App locked" row and a small lock badge (hidden while the full player is
+  open) end the locked session after authentication; the setting stays on and
+  re-arms on the next visit.
+- The preference is saved separately from the live pinning state, which is read
+  from ActivityManager and never persisted, so crashes, reboots or updates can't
+  trap the owner. Playback is never touched.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EzyBeBJGG55RsMKWmRWTnP
+---
+ app/src/main/AndroidManifest.xml              |   1 +
+ .../com/theveloper/pixelplay/MainActivity.kt  |  30 ++
+ .../components/AppLockIndicator.kt            |  66 ++++
+ .../screens/settings/GeneralSettings.kt       | 105 +++++++
+ .../presentation/settings/SettingsRegistry.kt |   7 +
+ .../com/theveloper/pixelplay/utils/AppLock.kt | 297 ++++++++++++++++++
+ app/src/main/res/values/strings_settings.xml  |  11 +
+ 7 files changed, 517 insertions(+)
+ create mode 100644 app/src/main/java/com/theveloper/pixelplay/presentation/components/AppLockIndicator.kt
+ create mode 100644 app/src/main/java/com/theveloper/pixelplay/utils/AppLock.kt
+
+diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+index f9a2752..2a10420 100644
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -2,6 +2,7 @@
+ <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+     xmlns:tools="http://schemas.android.com/tools">
+ 
++    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+     <uses-permission android:name="android.permission.INTERNET" />
+     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+diff --git a/app/src/main/java/com/theveloper/pixelplay/MainActivity.kt b/app/src/main/java/com/theveloper/pixelplay/MainActivity.kt
+index 01dcbe5..b432b5e 100644
+--- a/app/src/main/java/com/theveloper/pixelplay/MainActivity.kt
++++ b/app/src/main/java/com/theveloper/pixelplay/MainActivity.kt
+@@ -746,6 +746,16 @@ class MainActivity : ComponentActivity() {
+             }
+         }
+ 
++        // App Lock ("Lock App to Screen"): re-pins on each visit while the setting is on.
++        com.theveloper.pixelplay.utils.AppLockSessionEffect(this@MainActivity)
++        val appLockArmed = com.theveloper.pixelplay.utils.rememberAppLockArmed()
++        val appLockPinned by com.theveloper.pixelplay.utils.AppLock.pinned.collectAsStateWithLifecycle()
++        // Registered before the navigation host, so Back still walks back through the app's
++        // screens as usual; this only catches the Back that would close the app from its root.
++        BackHandler(enabled = appLockArmed) {
++            playerViewModel.sendToast("PixelPlayer is locked · tap the lock to unlock")
++        }
++
+         val navBarStyle by playerViewModel.navBarStyle.collectAsStateWithLifecycle()
+         val navBarCompactMode by playerViewModel.navBarCompactMode.collectAsStateWithLifecycle()
+         val navBarCornerRadiusRaw by playerViewModel.navBarCornerRadius.collectAsStateWithLifecycle()
+@@ -1245,6 +1255,26 @@ class MainActivity : ComponentActivity() {
+                             )
+                         }
+ 
++                        // App Lock: a small lock badge at the top while the lock is armed (hidden
++                        // while the full player is open). Tapping it asks for the owner to unlock.
++                        AnimatedVisibility(
++                            visible = appLockArmed && !isExpandedOrExpanding,
++                            enter = fadeIn(),
++                            exit = fadeOut(),
++                            modifier = Modifier.align(Alignment.TopCenter)
++                        ) {
++                            com.theveloper.pixelplay.presentation.components.AppLockIndicator(
++                                pinned = appLockPinned,
++                                onClick = {
++                                    if (appLockPinned) {
++                                        scope.launch { com.theveloper.pixelplay.utils.AppLock.endSession(this@MainActivity) }
++                                    } else {
++                                        com.theveloper.pixelplay.utils.AppLock.lockNow(this@MainActivity)
++                                    }
++                                }
++                            )
++                        }
++
+                         if (showPlayStoreAnnouncement) {
+                             PlayStoreAnnouncementDialog(
+                                 announcement = playStoreAnnouncement,
+diff --git a/app/src/main/java/com/theveloper/pixelplay/presentation/components/AppLockIndicator.kt b/app/src/main/java/com/theveloper/pixelplay/presentation/components/AppLockIndicator.kt
+new file mode 100644
+index 0000000..b22c042
+--- /dev/null
++++ b/app/src/main/java/com/theveloper/pixelplay/presentation/components/AppLockIndicator.kt
+@@ -0,0 +1,66 @@
++package com.theveloper.pixelplay.presentation.components
++
++import androidx.compose.foundation.layout.Box
++import androidx.compose.foundation.layout.size
++import androidx.compose.foundation.layout.statusBarsPadding
++import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.shape.CircleShape
++import androidx.compose.material.icons.Icons
++import androidx.compose.material.icons.rounded.Lock
++import androidx.compose.material.icons.rounded.LockOpen
++import androidx.compose.material3.Icon
++import androidx.compose.material3.MaterialTheme
++import androidx.compose.material3.Surface
++import androidx.compose.runtime.Composable
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.draw.alpha
++import androidx.compose.ui.semantics.Role
++import androidx.compose.ui.semantics.contentDescription
++import androidx.compose.ui.semantics.role
++import androidx.compose.ui.semantics.semantics
++import androidx.compose.ui.unit.dp
++
++/**
++ * A small, quiet lock badge shown while App Lock is armed. Tapping it asks for the owner's
++ * fingerprint / screen lock to end the locked session ([pinned]), or re-pins the app when
++ * Android isn't pinning it right now. It's only a shortcut: the same actions live in Settings.
++ */
++@Composable
++fun AppLockIndicator(
++    pinned: Boolean,
++    onClick: () -> Unit,
++    modifier: Modifier = Modifier,
++) {
++    val label = if (pinned) "App locked. Tap to unlock" else "App lock paused. Tap to lock"
++    // 48 dp touch target around a small 28 dp badge.
++    Box(
++        modifier = modifier
++            .statusBarsPadding()
++            .padding(top = 2.dp)
++            .size(48.dp)
++            .semantics {
++                role = Role.Button
++                contentDescription = label
++            },
++        contentAlignment = Alignment.Center
++    ) {
++        Surface(
++            onClick = onClick,
++            shape = CircleShape,
++            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.85f),
++            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
++            modifier = Modifier
++                .size(28.dp)
++                .alpha(if (pinned) 0.8f else 0.6f)
++        ) {
++            Box(contentAlignment = Alignment.Center) {
++                Icon(
++                    imageVector = if (pinned) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
++                    contentDescription = null,
++                    modifier = Modifier.size(15.dp)
++                )
++            }
++        }
++    }
++}
+diff --git a/app/src/main/java/com/theveloper/pixelplay/presentation/screens/settings/GeneralSettings.kt b/app/src/main/java/com/theveloper/pixelplay/presentation/screens/settings/GeneralSettings.kt
+index cc55a64..1845dc7 100644
+--- a/app/src/main/java/com/theveloper/pixelplay/presentation/screens/settings/GeneralSettings.kt
++++ b/app/src/main/java/com/theveloper/pixelplay/presentation/screens/settings/GeneralSettings.kt
+@@ -3,9 +3,24 @@ package com.theveloper.pixelplay.presentation.screens.settings
+ import android.app.Activity
+ import androidx.compose.material.icons.Icons
+ import androidx.compose.material.icons.outlined.Language
++import androidx.compose.material.icons.rounded.ChevronRight
++import androidx.compose.material.icons.rounded.Lock
++import androidx.compose.material.icons.rounded.LockOpen
++import androidx.compose.material.icons.rounded.PushPin
+ import androidx.compose.material3.Icon
+ import androidx.compose.material3.MaterialTheme
+ import androidx.compose.runtime.Composable
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.mutableStateOf
++import androidx.compose.runtime.remember
++import androidx.compose.runtime.rememberCoroutineScope
++import androidx.compose.runtime.setValue
++import androidx.lifecycle.compose.collectAsStateWithLifecycle
++import com.theveloper.pixelplay.presentation.screens.SettingsItem
++import com.theveloper.pixelplay.utils.AppLock
++import com.theveloper.pixelplay.utils.findHostActivity
++import com.theveloper.pixelplay.utils.rememberAppLockEnabled
++import kotlinx.coroutines.launch
+ import androidx.compose.ui.platform.LocalContext
+ import androidx.compose.ui.res.painterResource
+ import androidx.compose.ui.res.stringResource
+@@ -79,6 +94,8 @@ internal fun GeneralSettingsContent(
+         )
+     }
+ 
++    AppLockSettingsSection()
++
+     SettingsSubsection(title = stringResource(R.string.settings_gestures_haptics_section), addBottomSpace = false) {
+         SwitchSettingItem(
+             title = stringResource(R.string.settings_haptic_feedback_title),
+@@ -90,3 +107,91 @@ internal fun GeneralSettingsContent(
+         )
+     }
+ }
++
++/**
++ * Group & security → Lock App to Screen. Turning it on or off, and ending a locked session, all
++ * go through Android's biometric prompt (see [AppLock]); a failed or cancelled prompt changes
++ * nothing, so the switch simply stays where it was.
++ */
++@Composable
++private fun AppLockSettingsSection() {
++    val context = LocalContext.current
++    val activity = remember(context) { context.findHostActivity() }
++    val scope = rememberCoroutineScope()
++    val enabled = rememberAppLockEnabled()
++    val pinned by AppLock.pinned.collectAsStateWithLifecycle()
++    var busy by remember { mutableStateOf(false) }
++
++    SettingsSubsection(title = stringResource(R.string.settings_app_lock_section)) {
++        SwitchSettingItem(
++            title = stringResource(R.string.settings_app_lock_title),
++            subtitle = stringResource(R.string.settings_app_lock_subtitle),
++            checked = enabled,
++            enabled = activity != null && !busy,
++            onCheckedChange = { wanted ->
++                val host = activity ?: return@SwitchSettingItem
++                busy = true
++                scope.launch {
++                    try {
++                        AppLock.setEnabled(host, wanted)
++                    } finally {
++                        busy = false
++                    }
++                }
++            },
++            leadingIcon = { Icon(Icons.Rounded.Lock, null, tint = MaterialTheme.colorScheme.secondary) },
++            settingKey = "app_lock"
++        )
++        if (enabled && activity != null) {
++            SettingsItem(
++                title = stringResource(
++                    if (pinned) R.string.settings_app_lock_active_title else R.string.settings_app_lock_paused_title
++                ),
++                subtitle = stringResource(
++                    if (pinned) R.string.settings_app_lock_active_subtitle else R.string.settings_app_lock_paused_subtitle
++                ),
++                leadingIcon = {
++                    Icon(
++                        if (pinned) Icons.Rounded.LockOpen else Icons.Rounded.Lock,
++                        null,
++                        tint = MaterialTheme.colorScheme.secondary
++                    )
++                },
++                trailingIcon = { Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
++                onClick = {
++                    if (busy) return@SettingsItem
++                    if (pinned) {
++                        busy = true
++                        scope.launch {
++                            try {
++                                AppLock.endSession(activity)
++                            } finally {
++                                busy = false
++                            }
++                        }
++                    } else {
++                        AppLock.lockNow(activity)
++                    }
++                }
++            )
++            // Android blocks opening its settings while the app is pinned, so this only shows
++            // while the lock is paused.
++            if (!pinned) {
++                SettingsItem(
++                    title = stringResource(R.string.settings_app_lock_pinning_title),
++                    subtitle = stringResource(R.string.settings_app_lock_pinning_subtitle),
++                    leadingIcon = { Icon(Icons.Rounded.PushPin, null, tint = MaterialTheme.colorScheme.secondary) },
++                    trailingIcon = { Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
++                    onClick = {
++                        runCatching {
++                            context.startActivity(
++                                android.content.Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS)
++                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
++                            )
++                        }
++                    }
++                )
++            }
++        }
++    }
++}
+diff --git a/app/src/main/java/com/theveloper/pixelplay/presentation/settings/SettingsRegistry.kt b/app/src/main/java/com/theveloper/pixelplay/presentation/settings/SettingsRegistry.kt
+index bffd1a1..d9a5636 100644
+--- a/app/src/main/java/com/theveloper/pixelplay/presentation/settings/SettingsRegistry.kt
++++ b/app/src/main/java/com/theveloper/pixelplay/presentation/settings/SettingsRegistry.kt
+@@ -636,6 +636,13 @@ object SettingsRegistry {
+         ),
+ 
+         // Added 2026-09-23: settings that were on screen but missing from search.
++        SettingEntry(
++            key = "app_lock",
++            categoryId = "general",
++            titleRes = R.string.settings_app_lock_title,
++            descriptionRes = R.string.settings_app_lock_subtitle,
++            keywords = listOf("lock", "app lock", "pin", "screen pinning", "fingerprint", "biometric", "party", "group", "guest", "security")
++        ),
+         SettingEntry(
+             key = "hide_status_bar",
+             categoryId = "appearance",
+diff --git a/app/src/main/java/com/theveloper/pixelplay/utils/AppLock.kt b/app/src/main/java/com/theveloper/pixelplay/utils/AppLock.kt
+new file mode 100644
+index 0000000..fd293ef
+--- /dev/null
++++ b/app/src/main/java/com/theveloper/pixelplay/utils/AppLock.kt
+@@ -0,0 +1,297 @@
++package com.theveloper.pixelplay.utils
++
++import android.app.Activity
++import android.app.ActivityManager
++import android.content.Context
++import android.content.ContextWrapper
++import android.hardware.biometrics.BiometricManager
++import android.hardware.biometrics.BiometricPrompt
++import android.os.CancellationSignal
++import android.widget.Toast
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.DisposableEffect
++import androidx.compose.runtime.LaunchedEffect
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.remember
++import androidx.compose.runtime.rememberCoroutineScope
++import androidx.compose.ui.platform.LocalContext
++import androidx.datastore.preferences.core.booleanPreferencesKey
++import androidx.datastore.preferences.core.edit
++import androidx.lifecycle.Lifecycle
++import androidx.lifecycle.LifecycleEventObserver
++import androidx.lifecycle.compose.LocalLifecycleOwner
++import androidx.lifecycle.compose.collectAsStateWithLifecycle
++import androidx.lifecycle.repeatOnLifecycle
++import com.theveloper.pixelplay.data.preferences.dataStore
++import kotlinx.coroutines.delay
++import kotlinx.coroutines.flow.Flow
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.StateFlow
++import kotlinx.coroutines.flow.asStateFlow
++import kotlinx.coroutines.flow.distinctUntilChanged
++import kotlinx.coroutines.flow.first
++import kotlinx.coroutines.flow.map
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.suspendCancellableCoroutine
++import kotlinx.coroutines.sync.Mutex
++import kotlin.coroutines.resume
++
++/*
++ * App Lock ("Lock App to Screen"): exit protection for group listening, not an entry lock.
++ *
++ * - The saved preference (DataStore) is kept apart from the live session. The live session is
++ *   Android's own lock task / screen pinning state, read from ActivityManager, never saved, so a
++ *   crash, reboot, update or process death can't leave the owner trapped: Android ends pinning
++ *   with the task, and the app only asks to pin again when it is opened.
++ * - Inside the app nothing is locked and nothing asks for a fingerprint. Only turning the lock
++ *   on, turning it off and ending the locked session ask, through Android's own BiometricPrompt
++ *   (strong biometric, or the phone's PIN / pattern / password). The app never sees biometric
++ *   data, only success or failure.
++ * - A normal app can't block Home / Recents itself. Screen pinning is what keeps it on screen:
++ *   Android asks the user to confirm pinning, and its own unpin gesture asks for the device PIN
++ *   when "Ask for PIN before unpinning" is on in Android's settings. Where pinning isn't
++ *   available, only Back at the app's root is held (the one exit the app legitimately owns).
++ */
++
++object AppLockPrefKeys {
++    val ENABLED = booleanPreferencesKey("app_lock_enabled_v1")
++}
++
++fun appLockEnabledFlow(context: Context): Flow<Boolean> =
++    context.applicationContext.dataStore.data
++        .map { it[AppLockPrefKeys.ENABLED] ?: false }
++        .distinctUntilChanged()
++
++@Composable
++fun rememberAppLockEnabled(): Boolean {
++    val context = LocalContext.current
++    val flow = remember(context) { appLockEnabledFlow(context) }
++    val enabled by flow.collectAsStateWithLifecycle(initialValue = false)
++    return enabled
++}
++
++/**
++ * The lock is "armed" while the setting is on and the owner hasn't ended this session: Back at
++ * the app's root is held, and the lock indicator shows.
++ */
++@Composable
++fun rememberAppLockArmed(): Boolean {
++    val enabled = rememberAppLockEnabled()
++    val sessionEnded by AppLock.sessionEnded.collectAsStateWithLifecycle()
++    return enabled && !sessionEnded
++}
++
++fun Context.findHostActivity(): Activity? {
++    var current: Context? = this
++    while (current is ContextWrapper) {
++        if (current is Activity) return current
++        current = current.baseContext
++    }
++    return null
++}
++
++object AppLock {
++    private const val AUTHENTICATORS =
++        BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
++
++    private val _pinned = MutableStateFlow(false)
++    /** Android is keeping the app pinned to the screen right now. */
++    val pinned: StateFlow<Boolean> = _pinned.asStateFlow()
++
++    private val _sessionEnded = MutableStateFlow(false)
++    /** The owner unlocked this visit; the lock re-arms the next time the app is opened. */
++    val sessionEnded: StateFlow<Boolean> = _sessionEnded.asStateFlow()
++
++    /** One prompt at a time: a double tap must not stack two biometric dialogs. */
++    private val promptMutex = Mutex()
++
++    fun refresh(context: Context) {
++        _pinned.value = isPinned(context)
++    }
++
++    private fun isPinned(context: Context): Boolean {
++        val manager = context.getSystemService(ActivityManager::class.java) ?: return false
++        return manager.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE
++    }
++
++    /** True when the phone has a fingerprint (strong biometric) or a PIN / pattern / password. */
++    fun canAuthenticateOwner(context: Context): Boolean {
++        val manager = context.getSystemService(BiometricManager::class.java) ?: return false
++        return manager.canAuthenticate(AUTHENTICATORS) == BiometricManager.BIOMETRIC_SUCCESS
++    }
++
++    /**
++     * Android's own biometric prompt, with the device credential as fallback. Returns true only
++     * on success; a cancel or an error returns false. A single failed fingerprint keeps the
++     * prompt open for another try.
++     */
++    private suspend fun authenticate(activity: Activity, title: String, subtitle: String): Boolean {
++        if (!promptMutex.tryLock()) return false
++        try {
++            return suspendCancellableCoroutine<Boolean> { continuation ->
++                val cancel = CancellationSignal()
++                val prompt = BiometricPrompt.Builder(activity)
++                    .setTitle(title)
++                    .setSubtitle(subtitle)
++                    .setAllowedAuthenticators(AUTHENTICATORS)
++                    .setConfirmationRequired(false)
++                    .build()
++                prompt.authenticate(
++                    cancel,
++                    activity.mainExecutor,
++                    object : BiometricPrompt.AuthenticationCallback() {
++                        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult?) {
++                            if (continuation.isActive) continuation.resume(true)
++                        }
++
++                        override fun onAuthenticationError(errorCode: Int, errString: CharSequence?) {
++                            if (continuation.isActive) continuation.resume(false)
++                        }
++                    }
++                )
++                continuation.invokeOnCancellation { cancel.cancel() }
++            }
++        } finally {
++            promptMutex.unlock()
++        }
++    }
++
++    /** Asks Android to pin the app. Android shows its own confirmation; nothing else happens here. */
++    private fun requestPin(activity: Activity) {
++        if (isPinned(activity)) {
++            refresh(activity)
++            return
++        }
++        runCatching { activity.startLockTask() }
++        refresh(activity)
++    }
++
++    private fun releasePin(activity: Activity) {
++        if (isPinned(activity)) runCatching { activity.stopLockTask() }
++        refresh(activity)
++    }
++
++    /**
++     * Settings toggle. Turning on needs the owner's authentication, then pins; turning off needs
++     * it too, then unpins. On a failed or cancelled prompt nothing changes and false is returned.
++     */
++    suspend fun setEnabled(activity: Activity, enable: Boolean): Boolean {
++        val context = activity.applicationContext
++        val canAuthenticate = canAuthenticateOwner(activity)
++        if (enable) {
++            if (!canAuthenticate) {
++                toast(context, "Set up a fingerprint or screen lock on this phone first")
++                return false
++            }
++            val ok = authenticate(
++                activity,
++                title = "Turn on App Lock",
++                subtitle = "Confirm it's you to lock PixelPlayer to the screen"
++            )
++            if (!ok) return false
++            context.dataStore.edit { it[AppLockPrefKeys.ENABLED] = true }
++            _sessionEnded.value = false
++            requestPin(activity)
++            toast(context, "App lock enabled ✓")
++            return true
++        }
++        // With no fingerprint or screen lock left on the phone there is nothing to confirm with
++        // (and Android's own unpin needs no PIN either), so don't trap the owner.
++        if (canAuthenticate) {
++            val ok = authenticate(
++                activity,
++                title = "Turn off App Lock",
++                subtitle = "Confirm it's you to turn off App Lock"
++            )
++            if (!ok) return false
++        }
++        releasePin(activity)
++        context.dataStore.edit { it[AppLockPrefKeys.ENABLED] = false }
++        _sessionEnded.value = false
++        toast(context, "App lock turned off")
++        return true
++    }
++
++    /** "End locked session": the owner authenticates, the pin is released, the setting stays on. */
++    suspend fun endSession(activity: Activity): Boolean {
++        if (canAuthenticateOwner(activity)) {
++            val ok = authenticate(
++                activity,
++                title = "Unlock PixelPlayer",
++                subtitle = "Confirm it's you to end the locked session"
++            )
++            if (!ok) return false
++        }
++        releasePin(activity)
++        _sessionEnded.value = true
++        toast(activity.applicationContext, "Unlocked · you can leave the app")
++        return true
++    }
++
++    /** Lock again now (no authentication: locking is never the risky direction). */
++    fun lockNow(activity: Activity) {
++        _sessionEnded.value = false
++        requestPin(activity)
++    }
++
++    /** A new visit to the app with the setting on: re-arm and ask Android to pin again. */
++    internal fun onNewVisit(activity: Activity) {
++        _sessionEnded.value = false
++        requestPin(activity)
++    }
++
++    private fun toast(context: Context, message: String) {
++        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
++    }
++}
++
++/**
++ * Call once from the main activity's content. With the setting on, each visit to the app
++ * (cold start, or coming back after leaving) asks Android to pin it again. Pauses that aren't a
++ * visit (the biometric prompt itself, permission dialogs, Android's pin confirmation) don't count,
++ * so there are no prompt loops, and nothing about playback is touched.
++ */
++@Composable
++fun AppLockSessionEffect(activity: Activity) {
++    val lifecycleOwner = LocalLifecycleOwner.current
++    val scope = rememberCoroutineScope()
++    val appContext = activity.applicationContext
++
++    DisposableEffect(lifecycleOwner, activity) {
++        var newVisit = false
++        val observer = LifecycleEventObserver { _, event ->
++            when (event) {
++                Lifecycle.Event.ON_START -> newVisit = true
++                Lifecycle.Event.ON_RESUME -> {
++                    AppLock.refresh(activity)
++                    if (newVisit) {
++                        newVisit = false
++                        scope.launch {
++                            if (!appLockEnabledFlow(appContext).first()) return@launch
++                            // Let the window settle: pinning is only granted to the resumed,
++                            // focused activity.
++                            delay(400)
++                            if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
++                                AppLock.onNewVisit(activity)
++                            }
++                        }
++                    }
++                }
++                else -> Unit
++            }
++        }
++        lifecycleOwner.lifecycle.addObserver(observer)
++        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
++    }
++
++    // Android's own unpin gesture ends pinning without telling the app; keep the state current
++    // while the app is on screen.
++    LaunchedEffect(lifecycleOwner, activity) {
++        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
++            while (true) {
++                AppLock.refresh(activity)
++                delay(1_000)
++            }
++        }
++    }
++}
+diff --git a/app/src/main/res/values/strings_settings.xml b/app/src/main/res/values/strings_settings.xml
+index 08c126b..da92ad9 100644
+--- a/app/src/main/res/values/strings_settings.xml
++++ b/app/src/main/res/values/strings_settings.xml
+@@ -802,6 +802,17 @@
+     <string name="settings_search_pill_hint">Search all settings</string>
+     <string name="settings_summary_scrobbling_on">Scrobbling on</string>
+ 
++    <!-- App Lock (Lock App to Screen) -->
++    <string name="settings_app_lock_section">Group &amp; security</string>
++    <string name="settings_app_lock_title">Lock App to Screen</string>
++    <string name="settings_app_lock_subtitle">Require fingerprint or device authentication before leaving the app.</string>
++    <string name="settings_app_lock_active_title">🔒 App locked</string>
++    <string name="settings_app_lock_active_subtitle">Unlock / End locked session. Needs your fingerprint or screen lock</string>
++    <string name="settings_app_lock_paused_title">App lock paused</string>
++    <string name="settings_app_lock_paused_subtitle">Tap to lock PixelPlayer to the screen now. If Android doesn\'t offer to pin the app, turn on App pinning below</string>
++    <string name="settings_app_lock_pinning_title">Android app pinning</string>
++    <string name="settings_app_lock_pinning_subtitle">Turn on App pinning and \"Ask for PIN before unpinning\" so Android\'s own unpin gesture needs your PIN too</string>
++
+     <!-- Full screen -->
+     <string name="settings_full_screen_section">Full screen</string>
+     <string name="settings_hide_status_bar_title">Hide status bar</string>
+-- 
+2.43.0
+

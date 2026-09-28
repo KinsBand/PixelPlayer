@@ -214,7 +214,9 @@ class MusicService : MediaLibraryService() {
             prepare = { engine.prewarmNextStream(it) },
             onFailure = { Timber.d(it, "Next stream prewarm unavailable") },
             // Songs after the next one: manifest only, a few KB each.
-            prepareLater = { engine.prewarmNextStream(it, headBytes = 0) }
+            prepareLater = { engine.prewarmNextStream(it, headBytes = 0) },
+            // Then the whole next song on Wi-Fi, so it plays even if the network drops.
+            prepareFully = { engine.prefetchNextStreamFully(it) }
         )
     }
 

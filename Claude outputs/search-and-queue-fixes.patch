@@ -1,0 +1,233 @@
+From ae05a87b195be191218afe9191c08f7396c6f126 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 28 Sep 2026 18:42:49 +1000
+Subject: [PATCH] Search: online playlists open as playlist pages; clear search
+ on leaving; queue prompt fix
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- Online playlists in search results open on the normal Playlist page (tracks are
+  fetched first, with a progress bar on the row) instead of the quick browse
+  sheet; Play plays the whole playlist.
+- Leaving Search for Home or Library saves the typed query as a recent search and
+  empties the search bar. Opening a result doesn't count as leaving.
+- The search bar no longer grabs focus or the keyboard when returning to the app:
+  auto-focus happens once per visit and focus is dropped when the app is stopped.
+- Queue options "Song or artist…" box: the queue layer was removed whenever the
+  keyboard showed, which destroyed the box and closed the menu as soon as it was
+  tapped. The layer now stays while the queue is open (also fixes the
+  save-as-playlist search field).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EzyBeBJGG55RsMKWmRWTnP
+---
+ .../com/theveloper/pixelplay/MainActivity.kt  | 13 +++++
+ .../components/PlayerInternalNavigationBar.kt | 26 +++++++++-
+ .../components/UnifiedPlayerSheetV2.kt        |  7 ++-
+ .../presentation/screens/SearchScreen.kt      | 51 ++++++++++++++++++-
+ .../viewmodel/SearchBrowseViewModel.kt        | 19 +++++++
+ 5 files changed, 111 insertions(+), 5 deletions(-)
+
+diff --git a/app/src/main/java/com/theveloper/pixelplay/MainActivity.kt b/app/src/main/java/com/theveloper/pixelplay/MainActivity.kt
+index 01dcbe5..0ea6f35 100644
+--- a/app/src/main/java/com/theveloper/pixelplay/MainActivity.kt
++++ b/app/src/main/java/com/theveloper/pixelplay/MainActivity.kt
+@@ -703,6 +703,19 @@ class MainActivity : ComponentActivity() {
+         val navBackStackEntry by navController.currentBackStackEntryAsState()
+         val currentRoute = navBackStackEntry?.destination?.route
+ 
++        // Leaving Search for another tab: whatever is in the search bar is kept as a recent
++        // search and the bar is emptied. Opening a result (album, artist, playlist…) doesn't
++        // count as leaving, so Back still returns to the same results.
++        LaunchedEffect(currentRoute) {
++            if (currentRoute == Screen.Home.route || currentRoute == Screen.Library.route) {
++                val typed = playerViewModel.searchQuery.trim()
++                if (typed.isNotEmpty()) {
++                    playerViewModel.onSearchQuerySubmitted(typed)
++                    playerViewModel.updateSearchQuery("")
++                }
++            }
++        }
++
+ 
+         val routesWithHiddenNavigationBar = remember {
+             setOf(
+diff --git a/app/src/main/java/com/theveloper/pixelplay/presentation/components/PlayerInternalNavigationBar.kt b/app/src/main/java/com/theveloper/pixelplay/presentation/components/PlayerInternalNavigationBar.kt
+index b6e57f1..1eb8117 100644
+--- a/app/src/main/java/com/theveloper/pixelplay/presentation/components/PlayerInternalNavigationBar.kt
++++ b/app/src/main/java/com/theveloper/pixelplay/presentation/components/PlayerInternalNavigationBar.kt
+@@ -70,6 +70,11 @@ import androidx.compose.animation.core.animateDpAsState
+ import androidx.compose.animation.core.animateFloatAsState
+ import androidx.compose.foundation.layout.height
+ import androidx.compose.runtime.LaunchedEffect
++import androidx.compose.runtime.DisposableEffect
++import androidx.compose.runtime.saveable.rememberSaveable
++import androidx.lifecycle.Lifecycle
++import androidx.lifecycle.LifecycleEventObserver
++import androidx.lifecycle.compose.LocalLifecycleOwner
+ import androidx.compose.ui.graphics.Color
+ import androidx.compose.ui.graphics.graphicsLayer
+ import androidx.compose.ui.platform.LocalFocusManager
+@@ -379,14 +384,33 @@ private fun InlineNavSearchBar(
+     val voicePhase = voiceCapture?.phase
+     val voiceLive = voicePhase == VoiceCapturePhase.Listening || voicePhase == VoiceCapturePhase.Hearing
+ 
++    // Focus the field once, when the user opens Search. Saved across activity recreation, so
++    // coming back to PixelPlayer on the Search tab doesn't pop the keyboard up by itself.
++    var autoFocusDone by rememberSaveable { mutableStateOf(false) }
+     LaunchedEffect(Unit) {
+         // Opened by voice search: the words are typed in by the microphone, so no keyboard.
+-        if (voiceActive) return@LaunchedEffect
++        if (voiceActive || autoFocusDone) return@LaunchedEffect
++        autoFocusDone = true
+         delay(380L) // wait for 380ms navigation transition to settle before showing keyboard
+         focusRequester.requestFocus()
+         keyboardController?.show()
+     }
+ 
++    // Leaving the app drops the field's focus and the keyboard. Otherwise, on return, the
++    // focused field brought the keyboard back (or left its insets behind) and the screen acted
++    // as if the search bar were being typed in.
++    val lifecycleOwner = LocalLifecycleOwner.current
++    DisposableEffect(lifecycleOwner) {
++        val observer = LifecycleEventObserver { _, event ->
++            if (event == Lifecycle.Event.ON_STOP) {
++                keyboardController?.hide()
++                focusManager.clearFocus(force = true)
++            }
++        }
++        lifecycleOwner.lifecycle.addObserver(observer)
++        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
++    }
++
+     LaunchedEffect(voiceActive) {
+         if (voiceActive) {
+             keyboardController?.hide()
+diff --git a/app/src/main/java/com/theveloper/pixelplay/presentation/components/UnifiedPlayerSheetV2.kt b/app/src/main/java/com/theveloper/pixelplay/presentation/components/UnifiedPlayerSheetV2.kt
+index 0768189..e203e74 100644
+--- a/app/src/main/java/com/theveloper/pixelplay/presentation/components/UnifiedPlayerSheetV2.kt
++++ b/app/src/main/java/com/theveloper/pixelplay/presentation/components/UnifiedPlayerSheetV2.kt
+@@ -522,9 +522,12 @@ fun UnifiedPlayerSheetV2(
+     val isQueueVisible = sheetOverlayState.isQueueVisible
+     val bottomSheetOpenFraction = sheetOverlayState.bottomSheetOpenFraction
+     val queueScrimAlpha = sheetOverlayState.queueScrimAlpha
+-    val shouldRenderQueueHost by remember(internalIsKeyboardVisible, selectedSongForInfo) {
++    // The queue layer steps aside while the keyboard is up for other screens (Search), but
++    // never while the queue itself is open: its "Song or artist…" box and the save-as-playlist
++    // search open the keyboard, and removing the layer then closed the menu under the finger.
++    val shouldRenderQueueHost by remember(internalIsKeyboardVisible, selectedSongForInfo, showQueueSheet) {
+         derivedStateOf {
+-            !internalIsKeyboardVisible || selectedSongForInfo != null
++            !internalIsKeyboardVisible || selectedSongForInfo != null || showQueueSheet
+         }
+     }
+     val isQueueTelemetryActive = showQueueSheet
+diff --git a/app/src/main/java/com/theveloper/pixelplay/presentation/screens/SearchScreen.kt b/app/src/main/java/com/theveloper/pixelplay/presentation/screens/SearchScreen.kt
+index 2d12972..894daf5 100644
+--- a/app/src/main/java/com/theveloper/pixelplay/presentation/screens/SearchScreen.kt
++++ b/app/src/main/java/com/theveloper/pixelplay/presentation/screens/SearchScreen.kt
+@@ -1078,6 +1078,44 @@ fun SearchResultsList(
+     remoteCollection?.let { (id, title) ->
+         SearchBrowseSheet(id = id, title = title, player = playerViewModel, onDismiss = { remoteCollection = null })
+     }
++
++    // Online playlists open like library playlists: their tracks are fetched and shown on the
++    // normal Playlist page (not the quick browse sheet), and Play plays the whole playlist.
++    val remotePlaylistLoader: com.theveloper.pixelplay.presentation.viewmodel.SearchBrowseViewModel = hiltViewModel()
++    val remotePlaylistScope = rememberCoroutineScope()
++    var openingRemotePlaylistId by remember { mutableStateOf<String?>(null) }
++    fun openRemotePlaylist(browseId: String, playlist: Playlist, play: Boolean) {
++        if (openingRemotePlaylistId != null) return
++        openingRemotePlaylistId = browseId
++        remotePlaylistScope.launch {
++            val songs = try {
++                remotePlaylistLoader.loadAllSongs(browseId)
++            } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
++                openingRemotePlaylistId = null
++                throw cancelled
++            } catch (e: Exception) {
++                emptyList()
++            }
++            openingRemotePlaylistId = null
++            if (songs.isEmpty()) {
++                playerViewModel.sendToast("Couldn't load this playlist")
++                return@launch
++            }
++            if (play) {
++                playerViewModel.playSongs(songs, songs.first(), playlist.name)
++            } else {
++                val page = Playlist(
++                    id = "${PlaylistViewModel.GENERATED_MIX_PREFIX}search:$browseId",
++                    name = playlist.name,
++                    songIds = songs.map { it.id },
++                    coverImageUri = playlist.coverImageUri
++                )
++                PlaylistViewModel.registerTransientPlaylist(page, songs)
++                navController.navigateSafely(Screen.PlaylistDetail.createRoute(page.id))
++            }
++            onItemSelected()
++        }
++    }
+     val artistResults = remember(results, currentFilter) {
+         // Only the "All" tab mixes credited song artists into the shelf; the category tabs show
+         // exactly the category that was asked for.
+@@ -1315,14 +1353,23 @@ fun SearchResultsList(
+                                 SearchResultPlaylistItem(
+                                     playlist = item.playlist,
+                                     playlistSongs = playlistSongs,
+-                                    onPlayClick = { if (item.browseId != null) remoteCollection = item.browseId to item.playlist.name else onPlayClick() },
+-                                    onOpenClick = { if (item.browseId != null) remoteCollection = item.browseId to item.playlist.name else onOpenClick() },
++                                    onPlayClick = { val id = item.browseId; if (id != null) openRemotePlaylist(id, item.playlist, play = true) else onPlayClick() },
++                                    onOpenClick = { val id = item.browseId; if (id != null) openRemotePlaylist(id, item.playlist, play = false) else onOpenClick() },
+                                     isSelected = isSelected,
+                                     selectionIndex = selectionIndex,
+                                     isSelectionMode = isPlaylistSelectionMode,
+                                     onLongPress = { if (item.browseId == null) onPlaylistLongPress(item.playlist) },
+                                     onSelectionToggle = { if (item.browseId == null) onPlaylistSelectionToggle(item.playlist) }
+                                 )
++                                // Fetching an online playlist's tracks before its page opens.
++                                if (item.browseId != null && openingRemotePlaylistId == item.browseId) {
++                                    androidx.compose.material3.LinearProgressIndicator(
++                                        modifier = Modifier
++                                            .align(Alignment.BottomCenter)
++                                            .fillMaxWidth()
++                                            .padding(horizontal = 24.dp)
++                                    )
++                                }
+                             }
+                         }
+                     }
+diff --git a/app/src/main/java/com/theveloper/pixelplay/presentation/viewmodel/SearchBrowseViewModel.kt b/app/src/main/java/com/theveloper/pixelplay/presentation/viewmodel/SearchBrowseViewModel.kt
+index db765f3..2aab30a 100644
+--- a/app/src/main/java/com/theveloper/pixelplay/presentation/viewmodel/SearchBrowseViewModel.kt
++++ b/app/src/main/java/com/theveloper/pixelplay/presentation/viewmodel/SearchBrowseViewModel.kt
+@@ -37,6 +37,25 @@ class SearchBrowseViewModel @Inject constructor(
+ 
+     fun close() { request?.cancel(); currentId = null }
+ 
++    /**
++     * Every track on an online playlist page (following its "load more" pages, up to
++     * [maxPages]), so search can open it as a normal playlist page. Stateless: it doesn't touch
++     * [state], so it can't disturb a browse sheet using this same view model.
++     */
++    suspend fun loadAllSongs(id: String, maxPages: Int = 10): List<Song> {
++        val songs = LinkedHashMap<String, Song>()
++        val seen = mutableSetOf<String>()
++        var continuation: String? = null
++        repeat(maxPages) {
++            val page = client.browse(id, continuation)
++            api.hydrate(page.songs).forEach { songs.putIfAbsent(it.id, it) }
++            val next = page.continuation ?: return songs.values.toList()
++            if (!seen.add(next)) return songs.values.toList()
++            continuation = next
++        }
++        return songs.values.toList()
++    }
++
+     fun loadMore() {
+         val id = currentId ?: return
+         if (mutableState.value.loading) return
+-- 
+2.43.0
+

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Streaming:** a second, independent way to get an online song's audio (the visionOS 0.1 profile on YouTube Music's own player endpoint, the one Metrolist relies on first). When the usual request is slow or comes back empty, the backup is already on its way, so a song only falls back to slow full extraction when both fail.
+- **Streaming:** online songs played to the end, and the next song on Wi-Fi, are kept whole in a stream cache (up to 256 MB). Playing them again, seeking back, or reaching the next song needs no network at all, and cached songs also play offline.
+
+### Changed
+- **Streaming:** the app learns which way of getting audio works best on your connection and how fast it usually answers. A backup starts only once the first is slower than it normally is, so the heavy full extraction now rarely runs alongside a normal play (less data, fewer rate limits), while a stuck request is still covered.
+- **Streaming:** when a stream URL is refused (HTTP 403) or its server never sends a first byte, that song moves to a different source for five minutes instead of retrying the same one; a silent server is given up on after 5 s instead of about 30 s.
+
 ### Fixed
 - **Full screen:** with "Hide status bar" / "Hide gesture bar" on, the bars no longer come back and stay after the back gesture (e.g. on Pixel) or a screen transition, and they stay hidden while a bottom sheet (lyrics menu, song options…) is open; any time they reappear they're hidden again straight away. The two switches moved from General to Appearance.
 - **Lyrics:** in face-to-face mode the section pills beside the play / pause button have room for their names ("Chorus" was cut to "Cho…").
