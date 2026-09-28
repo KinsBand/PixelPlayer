@@ -15,14 +15,30 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 
-/** Where a word-timed result came from. Order = preference when several sources match. */
+/**
+ * Where a word-timed result came from. Order = preference when several sources match; a match
+ * on the exact recording (see [WordLyricsCandidate.exactMatch]) goes ahead of all of them.
+ */
 enum class WordLyricsSource(val key: String) {
     AMLL("amll"),
     MUSIXMATCH("musixmatch"),
+    /** Lyricsfile word timing in an LRCLIB record (found by the line pipeline, not a provider). */
+    LRCLIB("lrclib"),
+    UNISON("unison"),
     QQ("qq"),
     NETEASE("netease_yrc"),
     KUGOU("kugou")
 }
+
+/** What a word-timed lookup knows about the song. */
+data class WordLyricsQuery(
+    val title: String,
+    val artist: String,
+    val durationMs: Long,
+    val album: String? = null,
+    /** YouTube video id of the exact recording being played, when there is one. */
+    val videoId: String? = null
+)
 
 /** A song found by a word-timed provider's metadata search (no lyrics downloaded yet). */
 data class WordLyricsCandidate(
@@ -32,7 +48,12 @@ data class WordLyricsCandidate(
     val artistName: String,
     val albumName: String,
     val durationSeconds: Double,
-    val accessKey: String? = null
+    val accessKey: String? = null,
+    /**
+     * Found by an identifier of the exact recording (e.g. its YouTube video id) rather than by
+     * title, artist and duration, so it needs no metadata ranking and its timing fits that audio.
+     */
+    val exactMatch: Boolean = false
 )
 
 /**
@@ -53,6 +74,11 @@ data class WordLyricsResult(
 interface WordLyricsProvider {
     val source: WordLyricsSource
     suspend fun search(title: String, artist: String, durationMs: Long): List<WordLyricsCandidate>
+
+    /** Same as the title search; providers that can match [WordLyricsQuery.videoId] override it. */
+    suspend fun search(query: WordLyricsQuery): List<WordLyricsCandidate> =
+        search(query.title, query.artist, query.durationMs)
+
     suspend fun fetch(candidate: WordLyricsCandidate): WordLyricsResult?
 }
 

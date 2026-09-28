@@ -12,6 +12,7 @@ import com.theveloper.pixelplay.data.media.CoverArtUpdate
 import com.theveloper.pixelplay.data.media.ImageCacheManager
 import com.theveloper.pixelplay.data.media.MetadataEditError
 import com.theveloper.pixelplay.data.media.SongMetadataEditor
+import com.theveloper.pixelplay.data.lyrics.Lyricsfile
 import com.theveloper.pixelplay.data.model.Lyrics
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.repository.MusicRepository
@@ -481,14 +482,13 @@ class MetadataEditStateHolder @Inject constructor(
             return
         }
 
-        val songFile = java.io.File(song.path)
-        val lrcFile = java.io.File(songFile.parentFile, "${songFile.nameWithoutExtension}.lrc")
-
-        // Android 11+ check: if file exists and we might not have permission
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R && lrcFile.exists() && !lrcFile.canWrite()) {
-            val uri = MediaStorePermissionHelper.getMediaStoreUri(context, lrcFile.absolutePath)
-            if (uri != null) {
-                val intentSender = MediaStorePermissionHelper.createWriteRequestIntentSender(context, listOf(uri))
+        // Android 11+ check: sidecars that exist but aren't ours need the user's permission.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            val uris = lyricsSidecars(song).toList()
+                .filter { it.exists() && !it.canWrite() }
+                .mapNotNull { MediaStorePermissionHelper.getMediaStoreUri(context, it.absolutePath) }
+            if (uris.isNotEmpty()) {
+                val intentSender = MediaStorePermissionHelper.createWriteRequestIntentSender(context, uris)
                 if (intentSender != null) {
                     pendingLyricsSave = PendingLyricsSave(song, lyrics, preferSynced)
                     cb.scope.launch { _writePermissionRequest.emit(intentSender) }
@@ -498,6 +498,14 @@ class MetadataEditStateHolder @Inject constructor(
         }
 
         performLyricsSave(song, lyrics, preferSynced, cb)
+    }
+
+    /** `song.lrc` for every player, and `song.lyrics` (Lyricsfile), which keeps word timing too. */
+    private fun lyricsSidecars(song: Song): Pair<java.io.File, java.io.File> {
+        val songFile = java.io.File(song.path)
+        val base = songFile.nameWithoutExtension
+        return java.io.File(songFile.parentFile, "$base.lrc") to
+            java.io.File(songFile.parentFile, "$base.${Lyricsfile.FILE_EXTENSION}")
     }
 
     /** Called from the UI after the user approves or denies the MediaStore write permission. */
@@ -576,11 +584,23 @@ class MetadataEditStateHolder @Inject constructor(
     private fun performLyricsSave(song: Song, lyrics: Lyrics, preferSynced: Boolean, cb: MetadataEditCallbacks) {
         cb.scope.launch(Dispatchers.IO) {
             try {
-                val songFile = java.io.File(song.path)
-                val lrcFile = java.io.File(songFile.parentFile, "${songFile.nameWithoutExtension}.lrc")
+                val (lrcFile, lyricsFile) = lyricsSidecars(song)
                 val lrcContent = LyricsUtils.toLrcString(lyrics, preferSynced)
 
                 lrcFile.writeText(lrcContent, Charsets.UTF_8)
+                // The Lyricsfile is read before the .lrc, so it always gets the same choice
+                // (synced or plain); it also keeps word timing and line end times that LRC drops.
+                runCatching {
+                    val chosen = if (preferSynced && !lyrics.synced.isNullOrEmpty()) lyrics else lyrics.copy(synced = null)
+                    val metadata = Lyricsfile.Metadata(
+                        title = song.title,
+                        artist = song.displayArtist,
+                        album = song.album.takeIf { it.isNotBlank() },
+                        durationMs = song.duration.takeIf { it > 0 },
+                        language = lyrics.timing?.language
+                    )
+                    lyricsFile.writeText(Lyricsfile.serialize(chosen, metadata), Charsets.UTF_8)
+                }.onFailure { Timber.w(it, "Could not write %s", lyricsFile.name) }
                 cb.sendToast(context.getString(R.string.metadata_edit_lyrics_saved_successfully))
 
                 // If it was the current song, refresh the lyrics in state if it migrated from remote to local

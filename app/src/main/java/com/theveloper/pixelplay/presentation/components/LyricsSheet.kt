@@ -4,6 +4,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.drawscope.clipRect
 
 import android.widget.Toast
+import com.theveloper.pixelplay.data.lyrics.LyricsAttribution
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.model.Lyrics
 import com.theveloper.pixelplay.R
@@ -135,7 +136,7 @@ import androidx.compose.animation.SizeTransform
 import androidx.compose.ui.layout.onSizeChanged
 import com.theveloper.pixelplay.data.lyrics.SongStructure
 import com.theveloper.pixelplay.data.lyrics.SongStructureRepository
-import com.theveloper.pixelplay.utils.ProviderText
+import com.theveloper.pixelplay.utils.LyricsCreditText
 import com.theveloper.pixelplay.presentation.components.snapping.ExperimentalSnapperApi
 import com.theveloper.pixelplay.presentation.components.snapping.SnapperLayoutInfo
 import com.theveloper.pixelplay.presentation.components.snapping.rememberLazyListSnapperLayoutInfo
@@ -1336,11 +1337,11 @@ fun LyricsSheet(
                                                     resetImmersiveTimer()
                                                 },
                                                 footer = {
-                                                    if (lyrics?.areFromRemote == true) {
+                                                    // The real provider; Unison's credit shows even on stored copies.
+                                                    LyricsAttribution.creditFor(lyrics)?.let { credit ->
                                                         item(key = "provider_text") {
-                                                            ProviderText(
-                                                                providerText = stringResource(R.string.lyrics_provided_by),
-                                                                uri = stringResource(R.string.lyrics_lrclib_uri),
+                                                            LyricsCreditText(
+                                                                credit = credit,
                                                                 textAlign = TextAlign.Center,
                                                                 accentColor = lyricHighlightColor,
                                                                 modifier = Modifier
@@ -1388,6 +1389,17 @@ fun LyricsSheet(
                                                             )
                                                     )
                                                     Spacer(modifier = Modifier.height(16.dp))
+                                                }
+                                                LyricsAttribution.creditFor(lyrics)?.let { credit ->
+                                                    item(key = "provider_text") {
+                                                        LyricsCreditText(
+                                                            credit = credit,
+                                                            textAlign = TextAlign.Center,
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .padding(vertical = 16.dp)
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }

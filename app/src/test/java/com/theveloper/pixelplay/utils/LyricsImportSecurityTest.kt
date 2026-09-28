@@ -260,5 +260,50 @@ class LyricsImportSecurityTest {
         assertThat(valid.value.parsedLyrics.synced).hasSize(1)
         assertThat(valid.value.parsedLyrics.synced!!.first().line).isEqualTo("v1: Hello world")
     }
-}
 
+    @Test
+    fun validateImportedLyricsFile_acceptsLyricsfileAndKeepsItVerbatim() {
+        // Word-synced Lyricsfiles are verbose: well over the plain-LRC character budget.
+        val raw = buildString {
+            append("version: '1.0'\nmetadata:\n  title: Song\n  artist: Artist\n  instrumental: false\nlines:\n")
+            for (line in 0 until 400) {
+                val start = line * 3_000
+                append("  - text: word pair\n    start_ms: $start\n    words:\n")
+                append("      - {text: 'word ', start_ms: $start, end_ms: ${start + 500}}\n")
+                append("      - {text: pair, start_ms: ${start + 500}, end_ms: ${start + 1_000}}\n")
+            }
+        }
+        assertThat(raw.length).isGreaterThan(LyricsImportSecurity.MAX_LYRICS_TEXT_CHARS)
+
+        val result = LyricsImportSecurity.validateImportedLyricsFile(
+            fileName = "track.lyrics",
+            mimeType = "application/yaml",
+            inputStream = raw.byteInputStream()
+        )
+
+        assertThat(result).isInstanceOf(LyricsImportValidationResult.Valid::class.java)
+        val valid = (result as LyricsImportValidationResult.Valid).value
+        assertThat(valid.sanitizedContent).isEqualTo(raw.trim())
+        assertThat(valid.parsedLyrics.synced).hasSize(400)
+        assertThat(valid.parsedLyrics.synced!!.first().words).hasSize(2)
+    }
+
+    @Test
+    fun localLyricsfileSidecarIsTriedFirst() {
+        assertThat(LyricsImportSecurity.supportedFileExtensions().first()).isEqualTo("lyrics")
+        assertThat(LyricsImportSecurity.pickerMimeTypes().toList()).contains("application/yaml")
+    }
+
+    @Test
+    fun validateImportedLyricsFile_rejectsUnsyncedLyricsfile() {
+        val result = LyricsImportSecurity.validateImportedLyricsFile(
+            fileName = "track.lyrics",
+            mimeType = null,
+            inputStream = "version: '1.0'\nmetadata: {title: a, artist: b}\nlines: []\nplain: just words\n".byteInputStream()
+        )
+
+        assertThat(result).isEqualTo(
+            LyricsImportValidationResult.Invalid(LyricsImportFailureReason.INVALID_LYRICS_CONTENT)
+        )
+    }
+}

@@ -9,4 +9,10 @@ object WordLyricsPrefs {
 
     /** Musixmatch RichSync via the desktop app token. Off by default (against its terms, rate limited). */
     val MUSIXMATCH_ENABLED = booleanPreferencesKey("lyrics_musixmatch_richsync_v1")
+
+    /**
+     * Unison community lyrics (word and line timed; YouTube songs match by video). On by default;
+     * its lyrics are always shown with the attribution its ODbL licence requires.
+     */
+    val UNISON_ENABLED = booleanPreferencesKey("lyrics_unison_enabled_v1")
 }
