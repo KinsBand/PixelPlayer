@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Streaming:** resuming after a long pause plays the 7 s rewind from memory instead of refetching the song.
 - **Streaming:** the two songs after the next one also get their manifests ready (three in all), and the next song's cover is prefetched.
 - **Search:** opening Search pre-opens the search and playback connections, so the first query and first tap skip the connection setup.
+### Added
+- **Lyrics:** the top song card can collapse into a compact Now / Next bar (swipe up or the chevron; swipe down or the arrow to expand). Tapping Next skips to that song straight away, and when a song ends the bar slides left as the queue moves on.
+- **Lyrics:** a + button (toolbar, and next to the arrow in immersive) opens Search to add a song. Tapping a song there opens a small Play / Next / Soon / Queue sheet; picking one goes straight back to the lyrics with a short "Playing next ✓" style confirmation. Other buttons on song cards work as before.
+- **Queue:** Play Soon — lands after the current song and anything already added with Play next, at most three songs ahead.
+- **Lyrics:** quick reactions in the bottom corners (❤️ 🔥 👌 on the left, 😐 🥱 👎 on the right). Tap to open, or press and slide up to pick; closes after 3 s idle or on a tap elsewhere. Reactions are stored as their own signals for the mix (not likes); 😐 and 👎 re-plan upcoming automatic picks.
+- **Lyrics:** Expressive typography (beside Immersive lyrics, in the lyrics menu and Settings → Lyrics): font, size (now up to Extra large), weight and line spacing. The current line always stays a step bolder and the active card grows with the text.
+
+### Changed
+- **Lyrics:** the lyrics start right under the header whatever its size; secondary controls dim while the screen is idle; the fallback highlight colour stays in the cover art's hue instead of a fixed amber.
 
 ## [1.0.0] - KinsBand build
 

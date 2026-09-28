@@ -63,7 +63,6 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Speed
-import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -154,11 +153,6 @@ fun SongInfoBottomSheet(
         coverArtUpdate: CoverArtUpdate?
     ) -> Unit,
     removeFromListTrigger: () -> Unit,
-    /** Player-only: when set (the song is the one playing), Repeat + Sleep timer appear at the top. */
-    playbackRepeatMode: Int? = null,
-    onRepeatToggle: (() -> Unit)? = null,
-    sleepTimerLabel: String? = null,
-    onSleepTimerClick: (() -> Unit)? = null,
     songInfoViewModel: SongInfoBottomSheetViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -502,15 +496,6 @@ fun SongInfoBottomSheet(
                                             .padding(horizontal = 16.dp),
                                         verticalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
-                                        if (onRepeatToggle != null && playbackRepeatMode != null && onSleepTimerClick != null) {
-                                            PlayerPlaybackActionsRow(
-                                                repeatMode = playbackRepeatMode,
-                                                onRepeatToggle = onRepeatToggle,
-                                                sleepTimerLabel = sleepTimerLabel,
-                                                onSleepTimerClick = onSleepTimerClick
-                                            )
-                                        }
-
                                         // Queue / Next: once the song has been added, close the menu
                                         // (slides down, then dismisses). Playlist keeps its own picker.
                                         val closeAfterSuccess: (() -> Unit) -> Unit = { action ->
@@ -1178,82 +1163,6 @@ private val ToneTarget.confirmLabelResId: Int
         ToneTarget.Notification -> R.string.song_info_tone_notification_label
         ToneTarget.Alarm -> R.string.song_info_tone_alarm_label
     }
-
-/**
- * Repeat + Sleep timer, shown only when the options sheet is opened from the player for the
- * song that's playing (they used to live in a separate menu in front of Track options).
- */
-@Composable
-private fun PlayerPlaybackActionsRow(
-    repeatMode: Int,
-    onRepeatToggle: () -> Unit,
-    sleepTimerLabel: String?,
-    onSleepTimerClick: () -> Unit
-) {
-    val colors = MaterialTheme.colorScheme
-    val repeatActive = repeatMode != androidx.media3.common.Player.REPEAT_MODE_OFF
-    val timerActive = sleepTimerLabel != null
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        FilledTonalButton(
-            modifier = Modifier
-                .weight(1f)
-                .heightIn(min = 66.dp),
-            colors = ButtonDefaults.filledTonalButtonColors(
-                containerColor = if (repeatActive) colors.primary else colors.surfaceContainerHigh,
-                contentColor = if (repeatActive) colors.onPrimary else colors.onSurface
-            ),
-            contentPadding = PaddingValues(horizontal = 12.dp),
-            shape = CircleShape,
-            onClick = onRepeatToggle
-        ) {
-            Icon(
-                painter = painterResource(
-                    if (repeatMode == androidx.media3.common.Player.REPEAT_MODE_ONE) R.drawable.rounded_repeat_one_24
-                    else R.drawable.rounded_repeat_24
-                ),
-                contentDescription = null,
-                modifier = Modifier.size(22.dp)
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = when (repeatMode) {
-                    androidx.media3.common.Player.REPEAT_MODE_ONE -> "Repeat one"
-                    androidx.media3.common.Player.REPEAT_MODE_ALL -> "Repeat all"
-                    else -> "Repeat"
-                },
-                fontWeight = FontWeight.Bold,
-                maxLines = 1
-            )
-        }
-        FilledTonalButton(
-            modifier = Modifier
-                .weight(1f)
-                .heightIn(min = 66.dp),
-            colors = ButtonDefaults.filledTonalButtonColors(
-                containerColor = if (timerActive) colors.primary else colors.surfaceContainerHigh,
-                contentColor = if (timerActive) colors.onPrimary else colors.onSurface
-            ),
-            contentPadding = PaddingValues(horizontal = 12.dp),
-            shape = CircleShape,
-            onClick = onSleepTimerClick
-        ) {
-            Icon(
-                imageVector = androidx.compose.material.icons.Icons.Rounded.Timer,
-                contentDescription = null,
-                modifier = Modifier.size(22.dp)
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = sleepTimerLabel ?: "Sleep timer",
-                fontWeight = FontWeight.Bold,
-                maxLines = 1
-            )
-        }
-    }
-}
 
 @Composable
 private fun MetadataItemCard(

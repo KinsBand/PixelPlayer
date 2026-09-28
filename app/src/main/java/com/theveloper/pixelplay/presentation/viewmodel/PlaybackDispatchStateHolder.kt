@@ -1071,6 +1071,34 @@ class PlaybackDispatchStateHolder @Inject constructor(
         }
     }
 
+    /**
+     * Play Soon: lands in the near future without jumping ahead of what the user already lined
+     * up. Goes after the current song and any songs already added with Play next (priority,
+     * pinned), but never more than [PLAY_SOON_MAX_AHEAD] places after the current song.
+     */
+    fun addSongSoon(song: Song) {
+        cb.getController()?.let { controller ->
+            val mediaItem = com.theveloper.pixelplay.data.model.QueueEntryMetadata(
+                tier = com.theveloper.pixelplay.data.model.QueueTier.PRIORITY, pinned = true
+            ).attach(buildPlaybackMediaItem(song))
+            val count = controller.mediaItemCount
+            val current = controller.currentMediaItemIndex
+            val insertionIndex = if (current == C.INDEX_UNSET) {
+                count
+            } else {
+                playSoonInsertionIndex(
+                    currentIndex = current,
+                    itemCount = count,
+                    isPriority = { index ->
+                        val meta = com.theveloper.pixelplay.data.model.QueueEntryMetadata.read(controller.getMediaItemAt(index))
+                        meta.tier == com.theveloper.pixelplay.data.model.QueueTier.PRIORITY && meta.pinned
+                    }
+                )
+            }
+            controller.addMediaItem(insertionIndex, mediaItem)
+        }
+    }
+
     private fun buildPlaybackMediaItem(song: Song, playlistId: String? = null): MediaItem {
         val effectiveSong = if (song.youtubeId != null && com.theveloper.pixelplay.data.accounts.CatalogTracks.isCatalogUri(song.contentUriString)) {
             song.copy(contentUriString = "youtube://${song.youtubeId}")
@@ -1253,4 +1281,20 @@ class PlaybackDispatchStateHolder @Inject constructor(
 
         return remoteCurrentSongId == null || remoteCurrentSongId == expectedSongId
     }
+}
+
+/** How far after the current song Play Soon may land at most. */
+internal const val PLAY_SOON_MAX_AHEAD = 3
+
+/**
+ * Where Play Soon inserts: right after the current song, skipping past songs already queued
+ * with Play next ([isPriority]), capped at [PLAY_SOON_MAX_AHEAD] places after the current song.
+ */
+internal fun playSoonInsertionIndex(currentIndex: Int, itemCount: Int, isPriority: (Int) -> Boolean): Int {
+    if (currentIndex < 0) return itemCount
+    val first = (currentIndex + 1).coerceAtMost(itemCount)
+    val cap = (currentIndex + PLAY_SOON_MAX_AHEAD).coerceAtMost(itemCount)
+    var index = first
+    while (index < cap && isPriority(index)) index++
+    return index
 }

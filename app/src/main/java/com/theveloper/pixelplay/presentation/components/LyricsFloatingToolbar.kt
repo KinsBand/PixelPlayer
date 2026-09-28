@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
@@ -133,7 +134,9 @@ fun LyricsFloatingToolbar(
     /** Instruments page: the Instruments button opens / closes the practice area. */
     onInstrumentsClick: () -> Unit = {},
     // Draw-phase lambda: 0f = fully visible, 1f = dismissed. Read inside graphicsLayer to avoid recomposition per frame.
-    backProgressProvider: () -> Float = { 0f }
+    backProgressProvider: () -> Float = { 0f },
+    /** Add Song: opens Search to pick a song to play / queue. Hidden when null. */
+    onAddSongClick: (() -> Unit)? = null
 ) {
     // Always shown, so the Instruments page is reachable even for songs without lyrics.
     Row(
@@ -195,6 +198,23 @@ fun LyricsFloatingToolbar(
         )
         
         Spacer(modifier = Modifier.width(8.dp))
+
+        if (onAddSongClick != null) {
+            IconButton(
+                colors = IconButtonDefaults.iconButtonColors(
+                    containerColor = backgroundColor,
+                    contentColor = onBackgroundColor
+                ),
+                onClick = onAddSongClick
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Add,
+                    contentDescription = "Add a song",
+                    tint = onBackgroundColor
+                )
+            }
+            Spacer(modifier = Modifier.width(4.dp))
+        }
 
         IconButton(
             colors = IconButtonDefaults.iconButtonColors(

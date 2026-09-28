@@ -1,5 +1,7 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import com.theveloper.pixelplay.presentation.components.LocalSongPrimaryTap
+import com.theveloper.pixelplay.presentation.components.handle
 import com.theveloper.pixelplay.presentation.navigation.navigateSafely
 import com.theveloper.pixelplay.presentation.navigation.navigateSafelyReplacing
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -107,6 +109,7 @@ fun GenreDetailScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val stablePlayerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
+    val songTap = LocalSongPrimaryTap.current
     val favoriteSongIds by playerViewModel.favoriteSongIds.collectAsStateWithLifecycle()
     val playlistUiState by playlistViewModel.uiState.collectAsStateWithLifecycle()
     val libraryGenres by playerViewModel.genres.collectAsStateWithLifecycle()
@@ -379,7 +382,10 @@ fun GenreDetailScreen(
                                 item = item,
                                 stablePlayerState = stablePlayerState,
                                 onSongClick = { song ->
-                                    playerViewModel.showAndPlaySong(song, uiState.sortedSongs, genreDisplayName)
+                                    // Add Song from lyrics: opens the action sheet instead.
+                                    songTap.handle(song, uiState.sortedSongs, genreDisplayName) {
+                                        playerViewModel.showAndPlaySong(song, uiState.sortedSongs, genreDisplayName)
+                                    }
                                 },
                                 onMoreOptionsClick = { song -> showSongOptionsSheet = song },
                                 isSelectionMode = isSelectionMode,

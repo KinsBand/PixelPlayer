@@ -77,6 +77,8 @@ import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FormatSize
+import androidx.compose.material.icons.rounded.FormatBold
+import androidx.compose.material.icons.rounded.FormatLineSpacing
 import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.ScreenRotation
@@ -826,30 +828,6 @@ private fun LyricsAdvancedSettings(
                 val immersive = uiState.immersiveLyricsEnabled
                 AdvancedGroup(
                     title = stringResource(R.string.settings_lyrics_display_section),
-                    // "Lyrics": font on the left, size on the right.
-                    header = {
-                        LyricsFontSizeRow(
-                            fontOptions = listOf(
-                                com.theveloper.pixelplay.presentation.components.LyricsFont.SYSTEM.key to stringResource(R.string.settings_lyrics_font_system),
-                                com.theveloper.pixelplay.presentation.components.LyricsFont.GOOGLE_SANS_ROUNDED.key to stringResource(R.string.settings_lyrics_font_google_sans_rounded),
-                                com.theveloper.pixelplay.presentation.components.LyricsFont.GOOGLE_SANS_FLEX.key to stringResource(R.string.settings_lyrics_font_google_sans_flex),
-                                com.theveloper.pixelplay.presentation.components.LyricsFont.ROBOTO_FLEX.key to stringResource(R.string.settings_lyrics_font_roboto_flex),
-                                com.theveloper.pixelplay.presentation.components.LyricsFont.MONTSERRAT.key to stringResource(R.string.settings_lyrics_font_montserrat)
-                            ),
-                            selectedFont = displayPrefs.font.key,
-                            onFontSelect = { key -> editPrefs { it[com.theveloper.pixelplay.presentation.components.LyricsDisplayPrefKeys.FONT] = com.theveloper.pixelplay.presentation.components.LyricsFont.fromKey(key).key } },
-                            sizeOptions = listOf(
-                                com.theveloper.pixelplay.presentation.components.LyricsTextSize.SMALL.key to stringResource(R.string.settings_lyrics_size_small),
-                                com.theveloper.pixelplay.presentation.components.LyricsTextSize.MEDIUM.key to stringResource(R.string.settings_lyrics_size_medium),
-                                com.theveloper.pixelplay.presentation.components.LyricsTextSize.LARGE.key to stringResource(R.string.settings_lyrics_size_large)
-                            ),
-                            selectedSize = displayPrefs.textSize.key,
-                            onSizeSelect = { key -> editPrefs { it[com.theveloper.pixelplay.presentation.components.LyricsDisplayPrefKeys.TEXT_SIZE] = com.theveloper.pixelplay.presentation.components.LyricsTextSize.fromKey(key).key } },
-                            itemBackgroundColor = itemBackgroundColor,
-                            contentColor = contentColor,
-                            accentColor = accentColor
-                        )
-                    },
                     rows = buildList {
                         add(AdvancedRow(
                             icon = Icons.Rounded.Album,
@@ -884,6 +862,69 @@ private fun LyricsAdvancedSettings(
                                 title = "Face-to-face lyrics",
                                 checked = displayPrefs.splitFaceView,
                                 onCheckedChange = { enabled -> editPrefs { it[com.theveloper.pixelplay.presentation.components.LyricsDisplayPrefKeys.SPLIT_FACE_VIEW] = enabled } },
+                                depth = 1
+                            ))
+                        }
+                        // Expressive typography sits beside Immersive: one switch, and while it's
+                        // on, the font / size / weight / spacing choices hang under it.
+                        add(AdvancedRow(
+                            icon = Icons.Rounded.TextFields,
+                            title = stringResource(R.string.settings_lyrics_expressive_typography_title),
+                            subtitle = if (!displayPrefs.expressiveTypography) stringResource(R.string.settings_lyrics_expressive_typography_subtitle) else null,
+                            checked = displayPrefs.expressiveTypography,
+                            onCheckedChange = { enabled -> editPrefs { it[com.theveloper.pixelplay.presentation.components.LyricsDisplayPrefKeys.EXPRESSIVE_TYPOGRAPHY] = enabled } }
+                        ))
+                        if (displayPrefs.expressiveTypography) {
+                            add(AdvancedRow(
+                                icon = Icons.Rounded.TextFields,
+                                title = "Font",
+                                options = listOf(
+                                    com.theveloper.pixelplay.presentation.components.LyricsFont.SYSTEM.key to stringResource(R.string.settings_lyrics_font_system),
+                                    com.theveloper.pixelplay.presentation.components.LyricsFont.GOOGLE_SANS_ROUNDED.key to stringResource(R.string.settings_lyrics_font_google_sans_rounded),
+                                    com.theveloper.pixelplay.presentation.components.LyricsFont.GOOGLE_SANS_FLEX.key to stringResource(R.string.settings_lyrics_font_google_sans_flex),
+                                    com.theveloper.pixelplay.presentation.components.LyricsFont.ROBOTO_FLEX.key to stringResource(R.string.settings_lyrics_font_roboto_flex),
+                                    com.theveloper.pixelplay.presentation.components.LyricsFont.MONTSERRAT.key to stringResource(R.string.settings_lyrics_font_montserrat)
+                                ),
+                                selectedKey = displayPrefs.chosenFont.key,
+                                onSelect = { key -> editPrefs { it[com.theveloper.pixelplay.presentation.components.LyricsDisplayPrefKeys.FONT] = com.theveloper.pixelplay.presentation.components.LyricsFont.fromKey(key).key } },
+                                depth = 1
+                            ))
+                            add(AdvancedRow(
+                                icon = Icons.Rounded.FormatSize,
+                                title = "Size",
+                                options = listOf(
+                                    com.theveloper.pixelplay.presentation.components.LyricsTextSize.SMALL.key to stringResource(R.string.settings_lyrics_size_small),
+                                    com.theveloper.pixelplay.presentation.components.LyricsTextSize.MEDIUM.key to stringResource(R.string.settings_lyrics_size_medium),
+                                    com.theveloper.pixelplay.presentation.components.LyricsTextSize.LARGE.key to stringResource(R.string.settings_lyrics_size_large),
+                                    com.theveloper.pixelplay.presentation.components.LyricsTextSize.EXTRA_LARGE.key to stringResource(R.string.settings_lyrics_size_extra_large)
+                                ),
+                                selectedKey = displayPrefs.chosenTextSize.key,
+                                onSelect = { key -> editPrefs { it[com.theveloper.pixelplay.presentation.components.LyricsDisplayPrefKeys.TEXT_SIZE] = com.theveloper.pixelplay.presentation.components.LyricsTextSize.fromKey(key).key } },
+                                depth = 1
+                            ))
+                            add(AdvancedRow(
+                                icon = Icons.Rounded.FormatBold,
+                                title = "Weight",
+                                options = listOf(
+                                    com.theveloper.pixelplay.presentation.components.LyricsFontWeight.LIGHT.key to stringResource(R.string.settings_lyrics_weight_light),
+                                    com.theveloper.pixelplay.presentation.components.LyricsFontWeight.REGULAR.key to stringResource(R.string.settings_lyrics_weight_regular),
+                                    com.theveloper.pixelplay.presentation.components.LyricsFontWeight.MEDIUM.key to stringResource(R.string.settings_lyrics_weight_medium),
+                                    com.theveloper.pixelplay.presentation.components.LyricsFontWeight.SEMIBOLD.key to stringResource(R.string.settings_lyrics_weight_semibold)
+                                ),
+                                selectedKey = displayPrefs.chosenFontWeight.key,
+                                onSelect = { key -> editPrefs { it[com.theveloper.pixelplay.presentation.components.LyricsDisplayPrefKeys.FONT_WEIGHT] = com.theveloper.pixelplay.presentation.components.LyricsFontWeight.fromKey(key).key } },
+                                depth = 1
+                            ))
+                            add(AdvancedRow(
+                                icon = Icons.Rounded.FormatLineSpacing,
+                                title = "Line spacing",
+                                options = listOf(
+                                    com.theveloper.pixelplay.presentation.components.LyricsLineSpacing.TIGHT.key to stringResource(R.string.settings_lyrics_spacing_tight),
+                                    com.theveloper.pixelplay.presentation.components.LyricsLineSpacing.NORMAL.key to stringResource(R.string.settings_lyrics_spacing_normal),
+                                    com.theveloper.pixelplay.presentation.components.LyricsLineSpacing.RELAXED.key to stringResource(R.string.settings_lyrics_spacing_relaxed)
+                                ),
+                                selectedKey = displayPrefs.chosenLineSpacing.key,
+                                onSelect = { key -> editPrefs { it[com.theveloper.pixelplay.presentation.components.LyricsDisplayPrefKeys.LINE_SPACING] = com.theveloper.pixelplay.presentation.components.LyricsLineSpacing.fromKey(key).key } },
                                 depth = 1
                             ))
                         }
@@ -1185,107 +1226,6 @@ private fun ImmersiveDelayRow(
                         }
                     )
                 }
-            }
-        }
-    }
-}
-
-/** "Lyrics" heading over two side-by-side pickers: Font (left) and Size (right). */
-@Composable
-private fun LyricsFontSizeRow(
-    fontOptions: List<Pair<String, String>>,
-    selectedFont: String,
-    onFontSelect: (String) -> Unit,
-    sizeOptions: List<Pair<String, String>>,
-    selectedSize: String,
-    onSizeSelect: (String) -> Unit,
-    itemBackgroundColor: Color,
-    contentColor: Color,
-    accentColor: Color
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            "Lyrics",
-            modifier = Modifier.padding(start = 6.dp),
-            style = MaterialTheme.typography.labelLarge,
-            color = contentColor.copy(alpha = 0.7f)
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            PickerTile(
-                label = "Font",
-                icon = Icons.Rounded.TextFields,
-                options = fontOptions,
-                selectedKey = selectedFont,
-                onSelect = onFontSelect,
-                itemBackgroundColor = itemBackgroundColor,
-                contentColor = contentColor,
-                accentColor = accentColor,
-                modifier = Modifier.weight(1f)
-            )
-            PickerTile(
-                label = "Size",
-                icon = Icons.Rounded.FormatSize,
-                options = sizeOptions,
-                selectedKey = selectedSize,
-                onSelect = onSizeSelect,
-                itemBackgroundColor = itemBackgroundColor,
-                contentColor = contentColor,
-                accentColor = accentColor,
-                modifier = Modifier.weight(1f)
-            )
-        }
-    }
-}
-
-@Composable
-private fun PickerTile(
-    label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    options: List<Pair<String, String>>,
-    selectedKey: String,
-    onSelect: (String) -> Unit,
-    itemBackgroundColor: Color,
-    contentColor: Color,
-    accentColor: Color,
-    modifier: Modifier = Modifier
-) {
-    var menuOpen by remember { mutableStateOf(false) }
-    val selectedLabel = options.firstOrNull { it.first == selectedKey }?.second.orEmpty()
-    Box(modifier) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(62.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .background(itemBackgroundColor)
-                .clickable { menuOpen = true }
-                .padding(horizontal = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(icon, contentDescription = null, tint = contentColor, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text(label, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), color = contentColor)
-                Text(
-                    selectedLabel,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = accentColor,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, tint = accentColor)
-        }
-        androidx.compose.material3.DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            options.forEach { (key, optionLabel) ->
-                androidx.compose.material3.DropdownMenuItem(
-                    text = { Text(optionLabel) },
-                    leadingIcon = if (key == selectedKey) ({ Icon(Icons.Rounded.Check, null) }) else null,
-                    onClick = {
-                        menuOpen = false
-                        onSelect(key)
-                    }
-                )
             }
         }
     }

@@ -15,6 +15,16 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.Text
+import androidx.activity.compose.BackHandler
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.graphics.luminance
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.compose.currentBackStackEntryAsState
+import com.theveloper.pixelplay.presentation.components.LocalSongPrimaryTap
+import com.theveloper.pixelplay.presentation.components.SongActionRequest
+import com.theveloper.pixelplay.presentation.components.SongActionSheet
+import com.theveloper.pixelplay.presentation.components.SongPrimaryTapInterceptor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -86,426 +96,469 @@ fun AppNavigation(
             .toRoute()
     }
 
-    startDestination?.let { initialRoute ->
-        NavHost(
-            navController = navController,
-            startDestination = initialRoute,
-            enterTransition = { aospSharedAxisEnter() },
-            exitTransition = { aospSharedAxisExit() },
-            popEnterTransition = { aospSharedAxisPopEnter() },
-            popExitTransition = { aospSharedAxisPopExit() }
-        ) {
-            composable(
-                Screen.Home.route,
-                enterTransition = {
-                    mainRootEnterTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = enterTransition()
-                    )
+    // Add Song from the lyrics screen: while it's active, tapping a song's main area opens the
+    // Play / Next / Soon / Queue sheet instead of playing it. Other buttons on a card are
+    // untouched. Picking an action returns straight to the lyrics.
+    val addSongSession by playerViewModel.addSongSession.collectAsStateWithLifecycle()
+    var songActionRequest by remember { mutableStateOf<SongActionRequest?>(null) }
+    LaunchedEffect(addSongSession) { if (addSongSession == null) songActionRequest = null }
+    val songTapInterceptor = remember(addSongSession != null) {
+        if (addSongSession != null) {
+            SongPrimaryTapInterceptor { song, queue, name -> songActionRequest = SongActionRequest(song, queue, name) }
+        } else {
+            null
+        }
+    }
+
+    songActionRequest?.let { request ->
+        // The sheet takes the current song's cover-art colours, like the lyrics screen.
+        val albumSchemes by playerViewModel.activePlayerColorSchemePair.collectAsStateWithLifecycle()
+        val base = MaterialTheme.colorScheme
+        val isDark = base.background.luminance() < 0.5f
+        val scheme = albumSchemes?.let { if (isDark) it.dark else it.light } ?: base
+        MaterialTheme(colorScheme = scheme) {
+            SongActionSheet(
+                request = request,
+                onAction = { action ->
+                    songActionRequest = null
+                    playerViewModel.completeAddSong(action, request.song, request.contextQueue, request.queueName)
                 },
-                exitTransition = {
-                    mainRootExitTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = exitTransition()
-                    )
-                },
-                popEnterTransition = {
-                    mainRootEnterTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = popEnterTransition()
-                    )
-                },
-                popExitTransition = {
-                    mainRootExitTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = popExitTransition()
-                    )
-                },
+                // Swipe down / tap outside: just close, stay in Search.
+                onDismiss = { songActionRequest = null }
+            )
+        }
+    }
+
+    CompositionLocalProvider(LocalSongPrimaryTap provides songTapInterceptor) {
+        startDestination?.let { initialRoute ->
+            NavHost(
+                navController = navController,
+                startDestination = initialRoute,
+                enterTransition = { aospSharedAxisEnter() },
+                exitTransition = { aospSharedAxisExit() },
+                popEnterTransition = { aospSharedAxisPopEnter() },
+                popExitTransition = { aospSharedAxisPopExit() }
             ) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    HomeScreen(
-                        navController = navController, 
-                        paddingValuesParent = paddingValues, 
-                        playerViewModel = playerViewModel,
-                        onOpenSidebar = onOpenSidebar,
-                        onVoiceSearchClick = onVoiceSearchClick
-                    )
-                }
-            }
-            composable(
-                Screen.Search.route,
-                enterTransition = {
-                    mainRootEnterTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = enterTransition()
-                    )
-                },
-                exitTransition = {
-                    mainRootExitTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = exitTransition()
-                    )
-                },
-                popEnterTransition = {
-                    mainRootEnterTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = popEnterTransition()
-                    )
-                },
-                popExitTransition = {
-                    mainRootExitTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = popExitTransition()
-                    )
-                },
-            ) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    SearchScreen(
-                        paddingValues = paddingValues,
-                        playerViewModel = playerViewModel,
-                        navController = navController
-                    )
-                }
-            }
-            composable(
-                Screen.Library.route,
-                enterTransition = {
-                    mainRootEnterTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = enterTransition()
-                    )
-                },
-                exitTransition = {
-                    mainRootExitTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = exitTransition()
-                    )
-                },
-                popEnterTransition = {
-                    mainRootEnterTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = popEnterTransition()
-                    )
-                },
-                popExitTransition = {
-                    mainRootExitTransition(
-                        fromRoute = initialState.destination.route,
-                        toRoute = targetState.destination.route,
-                        fallback = popExitTransition()
-                    )
-                },
-            ) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    LibraryScreen(navController = navController, playerViewModel = playerViewModel)
-                }
-            }
-            composable(
-                Screen.Settings.route,
-            ) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    SettingsScreen(
-                        navController = navController,
-                        playerViewModel = playerViewModel,
-                        onNavigationIconClick = {
-                            navController.popBackStack()
-                        }
-                    )
-                }
-            }
-            composable(
-                Screen.Accounts.route,
-            ) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    AccountsScreen(
-                        onBackClick = { navController.popBackStack() },
-                        playerViewModel = playerViewModel,
-                        navController = navController
-                    )
-                }
-            }
-            composable(
-                route = Screen.SettingsCategory.route,
-                arguments = listOf(
-                    navArgument("categoryId") { type = NavType.StringType },
-                    navArgument("highlight") {
-                        type = NavType.StringType
-                        nullable = true
-                        defaultValue = null
+                composable(
+                    Screen.Home.route,
+                    enterTransition = {
+                        mainRootEnterTransition(
+                            fromRoute = initialState.destination.route,
+                            toRoute = targetState.destination.route,
+                            fallback = enterTransition()
+                        )
+                    },
+                    exitTransition = {
+                        mainRootExitTransition(
+                            fromRoute = initialState.destination.route,
+                            toRoute = targetState.destination.route,
+                            fallback = exitTransition()
+                        )
+                    },
+                    popEnterTransition = {
+                        mainRootEnterTransition(
+                            fromRoute = initialState.destination.route,
+                            toRoute = targetState.destination.route,
+                            fallback = popEnterTransition()
+                        )
+                    },
+                    popExitTransition = {
+                        mainRootExitTransition(
+                            fromRoute = initialState.destination.route,
+                            toRoute = targetState.destination.route,
+                            fallback = popExitTransition()
+                        )
+                    },
+                ) {
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        HomeScreen(
+                            navController = navController, 
+                            paddingValuesParent = paddingValues, 
+                            playerViewModel = playerViewModel,
+                            onOpenSidebar = onOpenSidebar,
+                            onVoiceSearchClick = onVoiceSearchClick
+                        )
                     }
-                ),
-            ) { backStackEntry ->
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    val categoryId = backStackEntry.arguments?.getString("categoryId")
-                    val highlight = backStackEntry.arguments?.getString("highlight")
-                    if (categoryId != null) {
-                        SettingsCategoryScreen(
-                            categoryId = categoryId,
-                            highlight = highlight,
+                }
+                composable(
+                    Screen.Search.route,
+                    enterTransition = {
+                        mainRootEnterTransition(
+                            fromRoute = initialState.destination.route,
+                            toRoute = targetState.destination.route,
+                            fallback = enterTransition()
+                        )
+                    },
+                    exitTransition = {
+                        mainRootExitTransition(
+                            fromRoute = initialState.destination.route,
+                            toRoute = targetState.destination.route,
+                            fallback = exitTransition()
+                        )
+                    },
+                    popEnterTransition = {
+                        mainRootEnterTransition(
+                            fromRoute = initialState.destination.route,
+                            toRoute = targetState.destination.route,
+                            fallback = popEnterTransition()
+                        )
+                    },
+                    popExitTransition = {
+                        mainRootExitTransition(
+                            fromRoute = initialState.destination.route,
+                            toRoute = targetState.destination.route,
+                            fallback = popExitTransition()
+                        )
+                    },
+                ) {
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        SearchScreen(
+                            paddingValues = paddingValues,
+                            playerViewModel = playerViewModel,
+                            navController = navController
+                        )
+                    }
+                }
+                composable(
+                    Screen.Library.route,
+                    enterTransition = {
+                        mainRootEnterTransition(
+                            fromRoute = initialState.destination.route,
+                            toRoute = targetState.destination.route,
+                            fallback = enterTransition()
+                        )
+                    },
+                    exitTransition = {
+                        mainRootExitTransition(
+                            fromRoute = initialState.destination.route,
+                            toRoute = targetState.destination.route,
+                            fallback = exitTransition()
+                        )
+                    },
+                    popEnterTransition = {
+                        mainRootEnterTransition(
+                            fromRoute = initialState.destination.route,
+                            toRoute = targetState.destination.route,
+                            fallback = popEnterTransition()
+                        )
+                    },
+                    popExitTransition = {
+                        mainRootExitTransition(
+                            fromRoute = initialState.destination.route,
+                            toRoute = targetState.destination.route,
+                            fallback = popExitTransition()
+                        )
+                    },
+                ) {
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        LibraryScreen(navController = navController, playerViewModel = playerViewModel)
+                    }
+                }
+                composable(
+                    Screen.Settings.route,
+                ) {
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        SettingsScreen(
                             navController = navController,
+                            playerViewModel = playerViewModel,
+                            onNavigationIconClick = {
+                                navController.popBackStack()
+                            }
+                        )
+                    }
+                }
+                composable(
+                    Screen.Accounts.route,
+                ) {
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        AccountsScreen(
+                            onBackClick = { navController.popBackStack() },
+                            playerViewModel = playerViewModel,
+                            navController = navController
+                        )
+                    }
+                }
+                composable(
+                    route = Screen.SettingsCategory.route,
+                    arguments = listOf(
+                        navArgument("categoryId") { type = NavType.StringType },
+                        navArgument("highlight") {
+                            type = NavType.StringType
+                            nullable = true
+                            defaultValue = null
+                        }
+                    ),
+                ) { backStackEntry ->
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        val categoryId = backStackEntry.arguments?.getString("categoryId")
+                        val highlight = backStackEntry.arguments?.getString("highlight")
+                        if (categoryId != null) {
+                            SettingsCategoryScreen(
+                                categoryId = categoryId,
+                                highlight = highlight,
+                                navController = navController,
+                                playerViewModel = playerViewModel,
+                                onBackClick = { navController.popBackStack() }
+                            )
+                        }
+                    }
+                }
+                composable(
+                    Screen.PaletteStyle.route,
+                ) {
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        PaletteStyleSettingsScreen(
                             playerViewModel = playerViewModel,
                             onBackClick = { navController.popBackStack() }
                         )
                     }
                 }
-            }
-            composable(
-                Screen.PaletteStyle.route,
-            ) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    PaletteStyleSettingsScreen(
-                        playerViewModel = playerViewModel,
-                        onBackClick = { navController.popBackStack() }
-                    )
+                composable(
+                    Screen.Experimental.route,
+                ) {
+                    // The Experimental screen was folded into Player & Lyrics; old links land there.
+                    LaunchedEffect(Unit) {
+                        navController.navigateSafelyReplacing(
+                            route = Screen.SettingsCategory.createRoute(SettingsCategory.LYRICS.id),
+                            patternToPop = Screen.Experimental.route
+                        )
+                    }
                 }
-            }
-            composable(
-                Screen.Experimental.route,
-            ) {
-                // The Experimental screen was folded into Player & Lyrics; old links land there.
-                LaunchedEffect(Unit) {
-                    navController.navigateSafelyReplacing(
-                        route = Screen.SettingsCategory.createRoute(SettingsCategory.LYRICS.id),
-                        patternToPop = Screen.Experimental.route
-                    )
-                }
-            }
-            composable(
-                Screen.DailyMixScreen.route,
-            ) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    DailyMixScreen(
-                        playerViewModel = playerViewModel,
-                        navController = navController
-                    )
-                }
-            }
-            composable(
-                Screen.RecentlyPlayed.route,
-            ) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    RecentlyPlayedScreen(
-                        playerViewModel = playerViewModel,
-                        navController = navController
-                    )
-                }
-            }
-            composable(
-                Screen.Stats.route,
-            ) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    StatsScreen(
-                        navController = navController
-                    )
-                }
-            }
-            composable(
-                route = Screen.PlaylistDetail.route,
-                arguments = listOf(navArgument("playlistId") { type = NavType.StringType }),
-            ) { backStackEntry ->
-                val playlistId = backStackEntry.arguments?.getString("playlistId")
-                val playlistViewModel: PlaylistViewModel = hiltViewModel()
-                if (playlistId != null) {
+                composable(
+                    Screen.DailyMixScreen.route,
+                ) {
                     ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                        PlaylistDetailScreen(
-                            playlistId = playlistId,
+                        DailyMixScreen(
                             playerViewModel = playerViewModel,
-                            playlistViewModel = playlistViewModel,
-                            onBackClick = { navController.popBackStack() },
-                            onDeletePlayListClick = { navController.popBackStack() },
                             navController = navController
                         )
                     }
                 }
-            }
-
-            composable(
-                route = Screen.PlatformPlaylists.route,
-                arguments = listOf(navArgument("platform") { type = NavType.StringType }),
-            ) { backStackEntry ->
-                val platform = PlaylistPlatform.from(backStackEntry.arguments?.getString("platform"))
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    PlatformPlaylistsScreen(
-                        platform = platform,
-                        navController = navController,
-                        onBackClick = { navController.popBackStack() }
-                    )
-                }
-            }
-
-            composable(Screen.Practice.route) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    PracticeScreen(
-                        playerViewModel = playerViewModel,
-                        onBackClick = { navController.popBackStack() }
-                    )
-                }
-            }
-
-            composable(Screen.Radio.route) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    RadioScreen(
-                        playerViewModel = playerViewModel,
-                        onBackClick = { navController.popBackStack() }
-                    )
-                }
-            }
-
-            composable(Screen.YourMusic.route) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    YourMusicScreen(
-                        playerViewModel = playerViewModel,
-                        navController = navController,
-                        onBackClick = { navController.popBackStack() }
-                    )
-                }
-            }
-
-            composable(
-                Screen.DJSpace.route,
-            ) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    MashupScreen()
-                }
-            }
-            composable(
-                route = Screen.GenreDetail.route,
-                arguments = listOf(navArgument("genreId") { type = NavType.StringType }),
-            ) { backStackEntry ->
-                val genreId = backStackEntry.arguments?.getString("genreId")
-                if (genreId != null) {
+                composable(
+                    Screen.RecentlyPlayed.route,
+                ) {
                     ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                        GenreDetailScreen(
-                            navController = navController,
-                            genreId = genreId,
-                            playerViewModel = playerViewModel
-                        )
-                    }
-                } else {
-                    Text(stringResource(R.string.nav_error_genre_id_missing), modifier = Modifier)
-                }
-            }
-            composable(
-                route = Screen.AlbumDetail.route,
-                arguments = listOf(navArgument("albumId") { type = NavType.StringType }),
-            ) { backStackEntry ->
-                val albumId = backStackEntry.arguments?.getString("albumId")
-                if (albumId != null) {
-                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                        AlbumDetailScreen(
-                            albumId = albumId,
-                            navController = navController,
-                            playerViewModel = playerViewModel
+                        RecentlyPlayedScreen(
+                            playerViewModel = playerViewModel,
+                            navController = navController
                         )
                     }
                 }
-            }
-            composable(
-                route = Screen.ArtistDetail.route,
-                arguments = listOf(navArgument("artistId") { type = NavType.StringType }),
-            ) { backStackEntry ->
-                val artistId = backStackEntry.arguments?.getString("artistId")
-                if (artistId != null) {
+                composable(
+                    Screen.Stats.route,
+                ) {
                     ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                        ArtistDetailScreen(
-                            artistId = artistId,
+                        StatsScreen(
+                            navController = navController
+                        )
+                    }
+                }
+                composable(
+                    route = Screen.PlaylistDetail.route,
+                    arguments = listOf(navArgument("playlistId") { type = NavType.StringType }),
+                ) { backStackEntry ->
+                    val playlistId = backStackEntry.arguments?.getString("playlistId")
+                    val playlistViewModel: PlaylistViewModel = hiltViewModel()
+                    if (playlistId != null) {
+                        ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                            PlaylistDetailScreen(
+                                playlistId = playlistId,
+                                playerViewModel = playerViewModel,
+                                playlistViewModel = playlistViewModel,
+                                onBackClick = { navController.popBackStack() },
+                                onDeletePlayListClick = { navController.popBackStack() },
+                                navController = navController
+                            )
+                        }
+                    }
+                }
+
+                composable(
+                    route = Screen.PlatformPlaylists.route,
+                    arguments = listOf(navArgument("platform") { type = NavType.StringType }),
+                ) { backStackEntry ->
+                    val platform = PlaylistPlatform.from(backStackEntry.arguments?.getString("platform"))
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        PlatformPlaylistsScreen(
+                            platform = platform,
+                            navController = navController,
+                            onBackClick = { navController.popBackStack() }
+                        )
+                    }
+                }
+
+                composable(Screen.Practice.route) {
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        PracticeScreen(
+                            playerViewModel = playerViewModel,
+                            onBackClick = { navController.popBackStack() }
+                        )
+                    }
+                }
+
+                composable(Screen.Radio.route) {
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        RadioScreen(
+                            playerViewModel = playerViewModel,
+                            onBackClick = { navController.popBackStack() }
+                        )
+                    }
+                }
+
+                composable(Screen.YourMusic.route) {
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        YourMusicScreen(
+                            playerViewModel = playerViewModel,
+                            navController = navController,
+                            onBackClick = { navController.popBackStack() }
+                        )
+                    }
+                }
+
+                composable(
+                    Screen.DJSpace.route,
+                ) {
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        MashupScreen()
+                    }
+                }
+                composable(
+                    route = Screen.GenreDetail.route,
+                    arguments = listOf(navArgument("genreId") { type = NavType.StringType }),
+                ) { backStackEntry ->
+                    val genreId = backStackEntry.arguments?.getString("genreId")
+                    if (genreId != null) {
+                        ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                            GenreDetailScreen(
+                                navController = navController,
+                                genreId = genreId,
+                                playerViewModel = playerViewModel
+                            )
+                        }
+                    } else {
+                        Text(stringResource(R.string.nav_error_genre_id_missing), modifier = Modifier)
+                    }
+                }
+                composable(
+                    route = Screen.AlbumDetail.route,
+                    arguments = listOf(navArgument("albumId") { type = NavType.StringType }),
+                ) { backStackEntry ->
+                    val albumId = backStackEntry.arguments?.getString("albumId")
+                    if (albumId != null) {
+                        ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                            AlbumDetailScreen(
+                                albumId = albumId,
+                                navController = navController,
+                                playerViewModel = playerViewModel
+                            )
+                        }
+                    }
+                }
+                composable(
+                    route = Screen.ArtistDetail.route,
+                    arguments = listOf(navArgument("artistId") { type = NavType.StringType }),
+                ) { backStackEntry ->
+                    val artistId = backStackEntry.arguments?.getString("artistId")
+                    if (artistId != null) {
+                        ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                            ArtistDetailScreen(
+                                artistId = artistId,
+                                navController = navController,
+                                playerViewModel = playerViewModel
+                            )
+                        }
+                    }
+                }
+                composable(
+                    Screen.NavBarCrRad.route,
+                ) {
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        NavBarCornerRadiusScreen(navController)
+                    }
+                }
+                composable(
+                    route = Screen.EditTransition.route,
+                    arguments = listOf(navArgument("playlistId") {
+                        type = NavType.StringType
+                        nullable = true
+                    }),
+                ) {
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        EditTransitionScreen(navController = navController)
+                    }
+                }
+                composable(
+                    Screen.About.route,
+                ) {
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        AboutScreen(
+                            navController = navController,
+                            viewModel = playerViewModel,
+                            onNavigationIconClick = { navController.popBackStack() }
+                        )
+                    }
+                }
+                composable(
+                    Screen.EasterEgg.route,
+                ) {
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        EasterEggScreen(
+                            viewModel = playerViewModel,
+                            onNavigationIconClick = { navController.popBackStack() },
+                        )
+                    }
+                }
+                composable(
+                    Screen.ArtistSettings.route,
+                ) {
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        ArtistSettingsScreen(navController = navController)
+                    }
+                }
+                composable(
+                    Screen.DelimiterConfig.route,
+                ) {
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        DelimiterConfigScreen(navController = navController)
+                    }
+                }
+                composable(
+                    Screen.WordDelimiterConfig.route,
+                ) {
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        WordDelimiterConfigScreen(navController = navController)
+                    }
+                }
+                composable(
+                    Screen.Equalizer.route,
+                ) {
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        EqualizerScreen(
                             navController = navController,
                             playerViewModel = playerViewModel
                         )
                     }
                 }
-            }
-            composable(
-                Screen.NavBarCrRad.route,
-            ) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    NavBarCornerRadiusScreen(navController)
-                }
-            }
-            composable(
-                route = Screen.EditTransition.route,
-                arguments = listOf(navArgument("playlistId") {
-                    type = NavType.StringType
-                    nullable = true
-                }),
-            ) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    EditTransitionScreen(navController = navController)
-                }
-            }
-            composable(
-                Screen.About.route,
-            ) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    AboutScreen(
-                        navController = navController,
-                        viewModel = playerViewModel,
-                        onNavigationIconClick = { navController.popBackStack() }
-                    )
-                }
-            }
-            composable(
-                Screen.EasterEgg.route,
-            ) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    EasterEggScreen(
-                        viewModel = playerViewModel,
-                        onNavigationIconClick = { navController.popBackStack() },
-                    )
-                }
-            }
-            composable(
-                Screen.ArtistSettings.route,
-            ) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    ArtistSettingsScreen(navController = navController)
-                }
-            }
-            composable(
-                Screen.DelimiterConfig.route,
-            ) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    DelimiterConfigScreen(navController = navController)
-                }
-            }
-            composable(
-                Screen.WordDelimiterConfig.route,
-            ) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    WordDelimiterConfigScreen(navController = navController)
-                }
-            }
-            composable(
-                Screen.Equalizer.route,
-            ) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    EqualizerScreen(
-                        navController = navController,
-                        playerViewModel = playerViewModel
-                    )
-                }
-            }
-            composable(
-                Screen.DeviceCapabilities.route,
-            ) {
-                ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
-                    com.theveloper.pixelplay.presentation.screens.DeviceCapabilitiesScreen(
-                        navController = navController,
-                        playerViewModel = playerViewModel
-                    )
+                composable(
+                    Screen.DeviceCapabilities.route,
+                ) {
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        com.theveloper.pixelplay.presentation.screens.DeviceCapabilitiesScreen(
+                            navController = navController,
+                            playerViewModel = playerViewModel
+                        )
+                    }
                 }
             }
         }
+    }
+
+    // Back from the Search screen itself (not from a page opened from it) ends Add Song and
+    // goes straight back to the lyrics. Registered after the NavHost so it
+    // takes priority over the NavHost's own back handling.
+    val currentEntry by navController.currentBackStackEntryAsState()
+    BackHandler(enabled = addSongSession != null && currentEntry?.destination?.route == Screen.Search.route) {
+        playerViewModel.cancelAddSong()
     }
 }
 

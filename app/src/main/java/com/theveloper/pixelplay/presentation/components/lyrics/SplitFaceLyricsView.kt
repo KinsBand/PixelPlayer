@@ -88,6 +88,8 @@ internal fun SplitFaceLyricsView(
      * the bottom; and in the gap to its right, turned 180°, for the person at the top.
      */
     sectionChip: (@Composable (maxWidth: Dp) -> Unit)? = null,
+    /** Re-centres both halves together when the user's typography changes. */
+    relayoutKey: Any? = null,
 ) {
     Column(
         modifier = modifier
@@ -129,6 +131,7 @@ internal fun SplitFaceLyricsView(
                 showRomanization = showRomanization,
                 onLineClick = onLineClick,
                 onSeekTo = onSeekTo,
+                relayoutKey = relayoutKey,
             )
         }
 
@@ -173,7 +176,11 @@ private fun ColumnScope.LyricsHalf(
     showRomanization: Boolean,
     onLineClick: (SyncedLine) -> Unit,
     onSeekTo: (Long) -> Unit,
+    relayoutKey: Any?,
 ) {
+    // Both halves read the same position StateFlow, so within a frame they always resolve the
+    // same current line; they only differ if someone scrolls one half by hand, and the next
+    // line (or a relayout) snaps both back together.
     // Start already on the current line so the half doesn't scroll in from the top.
     val initialIndex = remember(lines) {
         // Same rows as the list itself (instrumental breaks included).
@@ -251,6 +258,7 @@ private fun ColumnScope.LyricsHalf(
             showTranslation = showTranslation,
             showRomanization = showRomanization,
             onSeekTo = onSeekTo,
+            relayoutKey = relayoutKey,
         )
     }
 }

@@ -204,15 +204,6 @@ internal fun UnifiedPlayerSongInfoLayer(
 
         val liveSong = liveSongState
 
-        // Opened from the player for the playing song: Repeat + Sleep timer live in this sheet.
-        val playerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
-        val isPlayingSong = playerState.currentSong?.id == liveSong.id
-        val sleepTimerDisplay by playerViewModel.activeTimerValueDisplay.collectAsStateWithLifecycle()
-        val sleepTimerDurationMinutes by playerViewModel.activeTimerDurationMinutes.collectAsStateWithLifecycle()
-        val sleepTimerPlayCount by playerViewModel.playCount.collectAsStateWithLifecycle()
-        val isEndOfTrackTimerActive by playerViewModel.isEndOfTrackTimerActive.collectAsStateWithLifecycle()
-        var showSleepTimerSheet by remember(staticSong.id) { mutableStateOf(false) }
-
         MaterialTheme(
             colorScheme = albumColorScheme,
             typography = MaterialTheme.typography,
@@ -276,32 +267,8 @@ internal fun UnifiedPlayerSongInfoLayer(
                 removeFromListTrigger = {
                     playerViewModel.removeSongFromQueue(liveSong.id)
                     onDismissSongInfo()
-                },
-                playbackRepeatMode = if (isPlayingSong) playerState.repeatMode else null,
-                onRepeatToggle = if (isPlayingSong) ({ playerViewModel.cycleRepeatMode() }) else null,
-                sleepTimerLabel = when {
-                    isEndOfTrackTimerActive -> "End of track"
-                    sleepTimerDisplay != null -> sleepTimerDisplay
-                    else -> null
-                },
-                onSleepTimerClick = if (isPlayingSong) ({ showSleepTimerSheet = true }) else null
+                }
             )
-
-            if (showSleepTimerSheet) {
-                TimerOptionsBottomSheet(
-                    onPlayCounter = { playerViewModel.playCounted(it) },
-                    activeTimerValueDisplay = sleepTimerDisplay,
-                    activeTimerDurationMinutes = sleepTimerDurationMinutes,
-                    playCount = sleepTimerPlayCount,
-                    isEndOfTrackTimerActive = isEndOfTrackTimerActive,
-                    onDismiss = { showSleepTimerSheet = false },
-                    onCancelCountedPlay = { playerViewModel.cancelCountedPlay() },
-                    onSetPredefinedTimer = { playerViewModel.setSleepTimer(it) },
-                    onSetEndOfTrackTimer = { playerViewModel.setEndOfTrackTimer(it) },
-                    onOpenCustomTimePicker = {},
-                    onCancelTimer = { playerViewModel.cancelSleepTimer() }
-                )
-            }
 
             if (showPlaylistBottomSheet) {
                 PlaylistBottomSheet(

@@ -38,4 +38,23 @@ class MixLearningMigrationTest {
             }
         }
     }
+
+    /** v5 adds the reactions table and leaves existing history untouched. */
+    @Test fun upgradesV4AddsEmptyReactionsTable() {
+        helper.createDatabase(name, 4).apply {
+            execSQL("INSERT INTO attempts (id,songId,startedAt,activeMs,uniqueMs,repeatedMs,durationMs,voluntary,endReason,seeks,schemaVersion) VALUES ('kept','track',1000,5000,5000,0,180000,0,'COMPLETED',0,2)")
+            close()
+        }
+        helper.runMigrationsAndValidate(name, 5, true, MixLearningDatabase.MIGRATION_4_5).use { db ->
+            db.query("SELECT COUNT(*) FROM attempts WHERE id='kept'").use {
+                assertTrue(it.moveToFirst())
+                assertEquals(1, it.getInt(0))
+            }
+            db.execSQL("INSERT INTO reactions (id,songId,recordingId,sessionId,mixId,reaction,axis,polarity,strength,positionMs,durationMs,title,artist,createdAt) VALUES ('r','track',NULL,'s',NULL,'LOVE','SONG_PREFERENCE',1,1.0,30000,180000,'T','A',2000)")
+            db.query("SELECT reaction FROM reactions WHERE songId='track'").use {
+                assertTrue(it.moveToFirst())
+                assertEquals("LOVE", it.getString(0))
+            }
+        }
+    }
 }

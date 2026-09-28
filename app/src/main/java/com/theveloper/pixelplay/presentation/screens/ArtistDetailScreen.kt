@@ -2,6 +2,8 @@
 
 package com.theveloper.pixelplay.presentation.screens
 
+import com.theveloper.pixelplay.presentation.components.LocalSongPrimaryTap
+import com.theveloper.pixelplay.presentation.components.handle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -286,6 +288,7 @@ fun ArtistDetailScreen(
     }
 
     // --- Actions ---
+    val songTap = LocalSongPrimaryTap.current
     val artistName = uiState.artist?.name.orEmpty()
 
     /** B5: the list you're looking at, from the tapped song on. */
@@ -293,7 +296,10 @@ fun ArtistDetailScreen(
         val songs = list.map { it.playSong }
         val index = songs.indexOfFirst { it.id == item.playSong.id }.coerceAtLeast(0)
         val window = songs.drop(index).take(QUEUE_WINDOW).ifEmpty { listOf(item.playSong) }
-        playerViewModel.showAndPlaySong(item.playSong, window, queueLabel)
+        // Add Song from lyrics: opens the action sheet instead of playing.
+        songTap.handle(item.playSong, window, queueLabel) {
+            playerViewModel.showAndPlaySong(item.playSong, window, queueLabel)
+        }
     }
 
     fun songQueueLabel(): String =
@@ -503,7 +509,7 @@ fun ArtistDetailScreen(
                                                 versionsExpanded = item.key in expandedVersions,
                                                 onClick = { playFrom(item, uiState.visibleTracks, songQueueLabel()) },
                                                 onToggleVersions = { toggleVersions(item.key) },
-                                                onVersionClick = { version -> playerViewModel.showAndPlaySong(version, listOf(version), artist.name) },
+                                                onVersionClick = { version -> songTap.handle(version, listOf(version), artist.name) { playerViewModel.showAndPlaySong(version, listOf(version), artist.name) } },
                                                 onMoreClick = { openSongInfo(item.playSong) }
                                             )
                                         }
@@ -552,7 +558,7 @@ fun ArtistDetailScreen(
                                     YouAndArtistCard(
                                         artistName = artist.name,
                                         listening = listening,
-                                        onTopSongClick = { song -> playerViewModel.showAndPlaySong(song, listOf(song), artist.name) }
+                                        onTopSongClick = { song -> songTap.handle(song, listOf(song), artist.name) { playerViewModel.showAndPlaySong(song, listOf(song), artist.name) } }
                                     )
                                 }
                             }
@@ -719,7 +725,9 @@ fun ArtistDetailScreen(
                                                 RelatedSongCard(
                                                     song = song,
                                                     onClick = {
-                                                        playerViewModel.showAndPlaySong(song, uiState.fansAlsoLikeSongs, "Fans also like")
+                                                        songTap.handle(song, uiState.fansAlsoLikeSongs, "Fans also like") {
+                                                            playerViewModel.showAndPlaySong(song, uiState.fansAlsoLikeSongs, "Fans also like")
+                                                        }
                                                     }
                                                 )
                                             }
@@ -813,7 +821,7 @@ fun ArtistDetailScreen(
                                 onFansFilterChange = viewModel::setFansFilter,
                                 onSongClick = { item, list -> playFrom(item, list, songQueueLabel()) },
                                 onToggleVersions = ::toggleVersions,
-                                onVersionClick = { version -> playerViewModel.showAndPlaySong(version, listOf(version), artist.name) },
+                                onVersionClick = { version -> songTap.handle(version, listOf(version), artist.name) { playerViewModel.showAndPlaySong(version, listOf(version), artist.name) } },
                                 onSongMore = ::openSongInfo,
                                 onReleaseClick = ::openRelease,
                                 onVideoClick = ::playVideo,

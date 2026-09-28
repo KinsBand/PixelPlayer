@@ -318,7 +318,8 @@ class PlayerViewModelTest {
             mockMediaControllerFactory,
             mockk<com.theveloper.pixelplay.data.service.cast.CastTokenStore>(relaxed = true),
             mockk<com.theveloper.pixelplay.data.analysis.GenreCategorizerEngine>(relaxed = true),
-            mockk<com.theveloper.pixelplay.data.repository.HeardSongsRepository>(relaxed = true)
+            mockk<com.theveloper.pixelplay.data.repository.HeardSongsRepository>(relaxed = true),
+            mockk<com.theveloper.pixelplay.data.SongReactions>(relaxed = true)
         )
     }
 

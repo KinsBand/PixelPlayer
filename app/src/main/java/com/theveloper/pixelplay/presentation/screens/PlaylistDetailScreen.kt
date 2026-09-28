@@ -1,5 +1,7 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import com.theveloper.pixelplay.presentation.components.LocalSongPrimaryTap
+import com.theveloper.pixelplay.presentation.components.handle
 import com.theveloper.pixelplay.presentation.navigation.navigateSafely
 import com.theveloper.pixelplay.presentation.navigation.navigateSafelyReplacing
 
@@ -191,6 +193,7 @@ fun PlaylistDetailScreen(
 ) {
     val uiState by playlistViewModel.uiState.collectAsStateWithLifecycle()
     val playerStableState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
+    val songTap = LocalSongPrimaryTap.current
     val downloadState by playlistViewModel.downloadState.collectAsStateWithLifecycle()
     val downloadWifiOnly by playlistViewModel.downloadWifiOnly.collectAsStateWithLifecycle()
     val syncingPlaylistIds by playlistViewModel.syncingPlaylistIds.collectAsStateWithLifecycle()
@@ -579,12 +582,15 @@ fun PlaylistDetailScreen(
                                             selectedIds = if (isSelected) selectedIds - song.id else selectedIds + song.id
                                             if (selectedIds.isEmpty()) isSelectionMode = false
                                         } else {
-                                            playerViewModel.playSongs(
-                                                localReorderableSongs,
-                                                song,
-                                                currentPlaylist.name,
-                                                currentPlaylist.id
-                                            )
+                                            // Add Song from lyrics: opens the action sheet instead.
+                                            songTap.handle(song, localReorderableSongs, currentPlaylist.name) {
+                                                playerViewModel.playSongs(
+                                                    localReorderableSongs,
+                                                    song,
+                                                    currentPlaylist.name,
+                                                    currentPlaylist.id
+                                                )
+                                            }
                                         }
                                     },
                                     onLongClick = if (isReorderModeEnabled) null else {

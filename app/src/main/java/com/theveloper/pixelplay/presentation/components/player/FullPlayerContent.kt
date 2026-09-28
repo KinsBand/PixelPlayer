@@ -302,9 +302,14 @@ fun FullPlayerContent(
     val song = currentSong ?: retainedSong ?: return // Keep the player visible while transitioning
     var showSongInfoBottomSheet by remember { mutableStateOf(false) }
     var showLyricsSheet by remember { mutableStateOf(false) }
+    // A request made while this content wasn't composed (e.g. returning from Add Song with the
+    // player collapsed) is kept as a pending flag, so it's never lost.
     LaunchedEffect(playerViewModel) {
-        playerViewModel.lyricsOpenRequests.collect {
-            showLyricsSheet = true
+        playerViewModel.pendingLyricsOpen.collect { pending ->
+            if (pending) {
+                showLyricsSheet = true
+                playerViewModel.consumePendingLyricsOpen()
+            }
         }
     }
     var showArtistPicker by rememberSaveable { mutableStateOf(false) }
@@ -1213,12 +1218,15 @@ fun FullPlayerContent(
             // back to the platform font (fontFamily = null) whenever the chosen font has no
             // glyph for something in this song's lyrics, so extended Unicode (e.g. Icelandic
             // æ ð þ, Cyrillic, CJK) never renders as tofu. (#2427)
+            // Weight = the resting weight (the current line is drawn a step heavier, see
+            // activeLyricWeight); spacing scales the line height only.
             lyricsTextStyle = MaterialTheme.typography.titleLarge.let { base ->
                 val scale = lyricsDisplayPrefs.textSize.multiplier
                 base.copy(
                     fontFamily = lyricsFontFamily(effectiveLyricsFont),
+                    fontWeight = lyricsDisplayPrefs.fontWeight.fontWeight,
                     fontSize = base.fontSize * scale,
-                    lineHeight = base.lineHeight * scale
+                    lineHeight = base.lineHeight * scale * lyricsDisplayPrefs.lineSpacing.multiplier
                 )
             },
             colorScheme = LocalMaterialTheme.current,
@@ -1256,7 +1264,13 @@ fun FullPlayerContent(
             isFavoriteProvider = isFavoriteProvider,
             onShuffleToggle = onShuffleToggle,
             onRepeatToggle = onRepeatToggle,
-            onFavoriteToggle = onFavoriteToggle
+            onFavoriteToggle = onFavoriteToggle,
+            nextUpSongFlow = playerViewModel.nextUpSong,
+            onPlayNextUpNow = { playerViewModel.playNextUpNow() },
+            onAddSongClick = { playerViewModel.startAddSongFromLyrics() },
+            confirmations = playerViewModel.lyricsConfirmations,
+            onConfirmationShown = { playerViewModel.consumeLyricsConfirmation() },
+            onReaction = { playerViewModel.reactToCurrentSong(it) }
         )
     }
 

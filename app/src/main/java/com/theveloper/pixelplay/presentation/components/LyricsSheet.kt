@@ -62,6 +62,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ScreenRotation
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -124,6 +125,14 @@ import com.theveloper.pixelplay.presentation.components.lyrics.CustomLyricsEdito
 import com.theveloper.pixelplay.presentation.components.lyrics.ConnectedHeader
 import com.theveloper.pixelplay.presentation.components.lyrics.CurrentSectionChip
 import com.theveloper.pixelplay.presentation.components.lyrics.SongStructureStrip
+import com.theveloper.pixelplay.presentation.components.lyrics.CollapsedNowNextBar
+import com.theveloper.pixelplay.presentation.components.lyrics.LyricsConfirmationPill
+import com.theveloper.pixelplay.presentation.components.lyrics.ReactionCorner
+import com.theveloper.pixelplay.presentation.components.lyrics.ReactionSide
+import com.theveloper.pixelplay.presentation.components.lyrics.dismissReactionMenuOnOutsideTap
+import com.theveloper.pixelplay.presentation.components.lyrics.rememberReactionMenuState
+import androidx.compose.animation.SizeTransform
+import androidx.compose.ui.layout.onSizeChanged
 import com.theveloper.pixelplay.data.lyrics.SongStructure
 import com.theveloper.pixelplay.data.lyrics.SongStructureRepository
 import com.theveloper.pixelplay.utils.ProviderText
@@ -137,6 +146,7 @@ import android.content.BroadcastReceiver
 import android.content.Intent
 import android.content.IntentFilter
 import androidx.compose.ui.platform.LocalView
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -156,6 +166,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import com.theveloper.pixelplay.presentation.components.subcomps.PlayingEqIcon
 import com.theveloper.pixelplay.utils.MultiLangRomanizer
 
+private object UnsetRelayoutKey
+private class RelayoutTracker { var key: Any? = UnsetRelayoutKey }
+
+/** Largest lyric size (sp) full screen, immersive included. */
+private const val MAX_LYRIC_FONT_SP = 40f
+/** Largest lyric size (sp) in each face-to-face half. */
+private const val MAX_SPLIT_LYRIC_FONT_SP = 28f
+
 internal data class LyricsSheetColors(
     val container: Color,
     val content: Color,
@@ -168,7 +186,17 @@ internal data class LyricsSheetColors(
     val playPauseContainer: Color,
     val playPauseContent: Color,
     val syncButtonContainer: Color,
-    val syncButtonContent: Color
+    val syncButtonContent: Color,
+    /** Quieter surface for secondary chrome (the "Next" half of the collapsed bar, reaction triggers). */
+    val surfaceSecondary: Color = controlContainer,
+    val onSurfaceSecondary: Color = controlContent,
+    /** Tint for the positive reaction trigger / selection ring. */
+    val reactionPositive: Color = accent,
+    /** Tint for the negative reaction trigger / selection ring. */
+    val reactionNegative: Color = accent,
+    /** Small confirmation pill ("Playing next ✓"). */
+    val toastContainer: Color = accent,
+    val toastContent: Color = accentContent
 )
 
 internal fun lyricsSheetColors(colorScheme: ColorScheme): LyricsSheetColors {
@@ -198,7 +226,31 @@ internal fun lyricsSheetColors(colorScheme: ColorScheme): LyricsSheetColors {
         playPauseContainer = colorScheme.tertiaryFixedDim,
         playPauseContent = colorScheme.onTertiaryFixed,
         syncButtonContainer = colorScheme.secondaryFixedDim,
-        syncButtonContent = colorScheme.onSecondaryFixed
+        syncButtonContent = colorScheme.onSecondaryFixed,
+        surfaceSecondary = colorScheme.secondaryContainer,
+        onSurfaceSecondary = preferredContrastColor(
+            background = colorScheme.secondaryContainer,
+            preferred = colorScheme.onSecondaryContainer,
+            fallback = colorScheme.onSurface
+        ),
+        reactionPositive = preferredContrastColor(
+            background = container,
+            preferred = colorScheme.tertiary,
+            fallback = accent,
+            minContrastRatio = 3.0
+        ),
+        reactionNegative = preferredContrastColor(
+            background = container,
+            preferred = colorScheme.secondary,
+            fallback = content,
+            minContrastRatio = 3.0
+        ),
+        toastContainer = colorScheme.inverseSurface,
+        toastContent = preferredContrastColor(
+            background = colorScheme.inverseSurface,
+            preferred = colorScheme.inverseOnSurface,
+            fallback = colorScheme.inversePrimary
+        )
     )
 }
 
@@ -210,9 +262,36 @@ internal fun resolveBrightWarmColor(
 ): Color {
     if (contrastRatio(preferredWarm, background) >= 4.5) return preferredWarm
     val isDarkBackground = background.relativeLuminance() < 0.4
+    // First try the artwork's own colour, pushed lighter (dark background) or darker (light
+    // background) until it reads. Keeps the highlight in the cover's hue family instead of
+    // jumping to a fixed amber that can fight the artwork.
+    val toneShifted = toneShiftForContrast(preferredWarm, background, lighten = isDarkBackground)
+    if (toneShifted != null) return toneShifted
     val candidate = if (isDarkBackground) fallbackLightWarm else fallbackDarkWarm
     if (contrastRatio(candidate, background) >= 4.5) return candidate
     return preferredContrastColor(background, fallbackLightWarm, fallbackDarkWarm)
+}
+
+/**
+ * Blends [color] toward white ([lighten]) or black in small steps and returns the first step that
+ * reaches [minContrastRatio] against [background]. Stops before the colour is washed out entirely
+ * (max 70 % blend), returning null so the caller can fall back.
+ */
+internal fun toneShiftForContrast(
+    color: Color,
+    background: Color,
+    lighten: Boolean,
+    minContrastRatio: Double = 4.5
+): Color? {
+    val target = if (lighten) Color.White else Color.Black
+    var step = 1
+    while (step <= 14) {
+        val fraction = step * 0.05f
+        val candidate = androidx.compose.ui.graphics.lerp(color, target, fraction)
+        if (contrastRatio(candidate, background) >= minContrastRatio) return candidate
+        step++
+    }
+    return null
 }
 
 internal fun preferredContrastColor(
@@ -297,7 +376,19 @@ fun LyricsSheet(
     swipeThreshold: Dp = 100.dp,
     highlightZoneFraction: Float = 0.08f, // Reduced from 0.22 for less padding
     highlightOffsetDp: Dp = 32.dp,
-    autoscrollAnimationSpec: AnimationSpec<Float>? = null // null = auto-detect from preference
+    autoscrollAnimationSpec: AnimationSpec<Float>? = null, // null = auto-detect from preference
+    // ── Now / Next, Add Song, confirmations, reactions ──
+    /** The song after the current one (collapsed header's right half). */
+    nextUpSongFlow: StateFlow<Song?>? = null,
+    /** Tap on the collapsed header's Next half: skip to it now. */
+    onPlayNextUpNow: () -> Unit = onNext,
+    /** The + button: pick a song in Search to play / queue. Hidden when null. */
+    onAddSongClick: (() -> Unit)? = null,
+    /** "Playing next ✓" style confirmations after Add Song. */
+    confirmations: Flow<com.theveloper.pixelplay.presentation.viewmodel.LyricsConfirmation?>? = null,
+    onConfirmationShown: () -> Unit = {},
+    /** Reactions in the bottom corners. Hidden when null. */
+    onReaction: ((com.theveloper.pixelplay.data.SongReaction) -> Unit)? = null
 ) {
     // ─── Enter / Exit animation state ────────────────────────────────────────
     // Mirrors the player-sheet pattern: a plain Float in state drives graphicsLayer
@@ -576,9 +667,16 @@ fun LyricsSheet(
         label = "fontScale"
     )
     
+    // Immersive enlarges the text; the user's size (up to Extra large) multiplies with it, so cap
+    // the result: a single word must still fit a narrow phone without clipping.
+    val immersiveScaleCap = remember(lyricsTextStyle.fontSize) {
+        val base = lyricsTextStyle.fontSize
+        if (base.isSp && base.value > 0f) (MAX_LYRIC_FONT_SP / base.value).coerceAtLeast(1f) else fontScale
+    }
+    val effectiveFontScale = fontScale.coerceAtMost(immersiveScaleCap)
     val scaledTextStyle = lyricsTextStyle.copy(
-        fontSize = lyricsTextStyle.fontSize * fontScale,
-        lineHeight = lyricsTextStyle.lineHeight * fontScale
+        fontSize = lyricsTextStyle.fontSize * effectiveFontScale,
+        lineHeight = lyricsTextStyle.lineHeight * effectiveFontScale
     )
 
     /** Any touch: restarts the auto-hide timer. In manual mode it doesn't unhide the controls. */
@@ -613,9 +711,15 @@ fun LyricsSheet(
         !lyrics?.synced.isNullOrEmpty()
     val splitActiveState = rememberUpdatedState(splitActive)
     var swipeFromTopHalf by remember { mutableStateOf(false) }
+    // Face-to-face halves are short: the user's typography applies, enlarged a little but capped
+    // lower than full screen so the previous / current / next lines still fit in each half.
+    val splitScale = remember(lyricsTextStyle.fontSize) {
+        val base = lyricsTextStyle.fontSize
+        if (base.isSp && base.value > 0f) 1.15f.coerceAtMost((MAX_SPLIT_LYRIC_FONT_SP / base.value).coerceAtLeast(0.85f)) else 1.15f
+    }
     val splitTextStyle = lyricsTextStyle.copy(
-        fontSize = lyricsTextStyle.fontSize * 1.15f,
-        lineHeight = lyricsTextStyle.lineHeight * 1.15f
+        fontSize = lyricsTextStyle.fontSize * splitScale,
+        lineHeight = lyricsTextStyle.lineHeight * splitScale
     )
 
     // Song structure (Intro, Verse, Chorus…): found once per song and saved with it, then
@@ -651,6 +755,81 @@ fun LyricsSheet(
         )
         resetImmersiveTimer()
     }
+
+    // ── Header: expanded card or compact Now / Next bar ──────────────────────────────────
+    val headerCollapsed = lyricsDisplayPrefs.headerCollapsed
+    fun setHeaderCollapsed(collapsed: Boolean) {
+        if (collapsed == lyricsDisplayPrefs.headerCollapsed) return
+        hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        resetImmersiveTimer()
+        coroutineScope.launch {
+            context.editLyricsDisplayPrefs { it[LyricsDisplayPrefKeys.HEADER_COLLAPSED] = collapsed }
+        }
+    }
+    val noNextUpSong = remember { kotlinx.coroutines.flow.MutableStateFlow<Song?>(null) }
+    val nextUpSong by (nextUpSongFlow ?: noNextUpSong).collectAsStateWithLifecycle()
+    // The lists start below the header, whatever its size (expanded, collapsed, with or without
+    // the structure strip). 36 dp keeps the original gap under the expanded card.
+    var headerHeightPx by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+    val measuredHeaderHeight = with(density) { headerHeightPx.toDp() }
+    val headerTopTarget = if (headerHeightPx > 0) measuredHeaderHeight + 36.dp else 130.dp + structureTopExtra
+    val lyricsTopPadding by animateDpAsState(
+        targetValue = headerTopTarget,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "lyricsTopPadding"
+    )
+    // Re-centres the current line when typography or the header changes (not every frame).
+    val lyricsRelayoutKey = remember(lyricsTextStyle, headerCollapsed, songStructure != null) {
+        Triple(lyricsTextStyle, headerCollapsed, songStructure != null)
+    }
+
+    // The song structure strip under the header (both header forms share it).
+    val structureStripSlot: @Composable (Song?) -> Unit = { visibleFor ->
+        // Fully qualified: an enclosing Column makes the ColumnScope overload win otherwise.
+        androidx.compose.animation.AnimatedVisibility(
+            visible = songStructure != null && visibleFor?.id == currentSong?.id && lyricsDisplayPrefs.showSongStructure,
+            enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(tween(360)),
+            exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(tween(200))
+        ) {
+            (songStructure ?: lastSongStructure)?.let { structure ->
+                SongStructureStrip(
+                    structure = structure,
+                    playbackPositionFlow = playbackPositionFlow,
+                    lyricsSyncOffset = lyricsSyncOffset,
+                    positionOverrideMs = previewSeekPositionMs,
+                    accentColor = accentColor,
+                    onAccentColor = onAccentColor,
+                    contentColor = onBackgroundColor,
+                    onSectionClick = onSectionClick,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+            }
+        }
+    }
+
+    // ── Quiet chrome: secondary controls dim while nobody touches the screen ───────────────
+    var chromeIdle by remember { mutableStateOf(false) }
+    LaunchedEffect(lastInteractionTime) {
+        chromeIdle = false
+        delay(if (immersiveLyricsTimeout > IMMERSIVE_TIMEOUT_OFF) immersiveLyricsTimeout else DEFAULT_IMMERSIVE_TIMEOUT_MS)
+        chromeIdle = true
+    }
+    val chromeIdleAlpha by animateFloatAsState(
+        targetValue = if (chromeIdle) 0.55f else 1f,
+        animationSpec = tween(if (chromeIdle) 600 else 200),
+        label = "chromeIdleAlpha"
+    )
+
+    // ── Reactions (bottom corners) ──────────────────────────────────────────────────────
+    val reactionState = rememberReactionMenuState()
+    // Reacting counts as interaction (restarts auto-hide) but doesn't pop the controls back up,
+    // so the corners don't jump while a finger is on them.
+    LaunchedEffect(reactionState.lastInteractionMs) {
+        if (reactionState.lastInteractionMs > 0L) lastInteractionTime = System.currentTimeMillis()
+    }
+    // A new song closes a menu that was opened for the previous one.
+    LaunchedEffect(currentSong?.id) { reactionState.close() }
 
     // A phone lying between two people shouldn't sleep: keep the screen on while split,
     // without touching the saved keep-screen-on preference. Keyed on keepScreenOn too so it
@@ -846,7 +1025,12 @@ fun LyricsSheet(
         contentColor = contentColor,
         // Removed TopBar and FAB
     ) { paddingValues ->
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                // While a reaction menu is open, a tap anywhere else only closes it.
+                .dismissReactionMenuOnOutsideTap(reactionState)
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -905,63 +1089,108 @@ fun LyricsSheet(
                     .weight(1f)
                     .fillMaxWidth()
             ) {
-                // Track Info Header (Fixed at top)
-                AnimatedContent(
-                    targetState = currentSong,
-                    transitionSpec = {
-                        (fadeIn(animationSpec = tween(300)) + 
-                         scaleIn(initialScale = 0.9f, animationSpec = tween(300)))
-                        .togetherWith(fadeOut(animationSpec = tween(300)))
-                    },
+                // Track Info Header (Fixed at top). Expanded = the full card (cover, title, artist,
+                // visualiser); collapsed = the compact Now / Next bar. Either way the song
+                // structure strip stays attached underneath. Its measured height drives the lyric
+                // lists' top padding, so collapsing hands the space to the lyrics.
+                Box(
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .zIndex(2f)
-                        .wrapContentWidth(),
-                    label = "headerAnimation"
-                ) { song ->
-                    // Cover, title, artist and visualiser, with the song's structure attached
-                    // right underneath (no gap) as one connected shape.
-                    ConnectedHeader(
-                        backgroundColor = backgroundColor,
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(
-                                top = 4.dp, bottom = 24.dp, start = 18.dp, end = 18.dp
-                            )
-                            .animateContentSize(), // Animate width changes
-                        header = {
-                            LyricsTrackInfo(
-                                song = song,
-                                modifier = Modifier.wrapContentWidth(),
-                                backgroundColor = backgroundColor, // Distinct solid background
-                                contentColor = onBackgroundColor,
-                                isPlaying = isPlaying
+                        .onSizeChanged { headerHeightPx = it.height }
+                ) {
+                    AnimatedContent(
+                        targetState = headerCollapsed,
+                        transitionSpec = {
+                            androidx.compose.animation.ContentTransform(
+                                targetContentEnter = fadeIn(tween(220, delayMillis = 60)) +
+                                    scaleIn(initialScale = 0.96f, animationSpec = tween(260)),
+                                initialContentExit = fadeOut(tween(140)),
+                                sizeTransform = SizeTransform(clip = false)
                             )
                         },
-                        bottom = {
-                            // Fully qualified: an enclosing Column makes the ColumnScope
-                            // overload win otherwise, which can't be called here.
-                            androidx.compose.animation.AnimatedVisibility(
-                                visible = songStructure != null && song?.id == currentSong?.id && lyricsDisplayPrefs.showSongStructure,
-                                enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(tween(360)),
-                                exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(tween(200))
-                            ) {
-                                (songStructure ?: lastSongStructure)?.let { structure ->
-                                    SongStructureStrip(
-                                        structure = structure,
-                                        playbackPositionFlow = playbackPositionFlow,
-                                        lyricsSyncOffset = lyricsSyncOffset,
-                                        positionOverrideMs = previewSeekPositionMs,
-                                        accentColor = accentColor,
-                                        onAccentColor = onAccentColor,
+                        label = "headerCollapse"
+                    ) { collapsed ->
+                        if (collapsed) {
+                            ConnectedHeader(
+                                backgroundColor = backgroundColor,
+                                minBottomWidth = 0.dp,
+                                modifier = Modifier
+                                    .padding(top = 4.dp, bottom = 16.dp, start = 18.dp, end = 18.dp)
+                                    .fillMaxWidth()
+                                    .pointerInput(Unit) {
+                                        // Swipe down on the bar = expand, same as its button.
+                                        detectVerticalDragGestures { change, amount ->
+                                            if (amount > 12f) {
+                                                change.consume()
+                                                setHeaderCollapsed(false)
+                                            }
+                                        }
+                                    },
+                                header = {
+                                    CollapsedNowNextBar(
+                                        currentSong = currentSong,
+                                        nextSong = nextUpSong,
+                                        isPlaying = isPlaying,
+                                        backgroundColor = Color.Transparent,
                                         contentColor = onBackgroundColor,
-                                        onSectionClick = onSectionClick,
-                                        modifier = Modifier.padding(bottom = 4.dp)
+                                        nextContainerColor = sheetColors.surfaceSecondary,
+                                        nextContentColor = sheetColors.onSurfaceSecondary,
+                                        accentColor = accentColor,
+                                        onExpand = { setHeaderCollapsed(false) },
+                                        onNextClick = {
+                                            resetImmersiveTimer()
+                                            onPlayNextUpNow()
+                                        },
+                                        nextAlpha = { chromeIdleAlpha }
                                     )
-                                }
+                                },
+                                bottom = { structureStripSlot(currentSong) }
+                            )
+                        } else {
+                            AnimatedContent(
+                                targetState = currentSong,
+                                transitionSpec = {
+                                    (fadeIn(animationSpec = tween(300)) +
+                                     scaleIn(initialScale = 0.9f, animationSpec = tween(300)))
+                                    .togetherWith(fadeOut(animationSpec = tween(300)))
+                                },
+                                modifier = Modifier.wrapContentWidth(),
+                                label = "headerAnimation"
+                            ) { song ->
+                                // Cover, title, artist and visualiser, with the song's structure attached
+                                // right underneath (no gap) as one connected shape.
+                                ConnectedHeader(
+                                    backgroundColor = backgroundColor,
+                                    modifier = Modifier
+                                        .padding(
+                                            top = 4.dp, bottom = 24.dp, start = 18.dp, end = 18.dp
+                                        )
+                                        .animateContentSize() // Animate width changes
+                                        .pointerInput(Unit) {
+                                            // Swipe up on the card = collapse to the compact bar.
+                                            detectVerticalDragGestures { change, amount ->
+                                                if (amount < -12f) {
+                                                    change.consume()
+                                                    setHeaderCollapsed(true)
+                                                }
+                                            }
+                                        },
+                                    header = {
+                                        LyricsTrackInfo(
+                                            song = song,
+                                            modifier = Modifier.wrapContentWidth(),
+                                            backgroundColor = backgroundColor, // Distinct solid background
+                                            contentColor = onBackgroundColor,
+                                            isPlaying = isPlaying,
+                                            onCollapse = { setHeaderCollapsed(true) }
+                                        )
+                                    },
+                                    bottom = { structureStripSlot(song) }
+                                )
                             }
                         }
-                    )
+                    }
                 }
 
                 when (performanceView) {
@@ -988,7 +1217,7 @@ fun LyricsSheet(
                                 null -> {
                                     LazyColumn(
                                         modifier = Modifier.fillMaxSize(),
-                                        contentPadding = PaddingValues(top = 110.dp, bottom = 24.dp, start = 24.dp, end = 24.dp)
+                                        contentPadding = PaddingValues(top = (lyricsTopPadding - 20.dp).coerceAtLeast(0.dp), bottom = 24.dp, start = 24.dp, end = 24.dp)
                                     ) {
                                         item(key = "loader_or_empty") {
                                             Box(
@@ -1056,7 +1285,7 @@ fun LyricsSheet(
                                             modifier = Modifier
                                                 .fillMaxSize()
                                                 .padding(horizontal = 24.dp),
-                                            contentPadding = PaddingValues(top = 130.dp + structureTopExtra, bottom = 100.dp),
+                                            contentPadding = PaddingValues(top = lyricsTopPadding, bottom = 100.dp),
                                             lines = synced,
                                             listState = syncedListState,
                                             playbackPositionFlow = playbackPositionFlow,
@@ -1084,6 +1313,7 @@ fun LyricsSheet(
                                             lyricsAlignment = lyricsAlignment,
                                             showTranslation = showLyricsTranslation,
                                             showRomanization = showLyricsRomanization,
+                                            relayoutKey = lyricsRelayoutKey,
                                             onSeekTo = { seekMs ->
                                                 onSeekTo(
                                                     resolveSeekPositionMs(
@@ -1120,7 +1350,7 @@ fun LyricsSheet(
                                             contentPadding = PaddingValues(
                                                 start = 24.dp,
                                                 end = 24.dp,
-                                                top = 130.dp + structureTopExtra,
+                                                top = lyricsTopPadding,
                                                 bottom = 24.dp
                                             )
                                         ) {
@@ -1172,11 +1402,11 @@ fun LyricsSheet(
                 }
             }
                 
-                // Top Gradient for fade
+                // Top Gradient for fade (follows the header's height)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(130.dp)
+                        .height(lyricsTopPadding.coerceAtLeast(56.dp))
                         .align(Alignment.TopCenter)
                         .background(
                             brush = Brush.verticalGradient(
@@ -1197,6 +1427,60 @@ fun LyricsSheet(
                             )
                         )
                 )
+
+                // "Playing next ✓": just under the header, over the lyrics, never blocking them.
+                if (confirmations != null) {
+                    LyricsConfirmationPill(
+                        confirmations = confirmations,
+                        containerColor = sheetColors.toastContainer,
+                        contentColor = sheetColors.toastContent,
+                        onShown = onConfirmationShown,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .zIndex(3f)
+                            .padding(top = (lyricsTopPadding - 28.dp).coerceAtLeast(8.dp))
+                    )
+                }
+
+                // Reactions in the empty bottom corners: positive left, negative right. They
+                // overlay the fade area and never push or resize the lyrics.
+                val showReactions = onReaction != null &&
+                    currentSong != null &&
+                    performanceView == PerformanceView.Lyrics &&
+                    !splitActive
+                if (showReactions && onReaction != null) {
+                    val cornerBottom by animateDpAsState(
+                        targetValue = if (immersiveMode) paddingValues.calculateBottomPadding() + 20.dp else 10.dp,
+                        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                        label = "reactionCornerBottom"
+                    )
+                    ReactionCorner(
+                        side = ReactionSide.POSITIVE,
+                        state = reactionState,
+                        triggerContainer = sheetColors.surfaceSecondary,
+                        triggerContent = sheetColors.onSurfaceSecondary,
+                        ringColor = sheetColors.reactionPositive,
+                        onSelect = onReaction,
+                        idleAlpha = { chromeIdleAlpha },
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .zIndex(3f)
+                            .padding(start = 16.dp, bottom = cornerBottom)
+                    )
+                    ReactionCorner(
+                        side = ReactionSide.NEGATIVE,
+                        state = reactionState,
+                        triggerContainer = sheetColors.surfaceSecondary,
+                        triggerContent = sheetColors.onSurfaceSecondary,
+                        ringColor = sheetColors.reactionNegative,
+                        onSelect = onReaction,
+                        idleAlpha = { chromeIdleAlpha },
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .zIndex(3f)
+                            .padding(end = 16.dp, bottom = cornerBottom)
+                    )
+                }
             }
 
             // Controls Section (Auto-hide in immersive mode)
@@ -1378,6 +1662,12 @@ fun LyricsSheet(
                     },
                     // Pass progress so the back button animates with the gesture (draw-phase).
                     backProgressProvider = { backProgressProvider.value },
+                    onAddSongClick = onAddSongClick?.let { open ->
+                        {
+                            resetImmersiveTimer()
+                            open()
+                        }
+                    },
                 )
 
                 // Guitar / drum practice panel: the toolbar's Instruments button opens it.
@@ -1547,6 +1837,7 @@ fun LyricsSheet(
                         )
                     },
                     onBackgroundTap = { resetImmersiveTimer() },
+                    relayoutKey = lyricsTextStyle,
                     // Only the part playing now, beside the centre divider: left of it for the
                     // person at the bottom, right of it (turned) for the person at the top.
                     sectionChip = if (chipStructure == null) null else { chipMaxWidth ->
@@ -1599,6 +1890,8 @@ fun LyricsSheet(
                modifier = Modifier
                    .align(Alignment.BottomCenter)
                    .fillMaxWidth()
+                   // Leaves the corners free for the reaction triggers.
+                   .padding(horizontal = if (onReaction != null) 72.dp else 0.dp)
                    .height(96.dp)
                    .pointerInput(Unit) {
                        detectVerticalDragGestures(
@@ -1683,6 +1976,40 @@ fun LyricsSheet(
             }
         }
        
+       // Add Song shortcut while the controls are hidden, left of the arrow (mirrors the
+       // face-to-face shortcut on the right).
+       if (onAddSongClick != null) {
+           AnimatedVisibility(
+               visible = immersiveMode && !splitActive,
+               enter = fadeIn() + scaleIn(initialScale = 0.6f) + slideInVertically { it / 2 },
+               exit = fadeOut() + scaleOut(targetScale = 0.6f) + slideOutVertically { it / 2 },
+               modifier = Modifier
+                   .align(Alignment.BottomCenter)
+                   .offset(x = (-52).dp)
+                   .padding(bottom = 38.dp)
+           ) {
+               FilledTonalIconButton(
+                   onClick = {
+                       resetImmersiveTimer()
+                       onAddSongClick()
+                   },
+                   modifier = Modifier
+                       .size(36.dp)
+                       .graphicsLayer { alpha = chromeIdleAlpha },
+                   colors = IconButtonDefaults.filledTonalIconButtonColors(
+                       containerColor = accentColor.copy(alpha = 0.22f),
+                       contentColor = accentColor
+                   )
+               ) {
+                   Icon(
+                       imageVector = Icons.Rounded.Add,
+                       contentDescription = "Add a song",
+                       modifier = Modifier.size(18.dp)
+                   )
+               }
+           }
+       }
+
        // Swipe Feedback Overlay
        if (isSwipeActive || swipeProgress.value > 0f) {
            // The pill appears on the side the finger started from (physical direction);
@@ -1786,6 +2113,11 @@ fun SyncedLyricsList(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     onSeekTo: ((Long) -> Unit)? = null,
+    /**
+     * Changes when the list's layout changes for a reason other than playback (user typography,
+     * header collapsed / expanded). Must not change every frame (not the animated style).
+     */
+    relayoutKey: Any? = null,
     footer: LazyListScope.() -> Unit = {}
 ) {
     // Long pauses get their own music-note row; short ones keep the previous line lit.
@@ -1850,6 +2182,8 @@ fun SyncedLyricsList(
 
     var hasAlignedInitialLine by remember(lines) { mutableStateOf(false) }
     var lastAutoScrolledLineIndex by remember(lines) { mutableIntStateOf(-1) }
+    // Plain holder (not state): only read / written inside the autoscroll effect.
+    val relayoutTracker = remember { RelayoutTracker() }
     var highlightBloomTrigger by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         highlightBloomTrigger = true
@@ -1870,10 +2204,29 @@ fun SyncedLyricsList(
         )
         val flingBehavior = rememberSnapperFlingBehavior(layoutInfo = snapperLayoutInfo)
 
-        LaunchedEffect(activeLazyIndex, lines.size, metrics, isPreviewSeeking) {
+        // Typography and top padding are keys too: a new font / size / spacing or the header
+        // collapsing re-centres the current line straight away instead of on the next line.
+        LaunchedEffect(activeLazyIndex, lines.size, metrics, isPreviewSeeking, relayoutKey) {
             if (lines.isEmpty()) return@LaunchedEffect
             if (activeLazyIndex < 0) return@LaunchedEffect
             if (listState.layoutInfo.totalItemsCount == 0) return@LaunchedEffect
+
+            if (relayoutKey != relayoutTracker.key) {
+                val firstRun = relayoutTracker.key === UnsetRelayoutKey
+                relayoutTracker.key = relayoutKey
+                if (!firstRun && hasAlignedInitialLine && !listState.isScrollInProgress) {
+                    // Let the padding / text size animation settle, then re-centre once.
+                    delay(360)
+                    animateToSnapIndex(
+                        listState = listState,
+                        layoutInfo = snapperLayoutInfo,
+                        targetIndex = activeLazyIndex,
+                        animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing)
+                    )
+                    lastAutoScrolledLineIndex = activeLazyIndex
+                    return@LaunchedEffect
+                }
+            }
 
             if (!hasAlignedInitialLine) {
                 if (activeLazyIndex > 0) {
@@ -2163,9 +2516,14 @@ fun LyricLineRow(
     val targetScale = if (useAnimatedLyrics) when (distanceFromCurrent) {
         0 -> if (immersiveMode) 1.02f else 1.06f; 1 -> 0.96f; else -> 0.88f
     } else 1f
-    val targetPadding = if (useAnimatedLyrics) when (distanceFromCurrent) {
+    // Card padding follows the text: bigger / airier text gets a proportionally roomier card.
+    val paddingScale = remember(style) {
+        val lh = style.lineHeight
+        if (lh.isSp) (lh.value / 28f).coerceIn(0.8f, 1.8f) else 1f
+    }
+    val targetPadding = (if (useAnimatedLyrics) when (distanceFromCurrent) {
         0 -> 20.dp; 1 -> 14.dp; else -> 8.dp
-    } else 10.dp
+    } else 10.dp) * paddingScale
     val targetAlpha = if (useAnimatedLyrics) when (distanceFromCurrent) {
         0 -> 1.0f; 1 -> 0.55f; else -> 0.30f
     } else 1f
@@ -2257,6 +2615,11 @@ fun LyricLineRow(
             fontWeight = FontWeight.Normal
         )
     }
+    // Resting weight comes from the style (Settings → Lyrics weight); the current line is always
+    // a clear step heavier. The reserve layer uses the active weight so a line never reflows
+    // when it lights up, whatever font / weight / size is chosen.
+    val restLineStyle = remember(style) { style.copy(fontWeight = style.fontWeight ?: FontWeight.Normal) }
+    val activeLineStyle = remember(style) { style.copy(fontWeight = activeLyricWeight(style.fontWeight)) }
 
     val romanizationColor = lineColor.copy(alpha = lineColor.alpha * 0.85f)
     val translationColor = lineColor.copy(alpha = lineColor.alpha * 0.55f)
@@ -2296,9 +2659,9 @@ fun LyricLineRow(
             val lineLength = sanitizedLine.length.toFloat()
             com.theveloper.pixelplay.presentation.components.lyrics.LyricLineLayers(
                 text = sanitizedLine,
-                reserveStyle = style.copy(fontWeight = FontWeight.Bold),
-                restStyle = style.copy(fontWeight = FontWeight.Normal),
-                activeStyle = style.copy(fontWeight = FontWeight.Bold),
+                reserveStyle = activeLineStyle,
+                restStyle = restLineStyle,
+                activeStyle = activeLineStyle,
                 restColor = unhighlightedColor,
                 unsungColor = accentColor,
                 highlightColor = accentColor,
@@ -2354,9 +2717,9 @@ fun LyricLineRow(
             val fullLength = wordLayout.text.length.toFloat()
             com.theveloper.pixelplay.presentation.components.lyrics.LyricLineLayers(
                 text = wordLayout.text,
-                reserveStyle = style.copy(fontWeight = FontWeight.Bold),
-                restStyle = style.copy(fontWeight = FontWeight.Normal),
-                activeStyle = style.copy(fontWeight = FontWeight.Bold),
+                reserveStyle = activeLineStyle,
+                restStyle = restLineStyle,
+                activeStyle = activeLineStyle,
                 restColor = unhighlightedColor,
                 unsungColor = unhighlightedColor,
                 highlightColor = accentColor,
@@ -2784,7 +3147,9 @@ internal fun LyricsTrackInfo(
     modifier: Modifier = Modifier,
     backgroundColor: Color,
     contentColor: Color,
-    isPlaying: Boolean
+    isPlaying: Boolean,
+    /** Shows a small collapse chevron at the end (lyrics sheet header only). */
+    onCollapse: (() -> Unit)? = null
 ) {
     if (song == null) return
 
@@ -2871,11 +3236,27 @@ internal fun LyricsTrackInfo(
 
         PlayingEqIcon(
             modifier = Modifier
-                .padding(start = 8.dp, end = 18.dp)
+                .padding(start = 8.dp, end = if (onCollapse != null) 4.dp else 18.dp)
                 .size(width = 18.dp, height = 16.dp),
             color = contentColor,
             isPlaying = isPlaying
         )
+
+        if (onCollapse != null) {
+            IconButton(
+                onClick = onCollapse,
+                modifier = Modifier
+                    .padding(end = 6.dp)
+                    .size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.KeyboardArrowUp,
+                    contentDescription = "Collapse song details",
+                    tint = contentColor.copy(alpha = 0.7f),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
     }
 }
 

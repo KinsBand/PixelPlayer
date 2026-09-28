@@ -1056,15 +1056,21 @@ fun SearchResultsList(
             ?.let { "Search: $it" }
             ?: "Search Results"
     }
-    val onSongResultClick = remember(playerViewModel, onItemSelected, songResultsQueue, searchQueueName) {
+    // During the lyrics screen's Add Song, the tap opens the Play / Next / Soon / Queue sheet.
+    val songTap = com.theveloper.pixelplay.presentation.components.LocalSongPrimaryTap.current
+    val onSongResultClick = remember(playerViewModel, onItemSelected, songResultsQueue, searchQueueName, songTap) {
         { song: Song ->
             val playbackQueue = if (songResultsQueue.any { it.id == song.id }) {
                 songResultsQueue
             } else {
                 listOf(song)
             }
-            playerViewModel.showAndPlaySong(song, playbackQueue, searchQueueName)
-            onItemSelected()
+            if (songTap != null) {
+                songTap.onSongTap(song, playbackQueue, searchQueueName)
+            } else {
+                playerViewModel.showAndPlaySong(song, playbackQueue, searchQueueName)
+                onItemSelected()
+            }
         }
     }
 

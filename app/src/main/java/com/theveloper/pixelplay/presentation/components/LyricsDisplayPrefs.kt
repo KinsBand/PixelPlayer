@@ -138,12 +138,46 @@ enum class LyricsFont(val key: String, val isVariable: Boolean) {
 }
 
 enum class LyricsTextSize(val key: String, val multiplier: Float) {
-    SMALL("small", 0.87f), MEDIUM("medium", 1f), LARGE("large", 1.15f);
+    SMALL("small", 0.87f), MEDIUM("medium", 1f), LARGE("large", 1.15f), EXTRA_LARGE("xl", 1.3f);
 
     companion object {
         val DEFAULT = MEDIUM
         fun fromKey(key: String?): LyricsTextSize = entries.firstOrNull { it.key == key } ?: DEFAULT
     }
+}
+
+/**
+ * Resting weight of the lyric lines. The active line is always drawn a clear step heavier
+ * ([activeWeight]) so the hierarchy survives any choice.
+ */
+enum class LyricsFontWeight(val key: String, val weight: Int) {
+    LIGHT("light", 300), REGULAR("regular", 400), MEDIUM("medium", 500), SEMIBOLD("semibold", 600);
+
+    val fontWeight: FontWeight get() = FontWeight(weight)
+
+    companion object {
+        val DEFAULT = REGULAR
+        fun fromKey(key: String?): LyricsFontWeight = entries.firstOrNull { it.key == key } ?: DEFAULT
+    }
+}
+
+/** Line spacing, applied as a multiplier on the style's line height. */
+enum class LyricsLineSpacing(val key: String, val multiplier: Float) {
+    TIGHT("tight", 0.9f), NORMAL("normal", 1f), RELAXED("relaxed", 1.18f);
+
+    companion object {
+        val DEFAULT = NORMAL
+        fun fromKey(key: String?): LyricsLineSpacing = entries.firstOrNull { it.key == key } ?: DEFAULT
+    }
+}
+
+/**
+ * The weight the current line is drawn at, for a given resting weight: +300, capped at 900.
+ * Regular (400) → Bold (700), which is exactly the look the sheet always had.
+ */
+fun activeLyricWeight(rest: FontWeight?): FontWeight {
+    val base = rest?.weight ?: FontWeight.Normal.weight
+    return FontWeight((base + 300).coerceAtMost(900))
 }
 
 // ── Preferences ────────────────────────────────────────────────────────────────────────
@@ -159,8 +193,23 @@ data class LyricsDisplayPrefs(
     val animatedLyricsBlurStrength: Float = 2.5f,
     val disableBlurAllOver: Boolean = false,
     val coverLyricsEnabled: Boolean = false,
+    /**
+     * Expressive typography (toggle beside Immersive lyrics). When off, every lyrics surface uses
+     * the default look and the choices below are kept but not applied.
+     */
+    val expressiveTypography: Boolean = false,
+    /** Effective values: what lyrics surfaces draw with (defaults while expressive is off). */
     val font: LyricsFont = LyricsFont.DEFAULT,
     val textSize: LyricsTextSize = LyricsTextSize.DEFAULT,
+    val fontWeight: LyricsFontWeight = LyricsFontWeight.DEFAULT,
+    val lineSpacing: LyricsLineSpacing = LyricsLineSpacing.DEFAULT,
+    /** The user's saved choices, shown in the pickers whether or not expressive is on. */
+    val chosenFont: LyricsFont = LyricsFont.DEFAULT,
+    val chosenTextSize: LyricsTextSize = LyricsTextSize.DEFAULT,
+    val chosenFontWeight: LyricsFontWeight = LyricsFontWeight.DEFAULT,
+    val chosenLineSpacing: LyricsLineSpacing = LyricsLineSpacing.DEFAULT,
+    /** Lyrics sheet header shown as the compact Now / Next bar instead of the full card. */
+    val headerCollapsed: Boolean = false,
     /** Face-to-face split view in immersive lyrics (top half turned 180°). */
     val splitFaceView: Boolean = false,
     /** Show the song structure strip (Intro, Verse, Chorus…) under the header. */
@@ -187,6 +236,10 @@ object LyricsDisplayPrefKeys {
     val COVER_LYRICS_ENABLED = booleanPreferencesKey("cover_lyrics_enabled")
     val FONT = stringPreferencesKey("lyrics_font_v1")
     val TEXT_SIZE = stringPreferencesKey("lyrics_text_size_v1")
+    val EXPRESSIVE_TYPOGRAPHY = booleanPreferencesKey("lyrics_expressive_typography_v1")
+    val FONT_WEIGHT = stringPreferencesKey("lyrics_font_weight_v1")
+    val LINE_SPACING = stringPreferencesKey("lyrics_line_spacing_v1")
+    val HEADER_COLLAPSED = booleanPreferencesKey("lyrics_header_collapsed_v1")
     val SPLIT_FACE_VIEW = booleanPreferencesKey("lyrics_split_face_v1")
     val SHOW_SONG_STRUCTURE = booleanPreferencesKey("lyrics_show_song_structure")
     // Written by SettingsViewModel.setImmersiveLyricsEnabled / setImmersiveLyricsTimeout
@@ -203,6 +256,14 @@ const val IMMERSIVE_TIMEOUT_OFF = 0L
 fun lyricsDisplayPrefsFlow(dataStore: DataStore<Preferences>): Flow<LyricsDisplayPrefs> =
     dataStore.data
         .map { p ->
+            val chosenFont = LyricsFont.fromKey(p[LyricsDisplayPrefKeys.FONT])
+            val chosenSize = LyricsTextSize.fromKey(p[LyricsDisplayPrefKeys.TEXT_SIZE])
+            val chosenWeight = LyricsFontWeight.fromKey(p[LyricsDisplayPrefKeys.FONT_WEIGHT])
+            val chosenSpacing = LyricsLineSpacing.fromKey(p[LyricsDisplayPrefKeys.LINE_SPACING])
+            // Not set yet: on for anyone who already picked a font or size before the toggle
+            // existed, so an existing choice doesn't silently disappear.
+            val expressive = p[LyricsDisplayPrefKeys.EXPRESSIVE_TYPOGRAPHY]
+                ?: (chosenFont != LyricsFont.DEFAULT || chosenSize != LyricsTextSize.DEFAULT)
             LyricsDisplayPrefs(
                 alignment = LyricsAlignment.fromKey(p[LyricsDisplayPrefKeys.ALIGNMENT]),
                 showTranslation = p[LyricsDisplayPrefKeys.SHOW_TRANSLATION] ?: true,
@@ -213,8 +274,16 @@ fun lyricsDisplayPrefsFlow(dataStore: DataStore<Preferences>): Flow<LyricsDispla
                 animatedLyricsBlurStrength = p[LyricsDisplayPrefKeys.BLUR_STRENGTH] ?: 2.5f,
                 disableBlurAllOver = p[LyricsDisplayPrefKeys.DISABLE_BLUR_ALL_OVER] ?: false,
                 coverLyricsEnabled = p[LyricsDisplayPrefKeys.COVER_LYRICS_ENABLED] ?: false,
-                font = LyricsFont.fromKey(p[LyricsDisplayPrefKeys.FONT]),
-                textSize = LyricsTextSize.fromKey(p[LyricsDisplayPrefKeys.TEXT_SIZE]),
+                expressiveTypography = expressive,
+                font = if (expressive) chosenFont else LyricsFont.DEFAULT,
+                textSize = if (expressive) chosenSize else LyricsTextSize.DEFAULT,
+                fontWeight = if (expressive) chosenWeight else LyricsFontWeight.DEFAULT,
+                lineSpacing = if (expressive) chosenSpacing else LyricsLineSpacing.DEFAULT,
+                chosenFont = chosenFont,
+                chosenTextSize = chosenSize,
+                chosenFontWeight = chosenWeight,
+                chosenLineSpacing = chosenSpacing,
+                headerCollapsed = p[LyricsDisplayPrefKeys.HEADER_COLLAPSED] ?: false,
                 splitFaceView = p[LyricsDisplayPrefKeys.SPLIT_FACE_VIEW] ?: false,
                 showSongStructure = p[LyricsDisplayPrefKeys.SHOW_SONG_STRUCTURE] ?: true,
                 immersiveEnabled = p[LyricsDisplayPrefKeys.IMMERSIVE_ENABLED] ?: false,
@@ -322,7 +391,7 @@ internal fun resolveDisplayLineIndex(lines: List<SyncedLine>, position: Long): I
 
 private const val ROUNDED_AXIS = 100f
 private val lyricsFamilyCache = ConcurrentHashMap<String, FontFamily>()
-private val LYRICS_SHEET_WEIGHTS = intArrayOf(400, 500, 600, 700)
+private val LYRICS_SHEET_WEIGHTS = intArrayOf(300, 400, 500, 600, 700, 800, 900)
 
 @OptIn(ExperimentalTextApi::class)
 private fun variableFont(font: LyricsFont, weight: Int): Font {
