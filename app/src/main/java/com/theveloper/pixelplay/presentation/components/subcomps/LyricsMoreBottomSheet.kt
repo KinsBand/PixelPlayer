@@ -876,6 +876,14 @@ private fun LyricsAdvancedSettings(
                         ))
                         if (displayPrefs.expressiveTypography) {
                             add(AdvancedRow(
+                                icon = Icons.Rounded.AutoAwesomeMotion,
+                                title = stringResource(R.string.settings_lyrics_adaptive_typography_title),
+                                subtitle = stringResource(R.string.settings_lyrics_adaptive_typography_subtitle),
+                                checked = displayPrefs.adaptiveTypography,
+                                onCheckedChange = { enabled -> editPrefs { it[com.theveloper.pixelplay.presentation.components.LyricsDisplayPrefKeys.ADAPTIVE_TYPOGRAPHY] = enabled } },
+                                depth = 1
+                            ))
+                            add(AdvancedRow(
                                 icon = Icons.Rounded.TextFields,
                                 title = "Font",
                                 options = listOf(

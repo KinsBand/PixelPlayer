@@ -366,6 +366,13 @@ object SettingsRegistry {
             keywords = listOf("expressive typography", "lyrics font", "lyrics style", "custom lyrics text")
         ),
         SettingEntry(
+            key = "lyrics_adaptive_typography",
+            categoryId = "lyrics",
+            titleRes = R.string.settings_lyrics_adaptive_typography_title,
+            descriptionRes = R.string.settings_lyrics_adaptive_typography_subtitle,
+            keywords = listOf("adaptive typography", "expressive lyrics", "lyrics mood", "lyrics energy", "dynamic lyrics")
+        ),
+        SettingEntry(
             key = "lyrics_font_weight",
             categoryId = "lyrics",
             titleRes = R.string.settings_lyrics_weight_title,

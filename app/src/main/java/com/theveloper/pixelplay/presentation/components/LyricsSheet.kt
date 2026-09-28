@@ -952,324 +952,337 @@ fun LyricsSheet(
 
     
 
-    Scaffold(
-        modifier = modifier
-            .fillMaxSize()
-            // ─── Enter / Predictive-back exit transformation ──────────────────
-            // Read backProgressProvider inside graphicsLayer (draw-phase) — no layout
-            // pass is triggered per gesture frame, same pattern as SheetVisualState.
-            // 0f = fully visible, 1f = fully dismissed.
-            // Effect: scale down to 92 % + slide down 8 % of height + fade to 72 % alpha.
-            // Matches Android predictive back spec for full-screen destinations and
-            // mirrors the scale+alpha treatment used across the rest of the app.
-            .graphicsLayer {
-                val p = backProgressProvider.value
-                val scale = lerp(1f, 0.92f, p)
-                scaleX = scale
-                scaleY = scale
-                translationY = lerp(0f, size.height * 0.08f, p)
-            }
-            .clip(RoundedCornerShape(32.dp))
-            .pointerInput(Unit) {
-                detectDragGestures(
-                    onDragStart = { startOffset ->
-                        isSwipeActive = true
-                        hasTriggeredAction = false
-                        dragOffset = 0f
-                        // In the split view the top half is read from the other side of the
-                        // phone, so left/right are reversed for that person.
-                        swipeFromTopHalf = splitActiveState.value && startOffset.y < size.height / 2f
-                        resetImmersiveTimer()
-                        coroutineScope.launch {
-                            swipeProgress.snapTo(0f)
-                        }
-                    },
-                    onDragEnd = {
-                        isSwipeActive = false
-                        val committed = abs(dragOffset) > swipeThresholdPx && !hasTriggeredAction 
-                        
-                        if (committed) {
-                            val goNext = (dragOffset < 0) != swipeFromTopHalf
-                            if (goNext) onNext() else onPrev()
-                            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                        }
+    // Adaptive expressive typography: each song's own typographic voice (see LyricExpression.kt).
+    val expressionProfile by com.theveloper.pixelplay.presentation.components.lyrics.rememberSongExpressionProfile(
+        song = currentSong,
+        lyrics = lyrics,
+        structure = songStructure,
+        durationMs = stablePlayerState.totalDuration,
+        enabled = lyricsDisplayPrefs.expressiveTypography && lyricsDisplayPrefs.adaptiveTypography
+    )
 
-                        coroutineScope.launch {
-                             swipeProgress.animateTo(0f, tween(200))
-                             dragOffset = 0f
-                        }
-                    },
-                    onDragCancel = {
-                        isSwipeActive = false
-                        dragOffset = 0f
-                        coroutineScope.launch {
-                            swipeProgress.animateTo(0f, tween(200))
-                        }
-                    },
-                    onDrag = { change, dragAmount ->
-                        change.consume()
-                        resetImmersiveTimer()
-                        
-                        if (!hasTriggeredAction) {
-                            dragOffset += dragAmount.x
-                            val progress = (abs(dragOffset) / swipeThresholdPx).coerceIn(0f, 1f)
-                            
-                            coroutineScope.launch {
-                                swipeProgress.snapTo(progress)
-                            }
-                        }
-                    }
-                )
-            },
-        containerColor = containerColor,
-        contentColor = contentColor,
-        // Removed TopBar and FAB
-    ) { paddingValues ->
-        Box(
-            modifier = Modifier
+    CompositionLocalProvider(
+        com.theveloper.pixelplay.presentation.components.lyrics.LocalLyricExpression provides expressionProfile
+    ) {
+        Scaffold(
+            modifier = modifier
                 .fillMaxSize()
-                // While a reaction menu is open, a tap anywhere else only closes it.
-                .dismissReactionMenuOnOutsideTap(reactionState)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = paddingValues.calculateTopPadding())
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) {
-                    resetImmersiveTimer()
+                // ─── Enter / Predictive-back exit transformation ──────────────────
+                // Read backProgressProvider inside graphicsLayer (draw-phase) — no layout
+                // pass is triggered per gesture frame, same pattern as SheetVisualState.
+                // 0f = fully visible, 1f = fully dismissed.
+                // Effect: scale down to 92 % + slide down 8 % of height + fade to 72 % alpha.
+                // Matches Android predictive back spec for full-screen destinations and
+                // mirrors the scale+alpha treatment used across the rest of the app.
+                .graphicsLayer {
+                    val p = backProgressProvider.value
+                    val scale = lerp(1f, 0.92f, p)
+                    scaleX = scale
+                    scaleY = scale
+                    translationY = lerp(0f, size.height * 0.08f, p)
                 }
-        ) {
-            val initialSyncedLineIndex = remember(lyrics, playbackPositionFlow, lyricsSyncOffset) {
-                val syncedLines = withInstrumentalBreaks(lyrics?.synced.orEmpty())
-                val pos = (playbackPositionFlow.value + lyricsSyncOffset).coerceAtLeast(0L)
-                val hasIntro = (syncedLines.firstOrNull()?.time ?: 0) >= 1500 && syncedLines.firstOrNull()?.line?.isNotBlank() == true
-                val introOffset = if (hasIntro) 1 else 0
-                val resolved = resolveCurrentLineIndex(lines = syncedLines, position = pos)
-                if (resolved >= 0) {
-                    resolved + introOffset
-                } else {
-                    0
-                }
-            }
-            val syncedListState = rememberLazyListState(
-                initialFirstVisibleItemIndex = initialSyncedLineIndex
-            )
-            val staticListState = rememberLazyListState()
-
-            LaunchedEffect(showSyncedLyrics) {
-                if (showSyncedLyrics == false) {
-                    val syncedList = lyrics?.synced
-                    val plainList = lyrics?.plain
-                    if (!syncedList.isNullOrEmpty() && !plainList.isNullOrEmpty()) {
-                        val currentPos = (playbackPositionFlow.value + lyricsSyncOffset).coerceAtLeast(0L)
-                        val activeSyncedIndex = resolveCurrentLineIndex(lines = syncedList, position = currentPos).coerceAtLeast(0)
-                        val activeSyncedLine = syncedList.getOrNull(activeSyncedIndex)?.line?.trim().orEmpty()
-                        val targetPlainIndex = if (activeSyncedLine.isNotBlank()) {
-                            val foundIndex = plainList.indexOfFirst { plainLine ->
-                                val cleanPlain = plainLine.trim()
-                                cleanPlain.equals(activeSyncedLine, ignoreCase = true) ||
-                                    (activeSyncedLine.length > 5 && cleanPlain.contains(activeSyncedLine, ignoreCase = true))
+                .clip(RoundedCornerShape(32.dp))
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDragStart = { startOffset ->
+                            isSwipeActive = true
+                            hasTriggeredAction = false
+                            dragOffset = 0f
+                            // In the split view the top half is read from the other side of the
+                            // phone, so left/right are reversed for that person.
+                            swipeFromTopHalf = splitActiveState.value && startOffset.y < size.height / 2f
+                            resetImmersiveTimer()
+                            coroutineScope.launch {
+                                swipeProgress.snapTo(0f)
                             }
-                            if (foundIndex >= 0) foundIndex else activeSyncedIndex.coerceIn(0, plainList.lastIndex)
-                        } else {
-                            activeSyncedIndex.coerceIn(0, plainList.lastIndex)
-                        }
-                        staticListState.scrollToItem((targetPlainIndex - 1).coerceAtLeast(0))
-                    }
-                }
-            }
+                        },
+                        onDragEnd = {
+                            isSwipeActive = false
+                            val committed = abs(dragOffset) > swipeThresholdPx && !hasTriggeredAction 
+                        
+                            if (committed) {
+                                val goNext = (dragOffset < 0) != swipeFromTopHalf
+                                if (goNext) onNext() else onPrev()
+                                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                            }
 
-            // Lyrics Content (Weight 1)
+                            coroutineScope.launch {
+                                 swipeProgress.animateTo(0f, tween(200))
+                                 dragOffset = 0f
+                            }
+                        },
+                        onDragCancel = {
+                            isSwipeActive = false
+                            dragOffset = 0f
+                            coroutineScope.launch {
+                                swipeProgress.animateTo(0f, tween(200))
+                            }
+                        },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            resetImmersiveTimer()
+                        
+                            if (!hasTriggeredAction) {
+                                dragOffset += dragAmount.x
+                                val progress = (abs(dragOffset) / swipeThresholdPx).coerceIn(0f, 1f)
+                            
+                                coroutineScope.launch {
+                                    swipeProgress.snapTo(progress)
+                                }
+                            }
+                        }
+                    )
+                },
+            containerColor = containerColor,
+            contentColor = contentColor,
+            // Removed TopBar and FAB
+        ) { paddingValues ->
             Box(
                 modifier = Modifier
-                    .align(Alignment.Start)
-                    .weight(1f)
-                    .fillMaxWidth()
+                    .fillMaxSize()
+                    // While a reaction menu is open, a tap anywhere else only closes it.
+                    .dismissReactionMenuOnOutsideTap(reactionState)
             ) {
-                // Track Info Header (Fixed at top). Expanded = the full card (cover, title, artist,
-                // visualiser); collapsed = the compact Now / Next bar. Either way the song
-                // structure strip stays attached underneath. Its measured height drives the lyric
-                // lists' top padding, so collapsing hands the space to the lyrics.
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = paddingValues.calculateTopPadding())
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        resetImmersiveTimer()
+                    }
+            ) {
+                val initialSyncedLineIndex = remember(lyrics, playbackPositionFlow, lyricsSyncOffset) {
+                    val syncedLines = withInstrumentalBreaks(lyrics?.synced.orEmpty())
+                    val pos = (playbackPositionFlow.value + lyricsSyncOffset).coerceAtLeast(0L)
+                    val hasIntro = (syncedLines.firstOrNull()?.time ?: 0) >= 1500 && syncedLines.firstOrNull()?.line?.isNotBlank() == true
+                    val introOffset = if (hasIntro) 1 else 0
+                    val resolved = resolveCurrentLineIndex(lines = syncedLines, position = pos)
+                    if (resolved >= 0) {
+                        resolved + introOffset
+                    } else {
+                        0
+                    }
+                }
+                val syncedListState = rememberLazyListState(
+                    initialFirstVisibleItemIndex = initialSyncedLineIndex
+                )
+                val staticListState = rememberLazyListState()
+
+                LaunchedEffect(showSyncedLyrics) {
+                    if (showSyncedLyrics == false) {
+                        val syncedList = lyrics?.synced
+                        val plainList = lyrics?.plain
+                        if (!syncedList.isNullOrEmpty() && !plainList.isNullOrEmpty()) {
+                            val currentPos = (playbackPositionFlow.value + lyricsSyncOffset).coerceAtLeast(0L)
+                            val activeSyncedIndex = resolveCurrentLineIndex(lines = syncedList, position = currentPos).coerceAtLeast(0)
+                            val activeSyncedLine = syncedList.getOrNull(activeSyncedIndex)?.line?.trim().orEmpty()
+                            val targetPlainIndex = if (activeSyncedLine.isNotBlank()) {
+                                val foundIndex = plainList.indexOfFirst { plainLine ->
+                                    val cleanPlain = plainLine.trim()
+                                    cleanPlain.equals(activeSyncedLine, ignoreCase = true) ||
+                                        (activeSyncedLine.length > 5 && cleanPlain.contains(activeSyncedLine, ignoreCase = true))
+                                }
+                                if (foundIndex >= 0) foundIndex else activeSyncedIndex.coerceIn(0, plainList.lastIndex)
+                            } else {
+                                activeSyncedIndex.coerceIn(0, plainList.lastIndex)
+                            }
+                            staticListState.scrollToItem((targetPlainIndex - 1).coerceAtLeast(0))
+                        }
+                    }
+                }
+
+                // Lyrics Content (Weight 1)
                 Box(
                     modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .zIndex(2f)
-                        .onSizeChanged { headerHeightPx = it.height }
+                        .align(Alignment.Start)
+                        .weight(1f)
+                        .fillMaxWidth()
                 ) {
-                    AnimatedContent(
-                        targetState = headerCollapsed,
-                        transitionSpec = {
-                            androidx.compose.animation.ContentTransform(
-                                targetContentEnter = fadeIn(tween(220, delayMillis = 60)) +
-                                    scaleIn(initialScale = 0.96f, animationSpec = tween(260)),
-                                initialContentExit = fadeOut(tween(140)),
-                                sizeTransform = SizeTransform(clip = false)
-                            )
-                        },
-                        label = "headerCollapse"
-                    ) { collapsed ->
-                        if (collapsed) {
-                            ConnectedHeader(
-                                backgroundColor = backgroundColor,
-                                minBottomWidth = 0.dp,
-                                modifier = Modifier
-                                    .padding(top = 4.dp, bottom = 16.dp, start = 18.dp, end = 18.dp)
-                                    .fillMaxWidth()
-                                    .pointerInput(Unit) {
-                                        // Swipe down on the bar = expand, same as its button.
-                                        detectVerticalDragGestures { change, amount ->
-                                            if (amount > 12f) {
-                                                change.consume()
-                                                setHeaderCollapsed(false)
-                                            }
-                                        }
-                                    },
-                                header = {
-                                    CollapsedNowNextBar(
-                                        currentSong = currentSong,
-                                        nextSong = nextUpSong,
-                                        isPlaying = isPlaying,
-                                        backgroundColor = Color.Transparent,
-                                        contentColor = onBackgroundColor,
-                                        nextContainerColor = sheetColors.surfaceSecondary,
-                                        nextContentColor = sheetColors.onSurfaceSecondary,
-                                        accentColor = accentColor,
-                                        onExpand = { setHeaderCollapsed(false) },
-                                        onNextClick = {
-                                            resetImmersiveTimer()
-                                            onPlayNextUpNow()
-                                        },
-                                        nextAlpha = { chromeIdleAlpha }
-                                    )
-                                },
-                                bottom = { structureStripSlot(currentSong) }
-                            )
-                        } else {
-                            AnimatedContent(
-                                targetState = currentSong,
-                                transitionSpec = {
-                                    (fadeIn(animationSpec = tween(300)) +
-                                     scaleIn(initialScale = 0.9f, animationSpec = tween(300)))
-                                    .togetherWith(fadeOut(animationSpec = tween(300)))
-                                },
-                                modifier = Modifier.wrapContentWidth(),
-                                label = "headerAnimation"
-                            ) { song ->
-                                // Cover, title, artist and visualiser, with the song's structure attached
-                                // right underneath (no gap) as one connected shape.
+                    // Track Info Header (Fixed at top). Expanded = the full card (cover, title, artist,
+                    // visualiser); collapsed = the compact Now / Next bar. Either way the song
+                    // structure strip stays attached underneath. Its measured height drives the lyric
+                    // lists' top padding, so collapsing hands the space to the lyrics.
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .zIndex(2f)
+                            .onSizeChanged { headerHeightPx = it.height }
+                    ) {
+                        AnimatedContent(
+                            targetState = headerCollapsed,
+                            transitionSpec = {
+                                androidx.compose.animation.ContentTransform(
+                                    targetContentEnter = fadeIn(tween(220, delayMillis = 60)) +
+                                        scaleIn(initialScale = 0.96f, animationSpec = tween(260)),
+                                    initialContentExit = fadeOut(tween(140)),
+                                    sizeTransform = SizeTransform(clip = false)
+                                )
+                            },
+                            label = "headerCollapse"
+                        ) { collapsed ->
+                            if (collapsed) {
                                 ConnectedHeader(
                                     backgroundColor = backgroundColor,
+                                    minBottomWidth = 0.dp,
                                     modifier = Modifier
-                                        .padding(
-                                            top = 4.dp, bottom = 24.dp, start = 18.dp, end = 18.dp
-                                        )
-                                        .animateContentSize() // Animate width changes
+                                        .padding(top = 4.dp, bottom = 16.dp, start = 18.dp, end = 18.dp)
+                                        .fillMaxWidth()
                                         .pointerInput(Unit) {
-                                            // Swipe up on the card = collapse to the compact bar.
+                                            // Swipe down on the bar = expand, same as its button.
                                             detectVerticalDragGestures { change, amount ->
-                                                if (amount < -12f) {
+                                                if (amount > 12f) {
                                                     change.consume()
-                                                    setHeaderCollapsed(true)
+                                                    setHeaderCollapsed(false)
                                                 }
                                             }
                                         },
                                     header = {
-                                        LyricsTrackInfo(
-                                            song = song,
-                                            modifier = Modifier.wrapContentWidth(),
-                                            backgroundColor = backgroundColor, // Distinct solid background
-                                            contentColor = onBackgroundColor,
+                                        CollapsedNowNextBar(
+                                            currentSong = currentSong,
+                                            nextSong = nextUpSong,
                                             isPlaying = isPlaying,
-                                            onCollapse = { setHeaderCollapsed(true) }
+                                            backgroundColor = Color.Transparent,
+                                            contentColor = onBackgroundColor,
+                                            nextContainerColor = sheetColors.surfaceSecondary,
+                                            nextContentColor = sheetColors.onSurfaceSecondary,
+                                            accentColor = accentColor,
+                                            onExpand = { setHeaderCollapsed(false) },
+                                            onNextClick = {
+                                                resetImmersiveTimer()
+                                                onPlayNextUpNow()
+                                            },
+                                            nextAlpha = { chromeIdleAlpha }
                                         )
                                     },
-                                    bottom = { structureStripSlot(song) }
+                                    bottom = { structureStripSlot(currentSong) }
                                 )
+                            } else {
+                                AnimatedContent(
+                                    targetState = currentSong,
+                                    transitionSpec = {
+                                        (fadeIn(animationSpec = tween(300)) +
+                                         scaleIn(initialScale = 0.9f, animationSpec = tween(300)))
+                                        .togetherWith(fadeOut(animationSpec = tween(300)))
+                                    },
+                                    modifier = Modifier.wrapContentWidth(),
+                                    label = "headerAnimation"
+                                ) { song ->
+                                    // Cover, title, artist and visualiser, with the song's structure attached
+                                    // right underneath (no gap) as one connected shape.
+                                    ConnectedHeader(
+                                        backgroundColor = backgroundColor,
+                                        modifier = Modifier
+                                            .padding(
+                                                top = 4.dp, bottom = 24.dp, start = 18.dp, end = 18.dp
+                                            )
+                                            .animateContentSize() // Animate width changes
+                                            .pointerInput(Unit) {
+                                                // Swipe up on the card = collapse to the compact bar.
+                                                detectVerticalDragGestures { change, amount ->
+                                                    if (amount < -12f) {
+                                                        change.consume()
+                                                        setHeaderCollapsed(true)
+                                                    }
+                                                }
+                                            },
+                                        header = {
+                                            LyricsTrackInfo(
+                                                song = song,
+                                                modifier = Modifier.wrapContentWidth(),
+                                                backgroundColor = backgroundColor, // Distinct solid background
+                                                contentColor = onBackgroundColor,
+                                                isPlaying = isPlaying,
+                                                onCollapse = { setHeaderCollapsed(true) }
+                                            )
+                                        },
+                                        bottom = { structureStripSlot(song) }
+                                    )
+                                }
                             }
                         }
                     }
-                }
 
-                when (performanceView) {
-                    PerformanceView.Lyrics -> {
-                        AnimatedContent(
-                            targetState = showSyncedLyrics,
-                            transitionSpec = {
-                                if (initialState == false && targetState == true) {
-                                    (fadeIn(animationSpec = tween(380, easing = LinearOutSlowInEasing)) +
-                                        scaleIn(initialScale = 0.98f, animationSpec = tween(380, easing = LinearOutSlowInEasing)))
-                                        .togetherWith(fadeOut(animationSpec = tween(220, easing = FastOutLinearInEasing)))
-                                } else if (initialState == true && targetState == false) {
-                                    (fadeIn(animationSpec = tween(380, easing = LinearOutSlowInEasing)) +
-                                        scaleIn(initialScale = 1.01f, animationSpec = tween(380, easing = LinearOutSlowInEasing)))
-                                        .togetherWith(fadeOut(animationSpec = tween(220, easing = FastOutLinearInEasing)))
-                                } else {
-                                    fadeIn(animationSpec = tween(300)).togetherWith(fadeOut(animationSpec = tween(300)))
-                                }
-                            },
-                            label = "LyricsModeAnimatedContent",
-                            modifier = Modifier.fillMaxSize()
-                        ) { currentShowSynced ->
-                            when (currentShowSynced) {
-                                null -> {
-                                    LazyColumn(
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentPadding = PaddingValues(top = (lyricsTopPadding - 20.dp).coerceAtLeast(0.dp), bottom = 24.dp, start = 24.dp, end = 24.dp)
-                                    ) {
-                                        item(key = "loader_or_empty") {
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillParentMaxSize(),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                if (isLoadingLyrics) {
-                                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                        Text(
-                                                            text = stringResource(R.string.lyrics_loading),
-                                                            style = MaterialTheme.typography.titleMedium
-                                                        )
-                                                        Spacer(modifier = Modifier.height(8.dp))
-                                                        LinearWavyProgressIndicator(
-                                                            trackColor = accentColor.copy(alpha = 0.4f),
-                                                            color = accentColor,
-                                                            modifier = Modifier.width(100.dp)
-                                                        )
-                                                    }
-                                                } else {
-                                                    Column(
-                                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                                        verticalArrangement = Arrangement.Center,
-                                                        modifier = Modifier.padding(horizontal = 32.dp)
-                                                    ) {
-                                                        BubblesLine(
-                                                            positionFlow = playbackPositionFlow,
-                                                            time = 0,
-                                                            color = lyricHighlightColor,
-                                                            nextTime = Int.MAX_VALUE,
-                                                            modifier = Modifier
-                                                                .fillMaxWidth()
-                                                                .padding(vertical = 16.dp)
-                                                        )
-                                                        Spacer(modifier = Modifier.height(12.dp))
-                                                        Text(
-                                                            text = stringResource(R.string.lyrics_no_lyrics),
-                                                            style = MaterialTheme.typography.titleMedium.copy(
-                                                                color = contentColor.copy(alpha = 0.6f),
-                                                                fontWeight = FontWeight.Medium
-                                                            ),
-                                                            textAlign = TextAlign.Center
-                                                        )
-                                                        Spacer(modifier = Modifier.height(16.dp))
-                                                        // The toolbar below still has Instruments and the options menu.
-                                                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                                            OutlinedButton(onClick = { showFetchLyricsDialog = true }) {
-                                                                Text("Search lyrics", color = contentColor)
-                                                            }
-                                                            FilledTonalButton(onClick = { showCustomLyricsEditor = true }) {
-                                                                Text("Write your own")
+                    when (performanceView) {
+                        PerformanceView.Lyrics -> {
+                            AnimatedContent(
+                                targetState = showSyncedLyrics,
+                                transitionSpec = {
+                                    if (initialState == false && targetState == true) {
+                                        (fadeIn(animationSpec = tween(380, easing = LinearOutSlowInEasing)) +
+                                            scaleIn(initialScale = 0.98f, animationSpec = tween(380, easing = LinearOutSlowInEasing)))
+                                            .togetherWith(fadeOut(animationSpec = tween(220, easing = FastOutLinearInEasing)))
+                                    } else if (initialState == true && targetState == false) {
+                                        (fadeIn(animationSpec = tween(380, easing = LinearOutSlowInEasing)) +
+                                            scaleIn(initialScale = 1.01f, animationSpec = tween(380, easing = LinearOutSlowInEasing)))
+                                            .togetherWith(fadeOut(animationSpec = tween(220, easing = FastOutLinearInEasing)))
+                                    } else {
+                                        fadeIn(animationSpec = tween(300)).togetherWith(fadeOut(animationSpec = tween(300)))
+                                    }
+                                },
+                                label = "LyricsModeAnimatedContent",
+                                modifier = Modifier.fillMaxSize()
+                            ) { currentShowSynced ->
+                                when (currentShowSynced) {
+                                    null -> {
+                                        LazyColumn(
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentPadding = PaddingValues(top = (lyricsTopPadding - 20.dp).coerceAtLeast(0.dp), bottom = 24.dp, start = 24.dp, end = 24.dp)
+                                        ) {
+                                            item(key = "loader_or_empty") {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillParentMaxSize(),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    if (isLoadingLyrics) {
+                                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                            Text(
+                                                                text = stringResource(R.string.lyrics_loading),
+                                                                style = MaterialTheme.typography.titleMedium
+                                                            )
+                                                            Spacer(modifier = Modifier.height(8.dp))
+                                                            LinearWavyProgressIndicator(
+                                                                trackColor = accentColor.copy(alpha = 0.4f),
+                                                                color = accentColor,
+                                                                modifier = Modifier.width(100.dp)
+                                                            )
+                                                        }
+                                                    } else {
+                                                        Column(
+                                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                                            verticalArrangement = Arrangement.Center,
+                                                            modifier = Modifier.padding(horizontal = 32.dp)
+                                                        ) {
+                                                            BubblesLine(
+                                                                positionFlow = playbackPositionFlow,
+                                                                time = 0,
+                                                                color = lyricHighlightColor,
+                                                                nextTime = Int.MAX_VALUE,
+                                                                modifier = Modifier
+                                                                    .fillMaxWidth()
+                                                                    .padding(vertical = 16.dp)
+                                                            )
+                                                            Spacer(modifier = Modifier.height(12.dp))
+                                                            Text(
+                                                                text = stringResource(R.string.lyrics_no_lyrics),
+                                                                style = MaterialTheme.typography.titleMedium.copy(
+                                                                    color = contentColor.copy(alpha = 0.6f),
+                                                                    fontWeight = FontWeight.Medium
+                                                                ),
+                                                                textAlign = TextAlign.Center
+                                                            )
+                                                            Spacer(modifier = Modifier.height(16.dp))
+                                                            // The toolbar below still has Instruments and the options menu.
+                                                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                                                OutlinedButton(onClick = { showFetchLyricsDialog = true }) {
+                                                                    Text("Search lyrics", color = contentColor)
+                                                                }
+                                                                FilledTonalButton(onClick = { showCustomLyricsEditor = true }) {
+                                                                    Text("Write your own")
+                                                                }
                                                             }
                                                         }
                                                     }
@@ -1277,787 +1290,823 @@ fun LyricsSheet(
                                             }
                                         }
                                     }
-                                }
 
-                                true -> {
-                                    lyrics?.synced?.let { synced ->
-                                        SyncedLyricsList(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .padding(horizontal = 24.dp),
-                                            contentPadding = PaddingValues(top = lyricsTopPadding, bottom = 100.dp),
-                                            lines = synced,
-                                            listState = syncedListState,
-                                            playbackPositionFlow = playbackPositionFlow,
-                                            lyricsSyncOffset = lyricsSyncOffset,
-                                            positionOverrideMs = previewSeekPositionMs,
-                                            accentColor = lyricHighlightColor,
-                                            textStyle = scaledTextStyle,
-                                            onLineClick = { syncedLine -> 
-                                                onSeekTo(
-                                                    resolveSeekPositionMs(
-                                                        lineTimeMs = syncedLine.time.toLong(),
-                                                        lyricsSyncOffsetMs = lyricsSyncOffset
-                                                    )
-                                                )
-                                                resetImmersiveTimer()
-                                            },
-                                            highlightZoneFraction = highlightZoneFraction,
-                                            highlightOffsetDp = highlightOffsetDp,
-                                            autoscrollAnimationSpec = resolvedAutoscrollSpec,
-                                            useAnimatedLyrics = useAnimatedLyrics,
-                                            highlightMode = highlightMode,
-                                            animatedLyricsBlurEnabled = animatedLyricsBlurEnabled && !disableBlurAllOver,
-                                            animatedLyricsBlurStrength = animatedLyricsBlurStrength,
-                                            immersiveMode = immersiveMode,
-                                            lyricsAlignment = lyricsAlignment,
-                                            showTranslation = showLyricsTranslation,
-                                            showRomanization = showLyricsRomanization,
-                                            relayoutKey = lyricsRelayoutKey,
-                                            onSeekTo = { seekMs ->
-                                                onSeekTo(
-                                                    resolveSeekPositionMs(
-                                                        lineTimeMs = seekMs,
-                                                        lyricsSyncOffsetMs = lyricsSyncOffset
-                                                    )
-                                                )
-                                                resetImmersiveTimer()
-                                            },
-                                            footer = {
-                                                if (lyrics?.areFromRemote == true) {
-                                                    item(key = "provider_text") {
-                                                        ProviderText(
-                                                            providerText = stringResource(R.string.lyrics_provided_by),
-                                                            uri = stringResource(R.string.lyrics_lrclib_uri),
-                                                            textAlign = TextAlign.Center,
-                                                            accentColor = lyricHighlightColor,
-                                                            modifier = Modifier
-                                                                .fillMaxWidth()
-                                                                .padding(vertical = 16.dp)
+                                    true -> {
+                                        lyrics?.synced?.let { synced ->
+                                            SyncedLyricsList(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .padding(horizontal = 24.dp),
+                                                contentPadding = PaddingValues(top = lyricsTopPadding, bottom = 100.dp),
+                                                lines = synced,
+                                                listState = syncedListState,
+                                                playbackPositionFlow = playbackPositionFlow,
+                                                lyricsSyncOffset = lyricsSyncOffset,
+                                                positionOverrideMs = previewSeekPositionMs,
+                                                accentColor = lyricHighlightColor,
+                                                textStyle = scaledTextStyle,
+                                                onLineClick = { syncedLine -> 
+                                                    onSeekTo(
+                                                        resolveSeekPositionMs(
+                                                            lineTimeMs = syncedLine.time.toLong(),
+                                                            lyricsSyncOffsetMs = lyricsSyncOffset
                                                         )
+                                                    )
+                                                    resetImmersiveTimer()
+                                                },
+                                                highlightZoneFraction = highlightZoneFraction,
+                                                highlightOffsetDp = highlightOffsetDp,
+                                                autoscrollAnimationSpec = resolvedAutoscrollSpec,
+                                                useAnimatedLyrics = useAnimatedLyrics,
+                                                highlightMode = highlightMode,
+                                                animatedLyricsBlurEnabled = animatedLyricsBlurEnabled && !disableBlurAllOver,
+                                                animatedLyricsBlurStrength = animatedLyricsBlurStrength,
+                                                immersiveMode = immersiveMode,
+                                                lyricsAlignment = lyricsAlignment,
+                                                showTranslation = showLyricsTranslation,
+                                                showRomanization = showLyricsRomanization,
+                                                relayoutKey = lyricsRelayoutKey,
+                                                onSeekTo = { seekMs ->
+                                                    onSeekTo(
+                                                        resolveSeekPositionMs(
+                                                            lineTimeMs = seekMs,
+                                                            lyricsSyncOffsetMs = lyricsSyncOffset
+                                                        )
+                                                    )
+                                                    resetImmersiveTimer()
+                                                },
+                                                footer = {
+                                                    if (lyrics?.areFromRemote == true) {
+                                                        item(key = "provider_text") {
+                                                            ProviderText(
+                                                                providerText = stringResource(R.string.lyrics_provided_by),
+                                                                uri = stringResource(R.string.lyrics_lrclib_uri),
+                                                                textAlign = TextAlign.Center,
+                                                                accentColor = lyricHighlightColor,
+                                                                modifier = Modifier
+                                                                    .fillMaxWidth()
+                                                                    .padding(vertical = 16.dp)
+                                                            )
+                                                        }
                                                     }
                                                 }
-                                            }
-                                        )
-                                    }
-                                }
-
-                                false -> {
-                                    lyrics?.plain?.let { plain ->
-                                        LazyColumn(
-                                            modifier = Modifier.fillMaxSize(),
-                                            state = staticListState,
-                                            contentPadding = PaddingValues(
-                                                start = 24.dp,
-                                                end = 24.dp,
-                                                top = lyricsTopPadding,
-                                                bottom = 24.dp
                                             )
-                                        ) {
-                                            itemsIndexed(
-                                                items = plain,
-                                                key = { index, line -> "$index-$line" }
-                                            ) { _, line ->
-                                                PlainLyricsLine(
-                                                    line = line,
-                                                    style = lyricsTextStyle,
-                                                    lyricsAlignment = lyricsAlignment,
-                                                    showTranslation = if (hasTranslatedLyrics) showLyricsTranslation else true,
-                                                    showRomanization = if (hasRomanizedLyrics) showLyricsRomanization else true,
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .animateItem(
-                                                            fadeInSpec = tween(durationMillis = 300, easing = LinearOutSlowInEasing),
-                                                            fadeOutSpec = tween(durationMillis = 200, easing = FastOutLinearInEasing),
-                                                            placementSpec = spring(
-                                                                stiffness = Spring.StiffnessMediumLow,
-                                                                dampingRatio = Spring.DampingRatioNoBouncy
-                                                            )
-                                                        )
+                                        }
+                                    }
+
+                                    false -> {
+                                        lyrics?.plain?.let { plain ->
+                                            LazyColumn(
+                                                modifier = Modifier.fillMaxSize(),
+                                                state = staticListState,
+                                                contentPadding = PaddingValues(
+                                                    start = 24.dp,
+                                                    end = 24.dp,
+                                                    top = lyricsTopPadding,
+                                                    bottom = 24.dp
                                                 )
-                                                Spacer(modifier = Modifier.height(16.dp))
+                                            ) {
+                                                itemsIndexed(
+                                                    items = plain,
+                                                    key = { index, line -> "$index-$line" }
+                                                ) { _, line ->
+                                                    PlainLyricsLine(
+                                                        line = line,
+                                                        style = lyricsTextStyle,
+                                                        lyricsAlignment = lyricsAlignment,
+                                                        showTranslation = if (hasTranslatedLyrics) showLyricsTranslation else true,
+                                                        showRomanization = if (hasRomanizedLyrics) showLyricsRomanization else true,
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .animateItem(
+                                                                fadeInSpec = tween(durationMillis = 300, easing = LinearOutSlowInEasing),
+                                                                fadeOutSpec = tween(durationMillis = 200, easing = FastOutLinearInEasing),
+                                                                placementSpec = spring(
+                                                                    stiffness = Spring.StiffnessMediumLow,
+                                                                    dampingRatio = Spring.DampingRatioNoBouncy
+                                                                )
+                                                            )
+                                                    )
+                                                    Spacer(modifier = Modifier.height(16.dp))
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
                         }
-                    }
-                PerformanceView.Instruments -> {
-                    tabPractice?.let { practice ->
-                        InstrumentsPerformanceView(
-                            controller = practice,
-                            onBackgroundColor = onBackgroundColor,
-                            accentColor = accentColor,
-                            modifier = Modifier.fillMaxSize(),
-                            // A tap while the controls are hidden only brings them back.
-                            onUserInteraction = {
-                                val wasHidden = immersiveMode
-                                resetImmersiveTimer()
-                                // Swallow the tap only if it brought the controls back.
-                                wasHidden && !immersiveMode
-                            }
-                        )
+                    PerformanceView.Instruments -> {
+                        tabPractice?.let { practice ->
+                            InstrumentsPerformanceView(
+                                controller = practice,
+                                onBackgroundColor = onBackgroundColor,
+                                accentColor = accentColor,
+                                modifier = Modifier.fillMaxSize(),
+                                // A tap while the controls are hidden only brings them back.
+                                onUserInteraction = {
+                                    val wasHidden = immersiveMode
+                                    resetImmersiveTimer()
+                                    // Swallow the tap only if it brought the controls back.
+                                    wasHidden && !immersiveMode
+                                }
+                            )
+                        }
                     }
                 }
-            }
                 
-                // Top Gradient for fade (follows the header's height)
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(lyricsTopPadding.coerceAtLeast(56.dp))
-                        .align(Alignment.TopCenter)
-                        .background(
-                            brush = Brush.verticalGradient(
-                                colors = listOf(containerColor, Color.Transparent)
-                            )
-                        )
-                )
-
-                // Bottom Gradient for fade
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(80.dp)
-                        .align(Alignment.BottomCenter)
-                        .background(
-                            brush = Brush.verticalGradient(
-                                colors = listOf(Color.Transparent, containerColor)
-                            )
-                        )
-                )
-
-                // "Playing next ✓": just under the header, over the lyrics, never blocking them.
-                if (confirmations != null) {
-                    LyricsConfirmationPill(
-                        confirmations = confirmations,
-                        containerColor = sheetColors.toastContainer,
-                        contentColor = sheetColors.toastContent,
-                        onShown = onConfirmationShown,
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .zIndex(3f)
-                            .padding(top = (lyricsTopPadding - 28.dp).coerceAtLeast(8.dp))
-                    )
-                }
-
-                // Reactions in the empty bottom corners: positive left, negative right. They
-                // overlay the fade area and never push or resize the lyrics.
-                val showReactions = onReaction != null &&
-                    currentSong != null &&
-                    performanceView == PerformanceView.Lyrics &&
-                    !splitActive
-                if (showReactions && onReaction != null) {
-                    val cornerBottom by animateDpAsState(
-                        targetValue = if (immersiveMode) paddingValues.calculateBottomPadding() + 20.dp else 10.dp,
-                        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                        label = "reactionCornerBottom"
-                    )
-                    ReactionCorner(
-                        side = ReactionSide.POSITIVE,
-                        state = reactionState,
-                        triggerContainer = sheetColors.surfaceSecondary,
-                        triggerContent = sheetColors.onSurfaceSecondary,
-                        ringColor = sheetColors.reactionPositive,
-                        onSelect = onReaction,
-                        idleAlpha = { chromeIdleAlpha },
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .zIndex(3f)
-                            .padding(start = 16.dp, bottom = cornerBottom)
-                    )
-                    ReactionCorner(
-                        side = ReactionSide.NEGATIVE,
-                        state = reactionState,
-                        triggerContainer = sheetColors.surfaceSecondary,
-                        triggerContent = sheetColors.onSurfaceSecondary,
-                        ringColor = sheetColors.reactionNegative,
-                        onSelect = onReaction,
-                        idleAlpha = { chromeIdleAlpha },
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .zIndex(3f)
-                            .padding(end = 16.dp, bottom = cornerBottom)
-                    )
-                }
-            }
-
-            // Controls Section (Auto-hide in immersive mode)
-            AnimatedVisibility(
-                visible = !immersiveMode,
-                enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
-                exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        // Follows the finger while swiping the controls down.
-                        .graphicsLayer {
-                            translationY = controlsDragOffset.value
-                            alpha = 1f - (controlsDragOffset.value / (size.height.coerceAtLeast(1f) * 1.2f)).coerceIn(0f, 0.6f)
-                        }
-                        .background(containerColor)
-                        .padding(bottom = paddingValues.calculateBottomPadding() + 10.dp, end = 16.dp, start = 16.dp)
-                        // Swipe the controls down to hide them now instead of waiting for
-                        // the auto-hide timer. Tap anywhere to bring them back.
-                        .pointerInput(Unit) {
-                            detectVerticalDragGestures(
-                                onDragEnd = {
-                                    val practice = tabPracticeState.value
-                                    if (controlsUpDrag < -controlsHideThresholdPx * 0.6f && practice != null) {
-                                        practice.panelExpanded = true
-                                    }
-                                    controlsUpDrag = 0f
-                                    val committed = controlsDragOffset.value > controlsHideThresholdPx
-                                    if (committed) {
-                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        hideControlsNow()
-                                    }
-                                    coroutineScope.launch {
-                                        controlsDragOffset.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
-                                    }
-                                },
-                                onDragCancel = {
-                                    coroutineScope.launch {
-                                        controlsDragOffset.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
-                                    }
-                                },
-                                onVerticalDrag = { change, dragAmount ->
-                                    change.consume()
-                                    if (dragAmount < 0f || controlsUpDrag < 0f) controlsUpDrag += dragAmount
-                                    coroutineScope.launch {
-                                        controlsDragOffset.snapTo((controlsDragOffset.value + dragAmount).coerceAtLeast(0f))
-                                    }
-                                }
-                            )
-                        }
-                        .pointerInput(Unit) {
-                            awaitPointerEventScope {
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    // Reset timer on any touch down or move in this area
-                                    if (event.changes.any { it.pressed }) {
-                                         resetImmersiveTimer()
-                                    }
-                                }
-                            }
-                        }
-                ) {
-                    // Grab handle: hints that the controls can be swiped down.
+                    // Top Gradient for fade (follows the header's height)
                     Box(
-                        modifier = Modifier
-                            .align(Alignment.CenterHorizontally)
-                            .padding(top = 6.dp, bottom = 4.dp)
-                            .size(width = 32.dp, height = 4.dp)
-                            .background(contentColor.copy(alpha = 0.25f), CircleShape)
-                    )
-                                AnimatedVisibility(
-                    visible = showSyncedLyrics == true && lyrics?.synced != null && showSyncControls,
-                    enter = expandVertically() + fadeIn(),
-                    exit = shrinkVertically() + fadeOut()
-                ) {
-                    LyricsSyncControls(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 8.dp),
-                        offsetMillis = lyricsSyncOffset,
-                        onOffsetChange = onLyricsSyncOffsetChange,
-                        backgroundColor = backgroundColor,
-                        accentColor = sheetColors.syncButtonContainer,
-                        onAccentColor = sheetColors.syncButtonContent,
-                        onBackgroundColor = onBackgroundColor
-                    )
-                }
-
-                // Playback Controls Row
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 0.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // Play/Pause Button (Smaller)
-                    val playPauseCornerRadius by animateDpAsState(
-                        targetValue = if (tabPractice?.isPlaying ?: isPlaying) 18.dp else 50.dp,
-                        animationSpec = spring(stiffness = Spring.StiffnessLow),
-                        label = "playPauseShape"
+                            .height(lyricsTopPadding.coerceAtLeast(56.dp))
+                            .align(Alignment.TopCenter)
+                            .background(
+                                brush = Brush.verticalGradient(
+                                    colors = listOf(containerColor, Color.Transparent)
+                                )
+                            )
                     )
 
+                    // Bottom Gradient for fade
                     Box(
                         modifier = Modifier
-                            .size(78.dp)
-                            .clip(RoundedCornerShape(playPauseCornerRadius))
-                            .background(playPauseColor)
-                            .clickable {
-                                hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                // Instruments page: play/pause goes through the tab player
-                                // (count-in, loops, Synth, backing tracks).
-                                val practice = tabPractice
-                                if (practice != null) practice.togglePlay(coroutineScope) else onPlayPause()
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        AnimatedContent(
-                            targetState = tabPractice?.isPlaying ?: isPlaying,
-                            label = "playPauseIconAnimation"
-                        ) { playing ->
-                            if (playing) {
-                                Icon(
-                                    modifier = Modifier.size(32.dp),
-                                    imageVector = Icons.Rounded.Pause,
-                                    contentDescription = "Pause",
-                                    tint = onPlayPauseColor
+                            .fillMaxWidth()
+                            .height(80.dp)
+                            .align(Alignment.BottomCenter)
+                            .background(
+                                brush = Brush.verticalGradient(
+                                    colors = listOf(Color.Transparent, containerColor)
                                 )
-                            } else {
-                                Icon(
-                                    modifier = Modifier.size(32.dp),
-                                    imageVector = Icons.Rounded.PlayArrow,
-                                    contentDescription = stringResource(R.string.common_play),
-                                    tint = onPlayPauseColor
-                                )
-                            }
-                        }
+                            )
+                    )
+
+                    // "Playing next ✓": just under the header, over the lyrics, never blocking them.
+                    if (confirmations != null) {
+                        LyricsConfirmationPill(
+                            confirmations = confirmations,
+                            containerColor = sheetColors.toastContainer,
+                            contentColor = sheetColors.toastContent,
+                            onShown = onConfirmationShown,
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .zIndex(3f)
+                                .padding(top = (lyricsTopPadding - 28.dp).coerceAtLeast(8.dp))
+                        )
                     }
 
-                    // Progress Bar
-                    LyricsPlaybackSeekBar(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(50.dp),
-                        playbackPositionFlow = playbackPositionFlow,
-                        backgroundColor = backgroundColor,
-                        onBackgroundColor = onBackgroundColor,
-                        accentColor = accentColor,
-                        totalDuration = stablePlayerState.totalDuration,
-                        onSeekTo = onSeekTo,
-                        onSeekPreviewChange = { previewSeekPositionMs = it },
-                        isPlaying = isPlaying
-                    )
+                    // Reactions in the empty bottom corners: positive left, negative right. They
+                    // overlay the fade area and never push or resize the lyrics.
+                    val showReactions = onReaction != null &&
+                        currentSong != null &&
+                        performanceView == PerformanceView.Lyrics &&
+                        !splitActive
+                    if (showReactions && onReaction != null) {
+                        val cornerBottom by animateDpAsState(
+                            targetValue = if (immersiveMode) paddingValues.calculateBottomPadding() + 20.dp else 10.dp,
+                            animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                            label = "reactionCornerBottom"
+                        )
+                        ReactionCorner(
+                            side = ReactionSide.POSITIVE,
+                            state = reactionState,
+                            triggerContainer = sheetColors.surfaceSecondary,
+                            triggerContent = sheetColors.onSurfaceSecondary,
+                            ringColor = sheetColors.reactionPositive,
+                            onSelect = onReaction,
+                            idleAlpha = { chromeIdleAlpha },
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .zIndex(3f)
+                                .padding(start = 16.dp, bottom = cornerBottom)
+                        )
+                        ReactionCorner(
+                            side = ReactionSide.NEGATIVE,
+                            state = reactionState,
+                            triggerContainer = sheetColors.surfaceSecondary,
+                            triggerContent = sheetColors.onSurfaceSecondary,
+                            ringColor = sheetColors.reactionNegative,
+                            onSelect = onReaction,
+                            idleAlpha = { chromeIdleAlpha },
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .zIndex(3f)
+                                .padding(end = 16.dp, bottom = cornerBottom)
+                        )
+                    }
                 }
-                
-                Spacer(modifier = Modifier.height(16.dp))
 
-                // Floating Toolbar
-                LyricsFloatingToolbar(
-                    modifier = Modifier.padding(horizontal = 0.dp),
-                    showSyncedLyrics = showSyncedLyrics,
-                    hasSyncedLyrics = hasSyncedLyrics,
-                    onShowSyncedLyricsChange = { showSyncedLyrics = it },
-                    onNavigateBack = {
-                        onBackClick()
-                    },
-                    onMoreClick = { showMoreSheet = true },
-                    backgroundColor = backgroundColor,
-                    onBackgroundColor = onBackgroundColor,
-                    accentColor = accentColor,
-                    onAccentColor = onAccentColor,
-                    performanceView = performanceView,
-                    onPerformanceViewChange = { performanceView = it },
-                    instrumentsPanelOpen = tabPractice?.panelExpanded == true,
-                    onInstrumentsClick = {
-                        resetImmersiveTimer()
-                        tabPractice?.let { it.panelExpanded = !it.panelExpanded }
-                    },
-                    // Pass progress so the back button animates with the gesture (draw-phase).
-                    backProgressProvider = { backProgressProvider.value },
-                    onAddSongClick = onAddSongClick?.let { open ->
-                        {
-                            resetImmersiveTimer()
-                            open()
+                // Controls Section (Auto-hide in immersive mode)
+                AnimatedVisibility(
+                    visible = !immersiveMode,
+                    enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
+                    exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            // Follows the finger while swiping the controls down.
+                            .graphicsLayer {
+                                translationY = controlsDragOffset.value
+                                alpha = 1f - (controlsDragOffset.value / (size.height.coerceAtLeast(1f) * 1.2f)).coerceIn(0f, 0.6f)
+                            }
+                            .background(containerColor)
+                            .padding(bottom = paddingValues.calculateBottomPadding() + 10.dp, end = 16.dp, start = 16.dp)
+                            // Swipe the controls down to hide them now instead of waiting for
+                            // the auto-hide timer. Tap anywhere to bring them back.
+                            .pointerInput(Unit) {
+                                detectVerticalDragGestures(
+                                    onDragEnd = {
+                                        val practice = tabPracticeState.value
+                                        if (controlsUpDrag < -controlsHideThresholdPx * 0.6f && practice != null) {
+                                            practice.panelExpanded = true
+                                        }
+                                        controlsUpDrag = 0f
+                                        val committed = controlsDragOffset.value > controlsHideThresholdPx
+                                        if (committed) {
+                                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            hideControlsNow()
+                                        }
+                                        coroutineScope.launch {
+                                            controlsDragOffset.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                                        }
+                                    },
+                                    onDragCancel = {
+                                        coroutineScope.launch {
+                                            controlsDragOffset.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                                        }
+                                    },
+                                    onVerticalDrag = { change, dragAmount ->
+                                        change.consume()
+                                        if (dragAmount < 0f || controlsUpDrag < 0f) controlsUpDrag += dragAmount
+                                        coroutineScope.launch {
+                                            controlsDragOffset.snapTo((controlsDragOffset.value + dragAmount).coerceAtLeast(0f))
+                                        }
+                                    }
+                                )
+                            }
+                            .pointerInput(Unit) {
+                                awaitPointerEventScope {
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        // Reset timer on any touch down or move in this area
+                                        if (event.changes.any { it.pressed }) {
+                                             resetImmersiveTimer()
+                                        }
+                                    }
+                                }
+                            }
+                    ) {
+                        // Grab handle: hints that the controls can be swiped down.
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.CenterHorizontally)
+                                .padding(top = 6.dp, bottom = 4.dp)
+                                .size(width = 32.dp, height = 4.dp)
+                                .background(contentColor.copy(alpha = 0.25f), CircleShape)
+                        )
+                                    AnimatedVisibility(
+                        visible = showSyncedLyrics == true && lyrics?.synced != null && showSyncControls,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        LyricsSyncControls(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 8.dp),
+                            offsetMillis = lyricsSyncOffset,
+                            onOffsetChange = onLyricsSyncOffsetChange,
+                            backgroundColor = backgroundColor,
+                            accentColor = sheetColors.syncButtonContainer,
+                            onAccentColor = sheetColors.syncButtonContent,
+                            onBackgroundColor = onBackgroundColor
+                        )
+                    }
+
+                    // Playback Controls Row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 0.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Play/Pause Button (Smaller)
+                        val playPauseCornerRadius by animateDpAsState(
+                            targetValue = if (tabPractice?.isPlaying ?: isPlaying) 18.dp else 50.dp,
+                            animationSpec = spring(stiffness = Spring.StiffnessLow),
+                            label = "playPauseShape"
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .size(78.dp)
+                                .clip(RoundedCornerShape(playPauseCornerRadius))
+                                .background(playPauseColor)
+                                .clickable {
+                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    // Instruments page: play/pause goes through the tab player
+                                    // (count-in, loops, Synth, backing tracks).
+                                    val practice = tabPractice
+                                    if (practice != null) practice.togglePlay(coroutineScope) else onPlayPause()
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            AnimatedContent(
+                                targetState = tabPractice?.isPlaying ?: isPlaying,
+                                label = "playPauseIconAnimation"
+                            ) { playing ->
+                                if (playing) {
+                                    Icon(
+                                        modifier = Modifier.size(32.dp),
+                                        imageVector = Icons.Rounded.Pause,
+                                        contentDescription = "Pause",
+                                        tint = onPlayPauseColor
+                                    )
+                                } else {
+                                    Icon(
+                                        modifier = Modifier.size(32.dp),
+                                        imageVector = Icons.Rounded.PlayArrow,
+                                        contentDescription = stringResource(R.string.common_play),
+                                        tint = onPlayPauseColor
+                                    )
+                                }
+                            }
                         }
-                    },
-                )
 
-                // Guitar / drum practice panel: the toolbar's Instruments button opens it.
-                tabPractice?.let { practice ->
-                    com.theveloper.pixelplay.presentation.components.tabs.TabPracticePanel(
-                        controller = practice,
+                        // Progress Bar
+                        LyricsPlaybackSeekBar(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(50.dp),
+                            playbackPositionFlow = playbackPositionFlow,
+                            backgroundColor = backgroundColor,
+                            onBackgroundColor = onBackgroundColor,
+                            accentColor = accentColor,
+                            totalDuration = stablePlayerState.totalDuration,
+                            onSeekTo = onSeekTo,
+                            onSeekPreviewChange = { previewSeekPositionMs = it },
+                            isPlaying = isPlaying
+                        )
+
+                        // Skip forward, same glyph as the full player's next button. Sits right of
+                        // the timeline, so the timeline sits centred between play/pause and skip.
+                        val skipInteraction = remember { MutableInteractionSource() }
+                        val skipPressed by skipInteraction.collectIsPressedAsState()
+                        val skipScale by animateFloatAsState(
+                            targetValue = if (skipPressed) 0.86f else 1f,
+                            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+                            label = "skipPressScale"
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(58.dp)
+                                .graphicsLayer {
+                                    scaleX = skipScale
+                                    scaleY = skipScale
+                                }
+                                .clip(CircleShape)
+                                .background(sheetColors.surfaceSecondary)
+                                .clickable(
+                                    interactionSource = skipInteraction,
+                                    indication = androidx.compose.material3.ripple()
+                                ) {
+                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    resetImmersiveTimer()
+                                    onNext()
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.SkipNext,
+                                contentDescription = "Next song",
+                                tint = sheetColors.onSurfaceSecondary,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                    }
+                
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Floating Toolbar
+                    LyricsFloatingToolbar(
+                        modifier = Modifier.padding(horizontal = 0.dp),
+                        showSyncedLyrics = showSyncedLyrics,
+                        hasSyncedLyrics = hasSyncedLyrics,
+                        onShowSyncedLyricsChange = { showSyncedLyrics = it },
+                        onNavigateBack = {
+                            onBackClick()
+                        },
+                        onMoreClick = { showMoreSheet = true },
+                        backgroundColor = backgroundColor,
                         onBackgroundColor = onBackgroundColor,
                         accentColor = accentColor,
                         onAccentColor = onAccentColor,
+                        performanceView = performanceView,
+                        onPerformanceViewChange = { performanceView = it },
+                        instrumentsPanelOpen = tabPractice?.panelExpanded == true,
+                        onInstrumentsClick = {
+                            resetImmersiveTimer()
+                            tabPractice?.let { it.panelExpanded = !it.panelExpanded }
+                        },
+                        // Pass progress so the back button animates with the gesture (draw-phase).
+                        backProgressProvider = { backProgressProvider.value },
+                        onAddSongClick = onAddSongClick?.let { open ->
+                            {
+                                resetImmersiveTimer()
+                                open()
+                            }
+                        },
+                    )
+
+                    // Guitar / drum practice panel: the toolbar's Instruments button opens it.
+                    tabPractice?.let { practice ->
+                        com.theveloper.pixelplay.presentation.components.tabs.TabPracticePanel(
+                            controller = practice,
+                            onBackgroundColor = onBackgroundColor,
+                            accentColor = accentColor,
+                            onAccentColor = onAccentColor,
+                            containerColor = containerColor,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                 }
+                }
+            }
+
+            if (showMoreSheet) {
+                MaterialTheme(
+                    colorScheme = colorScheme,
+                    typography = MaterialTheme.typography,
+                    shapes = MaterialTheme.shapes
+                ) {
+                    LyricsMoreBottomSheet(
+                        onDismissRequest = { showMoreSheet = false },
+                        sheetState = moreSheetState,
+                        lyrics = lyrics,
+                        showSyncedLyrics = showSyncedLyrics == true,
+                        isSyncControlsVisible = showSyncControls,
+                        highlightMode = highlightMode,
+                        onHighlightModeChange = { mode ->
+                            coroutineScope.launch { context.dataStore.edit { it[stringPreferencesKey("lyrics_highlight_mode")] = mode.name } }
+                        },
+                        onResetAllLyrics = onResetAllLyrics,
+                        onSaveLyricsAsLrc = { showSaveLyricsDialog = true },
+                        onResetImportedLyrics = {
+                            wasResetTriggered = true
+                            resetLyricsForCurrentSong()
+                        },
+                        onTranslateViaAi = onTranslateViaAi,
+                        onToggleSyncControls = {
+                            resetImmersiveTimer()
+                            showSyncControls = !showSyncControls
+                        },
+                        isImmersiveTemporarilyDisabled = isImmersiveTemporarilyDisabled,
+                        onSetImmersiveTemporarilyDisabled = {
+                            resetImmersiveTimer()
+                            onSetImmersiveTemporarilyDisabled(it)
+                        },
+                        keepScreenOn = keepScreenOn,
+                        onKeepScreenOnChange = { enabled ->
+                            keepScreenOn = enabled
+                            coroutineScope.launch {
+                                context.dataStore.edit { prefs ->
+                                    prefs[booleanPreferencesKey("keep_screen_on_lyrics")] = enabled
+                                }
+                            }
+                        },
+                        lyricsAlignment = lyricsAlignment,
+                        onLyricsAlignmentChange = { newAlignment ->
+                            coroutineScope.launch {
+                                context.dataStore.edit { preferences ->
+                                    preferences[stringPreferencesKey("lyrics_alignment")] = newAlignment
+                                }
+                            }
+                        },
+                        hasTranslatedLyrics = hasTranslatedLyrics,
+                        hasRomanizedLyrics = hasRomanizedLyrics,
+                        showTranslation = showLyricsTranslation,
+                        showRomanization = showLyricsRomanization,
+                        onShowTranslationChange = { enabled ->
+                            resetImmersiveTimer()
+                            coroutineScope.launch {
+                                context.dataStore.edit { preferences ->
+                                    preferences[booleanPreferencesKey("show_lyrics_translation")] = enabled
+                                }
+                            }
+                        },
+                        onShowRomanizationChange = { enabled ->
+                            resetImmersiveTimer()
+                            coroutineScope.launch {
+                                context.dataStore.edit { preferences ->
+                                    preferences[booleanPreferencesKey("show_lyrics_romanization")] = enabled
+                                }
+                            }
+                        },
+                        immersiveLyricsEnabled = immersiveLyricsEnabled,
+                        showImmersiveToggle = showSyncedLyrics == true || performanceView == PerformanceView.Instruments,
+                        isShuffleEnabled = isShuffleEnabled,
+                        repeatMode = repeatMode,
+                        isFavoriteProvider = isFavoriteProvider,
+                        onShuffleToggle = {
+                            resetImmersiveTimer()
+                            onShuffleToggle()
+                        },
+                        onRepeatToggle = {
+                            resetImmersiveTimer()
+                            onRepeatToggle()
+                        },
+                        onFavoriteToggle = {
+                            resetImmersiveTimer()
+                            onFavoriteToggle()
+                        },
                         containerColor = containerColor,
-                        modifier = Modifier.padding(top = 4.dp)
+                        contentColor = contentColor,
+                        accentColor = accentColor,
+                        onAccentColor = onAccentColor,
+                        tertiaryColor = colorScheme.tertiary,
+                        onTertiaryColor = colorScheme.onTertiary,
+                        onWriteCustomLyrics = { showCustomLyricsEditor = true },
+                        onFindLyrics = { showFetchLyricsDialog = true },
+                        tabOptions = tabPractice?.let { practice ->
+                            {
+                                com.theveloper.pixelplay.presentation.components.tabs.TabOptionsSection(
+                                    controller = practice,
+                                    contentColor = contentColor,
+                                    accentColor = accentColor,
+                                    itemBackgroundColor = contentColor.copy(alpha = 0.08f)
+                                )
+                            }
+                        }
                     )
                 }
-             }
             }
-        }
 
-        if (showMoreSheet) {
-            MaterialTheme(
-                colorScheme = colorScheme,
-                typography = MaterialTheme.typography,
-                shapes = MaterialTheme.shapes
+           // Face-to-face split view (covers the list and header while active)
+           AnimatedVisibility(
+                visible = splitActive,
+                enter = fadeIn(tween(420, easing = LinearOutSlowInEasing)) +
+                    scaleIn(initialScale = 0.97f, animationSpec = tween(420, easing = LinearOutSlowInEasing)),
+                exit = fadeOut(tween(220, easing = FastOutLinearInEasing)) +
+                    scaleOut(targetScale = 0.98f, animationSpec = tween(220, easing = FastOutLinearInEasing)),
+                modifier = Modifier.fillMaxSize()
             ) {
-                LyricsMoreBottomSheet(
-                    onDismissRequest = { showMoreSheet = false },
-                    sheetState = moreSheetState,
-                    lyrics = lyrics,
-                    showSyncedLyrics = showSyncedLyrics == true,
-                    isSyncControlsVisible = showSyncControls,
-                    highlightMode = highlightMode,
-                    onHighlightModeChange = { mode ->
-                        coroutineScope.launch { context.dataStore.edit { it[stringPreferencesKey("lyrics_highlight_mode")] = mode.name } }
-                    },
-                    onResetAllLyrics = onResetAllLyrics,
-                    onSaveLyricsAsLrc = { showSaveLyricsDialog = true },
-                    onResetImportedLyrics = {
-                        wasResetTriggered = true
-                        resetLyricsForCurrentSong()
-                    },
-                    onTranslateViaAi = onTranslateViaAi,
-                    onToggleSyncControls = {
-                        resetImmersiveTimer()
-                        showSyncControls = !showSyncControls
-                    },
-                    isImmersiveTemporarilyDisabled = isImmersiveTemporarilyDisabled,
-                    onSetImmersiveTemporarilyDisabled = {
-                        resetImmersiveTimer()
-                        onSetImmersiveTemporarilyDisabled(it)
-                    },
-                    keepScreenOn = keepScreenOn,
-                    onKeepScreenOnChange = { enabled ->
-                        keepScreenOn = enabled
-                        coroutineScope.launch {
-                            context.dataStore.edit { prefs ->
-                                prefs[booleanPreferencesKey("keep_screen_on_lyrics")] = enabled
-                            }
-                        }
-                    },
-                    lyricsAlignment = lyricsAlignment,
-                    onLyricsAlignmentChange = { newAlignment ->
-                        coroutineScope.launch {
-                            context.dataStore.edit { preferences ->
-                                preferences[stringPreferencesKey("lyrics_alignment")] = newAlignment
-                            }
-                        }
-                    },
-                    hasTranslatedLyrics = hasTranslatedLyrics,
-                    hasRomanizedLyrics = hasRomanizedLyrics,
-                    showTranslation = showLyricsTranslation,
-                    showRomanization = showLyricsRomanization,
-                    onShowTranslationChange = { enabled ->
-                        resetImmersiveTimer()
-                        coroutineScope.launch {
-                            context.dataStore.edit { preferences ->
-                                preferences[booleanPreferencesKey("show_lyrics_translation")] = enabled
-                            }
-                        }
-                    },
-                    onShowRomanizationChange = { enabled ->
-                        resetImmersiveTimer()
-                        coroutineScope.launch {
-                            context.dataStore.edit { preferences ->
-                                preferences[booleanPreferencesKey("show_lyrics_romanization")] = enabled
-                            }
-                        }
-                    },
-                    immersiveLyricsEnabled = immersiveLyricsEnabled,
-                    showImmersiveToggle = showSyncedLyrics == true || performanceView == PerformanceView.Instruments,
-                    isShuffleEnabled = isShuffleEnabled,
-                    repeatMode = repeatMode,
-                    isFavoriteProvider = isFavoriteProvider,
-                    onShuffleToggle = {
-                        resetImmersiveTimer()
-                        onShuffleToggle()
-                    },
-                    onRepeatToggle = {
-                        resetImmersiveTimer()
-                        onRepeatToggle()
-                    },
-                    onFavoriteToggle = {
-                        resetImmersiveTimer()
-                        onFavoriteToggle()
-                    },
-                    containerColor = containerColor,
-                    contentColor = contentColor,
-                    accentColor = accentColor,
-                    onAccentColor = onAccentColor,
-                    tertiaryColor = colorScheme.tertiary,
-                    onTertiaryColor = colorScheme.onTertiary,
-                    onWriteCustomLyrics = { showCustomLyricsEditor = true },
-                    onFindLyrics = { showFetchLyricsDialog = true },
-                    tabOptions = tabPractice?.let { practice ->
-                        {
-                            com.theveloper.pixelplay.presentation.components.tabs.TabOptionsSection(
-                                controller = practice,
-                                contentColor = contentColor,
-                                accentColor = accentColor,
-                                itemBackgroundColor = contentColor.copy(alpha = 0.08f)
+                lyrics?.synced?.takeIf { it.isNotEmpty() }?.let { synced ->
+                    val chipStructure = songStructure?.takeIf { lyricsDisplayPrefs.showSongStructure }
+                    SplitFaceLyricsView(
+                        lines = synced,
+                        playbackPositionFlow = playbackPositionFlow,
+                        lyricsSyncOffset = lyricsSyncOffset,
+                        positionOverrideMs = previewSeekPositionMs,
+                        accentColor = lyricHighlightColor,
+                        textStyle = splitTextStyle,
+                        autoscrollAnimationSpec = resolvedAutoscrollSpec,
+                        useAnimatedLyrics = useAnimatedLyrics,
+                        highlightMode = highlightMode,
+                        animatedLyricsBlurEnabled = animatedLyricsBlurEnabled && !disableBlurAllOver,
+                        animatedLyricsBlurStrength = animatedLyricsBlurStrength,
+                        lyricsAlignment = lyricsAlignment,
+                        showTranslation = showLyricsTranslation,
+                        showRomanization = showLyricsRomanization,
+                        // Jumping to a line keeps the split open: both people are still reading.
+                        onLineClick = { syncedLine ->
+                            onSeekTo(
+                                resolveSeekPositionMs(
+                                    lineTimeMs = syncedLine.time.toLong(),
+                                    lyricsSyncOffsetMs = lyricsSyncOffset
+                                )
                             )
-                        }
-                    }
-                )
+                        },
+                        onSeekTo = { seekMs ->
+                            onSeekTo(
+                                resolveSeekPositionMs(
+                                    lineTimeMs = seekMs,
+                                    lyricsSyncOffsetMs = lyricsSyncOffset
+                                )
+                            )
+                        },
+                        onBackgroundTap = { resetImmersiveTimer() },
+                        relayoutKey = lyricsTextStyle,
+                        // Only the part playing now, beside the centre divider: left of it for the
+                        // person at the bottom, right of it (turned) for the person at the top.
+                        sectionChip = if (chipStructure == null) null else { chipMaxWidth ->
+                                CurrentSectionChip(
+                                    structure = chipStructure,
+                                    playbackPositionFlow = playbackPositionFlow,
+                                    lyricsSyncOffset = lyricsSyncOffset,
+                                    positionOverrideMs = previewSeekPositionMs,
+                                    accentColor = lyricHighlightColor,
+                                    onAccentColor = onAccentColor,
+                                    maxWidth = chipMaxWidth
+                                )
+                        },
+                        headerPill = { pillModifier ->
+                            AnimatedContent(
+                                targetState = currentSong,
+                                transitionSpec = {
+                                    (fadeIn(animationSpec = tween(300)) +
+                                        scaleIn(initialScale = 0.9f, animationSpec = tween(300)))
+                                        .togetherWith(fadeOut(animationSpec = tween(300)))
+                                },
+                                modifier = pillModifier.wrapContentWidth(),
+                                label = "splitHeaderAnimation"
+                            ) { song ->
+                                LyricsTrackInfo(
+                                    song = song,
+                                    modifier = Modifier
+                                        .padding(horizontal = 18.dp, vertical = 4.dp)
+                                        .background(color = backgroundColor, shape = CircleShape)
+                                        .wrapContentWidth()
+                                        .animateContentSize(),
+                                    backgroundColor = backgroundColor,
+                                    contentColor = onBackgroundColor,
+                                    isPlaying = isPlaying
+                                )
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(containerColor)
+                    )
+                }
             }
-        }
 
-       // Face-to-face split view (covers the list and header while active)
-       AnimatedVisibility(
-            visible = splitActive,
-            enter = fadeIn(tween(420, easing = LinearOutSlowInEasing)) +
-                scaleIn(initialScale = 0.97f, animationSpec = tween(420, easing = LinearOutSlowInEasing)),
-            exit = fadeOut(tween(220, easing = FastOutLinearInEasing)) +
-                scaleOut(targetScale = 0.98f, animationSpec = tween(220, easing = FastOutLinearInEasing)),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            lyrics?.synced?.takeIf { it.isNotEmpty() }?.let { synced ->
-                val chipStructure = songStructure?.takeIf { lyricsDisplayPrefs.showSongStructure }
-                SplitFaceLyricsView(
-                    lines = synced,
-                    playbackPositionFlow = playbackPositionFlow,
-                    lyricsSyncOffset = lyricsSyncOffset,
-                    positionOverrideMs = previewSeekPositionMs,
-                    accentColor = lyricHighlightColor,
-                    textStyle = splitTextStyle,
-                    autoscrollAnimationSpec = resolvedAutoscrollSpec,
-                    useAnimatedLyrics = useAnimatedLyrics,
-                    highlightMode = highlightMode,
-                    animatedLyricsBlurEnabled = animatedLyricsBlurEnabled && !disableBlurAllOver,
-                    animatedLyricsBlurStrength = animatedLyricsBlurStrength,
-                    lyricsAlignment = lyricsAlignment,
-                    showTranslation = showLyricsTranslation,
-                    showRomanization = showLyricsRomanization,
-                    // Jumping to a line keeps the split open: both people are still reading.
-                    onLineClick = { syncedLine ->
-                        onSeekTo(
-                            resolveSeekPositionMs(
-                                lineTimeMs = syncedLine.time.toLong(),
-                                lyricsSyncOffsetMs = lyricsSyncOffset
-                            )
-                        )
-                    },
-                    onSeekTo = { seekMs ->
-                        onSeekTo(
-                            resolveSeekPositionMs(
-                                lineTimeMs = seekMs,
-                                lyricsSyncOffsetMs = lyricsSyncOffset
-                            )
-                        )
-                    },
-                    onBackgroundTap = { resetImmersiveTimer() },
-                    relayoutKey = lyricsTextStyle,
-                    // Only the part playing now, beside the centre divider: left of it for the
-                    // person at the bottom, right of it (turned) for the person at the top.
-                    sectionChip = if (chipStructure == null) null else { chipMaxWidth ->
-                            CurrentSectionChip(
-                                structure = chipStructure,
-                                playbackPositionFlow = playbackPositionFlow,
-                                lyricsSyncOffset = lyricsSyncOffset,
-                                positionOverrideMs = previewSeekPositionMs,
-                                accentColor = lyricHighlightColor,
-                                onAccentColor = onAccentColor,
-                                maxWidth = chipMaxWidth
-                            )
-                    },
-                    headerPill = { pillModifier ->
-                        AnimatedContent(
-                            targetState = currentSong,
-                            transitionSpec = {
-                                (fadeIn(animationSpec = tween(300)) +
-                                    scaleIn(initialScale = 0.9f, animationSpec = tween(300)))
-                                    .togetherWith(fadeOut(animationSpec = tween(300)))
-                            },
-                            modifier = pillModifier.wrapContentWidth(),
-                            label = "splitHeaderAnimation"
-                        ) { song ->
-                            LyricsTrackInfo(
-                                song = song,
-                                modifier = Modifier
-                                    .padding(horizontal = 18.dp, vertical = 4.dp)
-                                    .background(color = backgroundColor, shape = CircleShape)
-                                    .wrapContentWidth()
-                                    .animateContentSize(),
-                                backgroundColor = backgroundColor,
-                                contentColor = onBackgroundColor,
-                                isPlaying = isPlaying
-                            )
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(containerColor)
-                )
-            }
-        }
-
-       // Swipe up from the bottom edge while the controls are hidden to bring them back
-       // (works in both timed and manual immersive).
-       if (immersiveMode && !splitActive) {
-           var revealDrag by remember { mutableFloatStateOf(0f) }
-           Box(
-               modifier = Modifier
-                   .align(Alignment.BottomCenter)
-                   .fillMaxWidth()
-                   // Leaves the corners free for the reaction triggers.
-                   .padding(horizontal = if (onReaction != null) 72.dp else 0.dp)
-                   .height(96.dp)
-                   .pointerInput(Unit) {
-                       detectVerticalDragGestures(
-                           onDragStart = { revealDrag = 0f },
-                           onDragEnd = {
-                               if (revealDrag < -controlsHideThresholdPx * 0.6f) {
-                                   hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                   showControlsNow()
+           // Swipe up from the bottom edge while the controls are hidden to bring them back
+           // (works in both timed and manual immersive).
+           if (immersiveMode && !splitActive) {
+               var revealDrag by remember { mutableFloatStateOf(0f) }
+               Box(
+                   modifier = Modifier
+                       .align(Alignment.BottomCenter)
+                       .fillMaxWidth()
+                       // Leaves the corners free for the reaction triggers.
+                       .padding(horizontal = if (onReaction != null) 72.dp else 0.dp)
+                       .height(96.dp)
+                       .pointerInput(Unit) {
+                           detectVerticalDragGestures(
+                               onDragStart = { revealDrag = 0f },
+                               onDragEnd = {
+                                   if (revealDrag < -controlsHideThresholdPx * 0.6f) {
+                                       hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                       showControlsNow()
+                                   }
+                                   revealDrag = 0f
+                               },
+                               onDragCancel = { revealDrag = 0f },
+                               onVerticalDrag = { change, amount ->
+                                   change.consume()
+                                   revealDrag += amount
                                }
-                               revealDrag = 0f
-                           },
-                           onDragCancel = { revealDrag = 0f },
-                           onVerticalDrag = { change, amount ->
-                               change.consume()
-                               revealDrag += amount
-                           }
+                           )
+                       }
+               )
+           }
+
+           // Show Controls Button (Overlay) — replaced by the turned header pill in split view
+           AnimatedVisibility(
+                visible = immersiveMode && !splitActive,
+                enter = fadeIn() + slideInVertically { it / 2 },
+                exit = fadeOut() + slideOutVertically { it / 2 },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 32.dp)
+            ) {
+                FilledIconButton(
+                    onClick = { showControlsNow() },
+                    modifier = Modifier.size(48.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = accentColor,
+                        contentColor = onAccentColor
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.KeyboardArrowUp,
+                        contentDescription = "Show Controls"
+                    )
+                }
+            }
+
+           // Face-to-face shortcut, just right of the arrow. Turns the saved setting on (the split
+           // opens straight away because we're already immersive); it then disappears, and the
+           // setting is turned back off from the lyrics options / Settings.
+           val canOfferSplit = !lyricsDisplayPrefs.splitFaceView &&
+               showSyncedLyrics == true &&
+               performanceView == PerformanceView.Lyrics &&
+               !lyrics?.synced.isNullOrEmpty()
+           AnimatedVisibility(
+                visible = immersiveMode && !splitActive && canOfferSplit,
+                enter = fadeIn() + scaleIn(initialScale = 0.6f) + slideInVertically { it / 2 },
+                exit = fadeOut() + scaleOut(targetScale = 0.6f) + slideOutVertically { it / 2 },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    // Arrow is 48 dp wide and centred: 24 dp half-width + 10 dp gap + 18 dp half of this.
+                    .offset(x = 52.dp)
+                    .padding(bottom = 38.dp)
+            ) {
+                FilledTonalIconButton(
+                    onClick = {
+                        coroutineScope.launch {
+                            context.editLyricsDisplayPrefs {
+                                it[LyricsDisplayPrefKeys.SPLIT_FACE_VIEW] = true
+                            }
+                        }
+                    },
+                    modifier = Modifier.size(36.dp),
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = accentColor.copy(alpha = 0.22f),
+                        contentColor = accentColor
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.ScreenRotation,
+                        contentDescription = "Face-to-face lyrics",
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+       
+           // Add Song shortcut while the controls are hidden, left of the arrow (mirrors the
+           // face-to-face shortcut on the right).
+           if (onAddSongClick != null) {
+               AnimatedVisibility(
+                   visible = immersiveMode && !splitActive,
+                   enter = fadeIn() + scaleIn(initialScale = 0.6f) + slideInVertically { it / 2 },
+                   exit = fadeOut() + scaleOut(targetScale = 0.6f) + slideOutVertically { it / 2 },
+                   modifier = Modifier
+                       .align(Alignment.BottomCenter)
+                       .offset(x = (-52).dp)
+                       .padding(bottom = 38.dp)
+               ) {
+                   FilledTonalIconButton(
+                       onClick = {
+                           resetImmersiveTimer()
+                           onAddSongClick()
+                       },
+                       modifier = Modifier
+                           .size(36.dp)
+                           .graphicsLayer { alpha = chromeIdleAlpha },
+                       colors = IconButtonDefaults.filledTonalIconButtonColors(
+                           containerColor = accentColor.copy(alpha = 0.22f),
+                           contentColor = accentColor
+                       )
+                   ) {
+                       Icon(
+                           imageVector = Icons.Rounded.Add,
+                           contentDescription = "Add a song",
+                           modifier = Modifier.size(18.dp)
                        )
                    }
-           )
-       }
+               }
+           }
 
-       // Show Controls Button (Overlay) — replaced by the turned header pill in split view
-       AnimatedVisibility(
-            visible = immersiveMode && !splitActive,
-            enter = fadeIn() + slideInVertically { it / 2 },
-            exit = fadeOut() + slideOutVertically { it / 2 },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 32.dp)
-        ) {
-            FilledIconButton(
-                onClick = { showControlsNow() },
-                modifier = Modifier.size(48.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = accentColor,
-                    contentColor = onAccentColor
-                )
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.KeyboardArrowUp,
-                    contentDescription = "Show Controls"
-                )
-            }
-        }
-
-       // Face-to-face shortcut, just right of the arrow. Turns the saved setting on (the split
-       // opens straight away because we're already immersive); it then disappears, and the
-       // setting is turned back off from the lyrics options / Settings.
-       val canOfferSplit = !lyricsDisplayPrefs.splitFaceView &&
-           showSyncedLyrics == true &&
-           performanceView == PerformanceView.Lyrics &&
-           !lyrics?.synced.isNullOrEmpty()
-       AnimatedVisibility(
-            visible = immersiveMode && !splitActive && canOfferSplit,
-            enter = fadeIn() + scaleIn(initialScale = 0.6f) + slideInVertically { it / 2 },
-            exit = fadeOut() + scaleOut(targetScale = 0.6f) + slideOutVertically { it / 2 },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                // Arrow is 48 dp wide and centred: 24 dp half-width + 10 dp gap + 18 dp half of this.
-                .offset(x = 52.dp)
-                .padding(bottom = 38.dp)
-        ) {
-            FilledTonalIconButton(
-                onClick = {
-                    coroutineScope.launch {
-                        context.editLyricsDisplayPrefs {
-                            it[LyricsDisplayPrefKeys.SPLIT_FACE_VIEW] = true
-                        }
-                    }
-                },
-                modifier = Modifier.size(36.dp),
-                colors = IconButtonDefaults.filledTonalIconButtonColors(
-                    containerColor = accentColor.copy(alpha = 0.22f),
-                    contentColor = accentColor
-                )
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.ScreenRotation,
-                    contentDescription = "Face-to-face lyrics",
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
-       
-       // Add Song shortcut while the controls are hidden, left of the arrow (mirrors the
-       // face-to-face shortcut on the right).
-       if (onAddSongClick != null) {
-           AnimatedVisibility(
-               visible = immersiveMode && !splitActive,
-               enter = fadeIn() + scaleIn(initialScale = 0.6f) + slideInVertically { it / 2 },
-               exit = fadeOut() + scaleOut(targetScale = 0.6f) + slideOutVertically { it / 2 },
-               modifier = Modifier
-                   .align(Alignment.BottomCenter)
-                   .offset(x = (-52).dp)
-                   .padding(bottom = 38.dp)
-           ) {
-               FilledTonalIconButton(
-                   onClick = {
-                       resetImmersiveTimer()
-                       onAddSongClick()
-                   },
+           // Swipe Feedback Overlay
+           if (isSwipeActive || swipeProgress.value > 0f) {
+               // The pill appears on the side the finger started from (physical direction);
+               // the icon shows what will happen (flipped for the top half in split view).
+               val fromRight = dragOffset < 0
+               val isNext = fromRight != swipeFromTopHalf
+               val overlayAlignment = if (fromRight) Alignment.CenterEnd else Alignment.CenterStart
+               val icon = if (isNext) Icons.Rounded.SkipNext else Icons.Rounded.SkipPrevious
+           
+               Box(
                    modifier = Modifier
-                       .size(36.dp)
-                       .graphicsLayer { alpha = chromeIdleAlpha },
-                   colors = IconButtonDefaults.filledTonalIconButtonColors(
-                       containerColor = accentColor.copy(alpha = 0.22f),
-                       contentColor = accentColor
-                   )
+                       .align(overlayAlignment)
+                       .size(100.dp) // Base size
+                       .padding(
+                           start = if(fromRight) 0.dp else 6.dp,
+                           end = if(fromRight) 6.dp else 0.dp
+                       )
+                       .graphicsLayer {
+                            val widthPx = size.width
+                            val initialOffset = if(fromRight) widthPx else -widthPx
+                            translationX = initialOffset * (1f - swipeProgress.value)
+
+                            scaleX = 0.8f + (swipeProgress.value * 0.2f)
+                            scaleY = 0.8f + (swipeProgress.value * 0.2f)
+                       }
+                       .background(
+                            color = accentColor, // No alpha modulation
+                            shape = RoundedCornerShape(
+                                topStart = if(fromRight) 360.dp else 8.dp,
+                                bottomStart = if(fromRight) 360.dp else 8.dp,
+                                topEnd = if(fromRight) 8.dp else 360.dp,
+                                bottomEnd = if(fromRight) 8.dp else 360.dp
+                            )
+                       ),
+                   contentAlignment = Alignment.Center
                ) {
                    Icon(
-                       imageVector = Icons.Rounded.Add,
-                       contentDescription = "Add a song",
-                       modifier = Modifier.size(18.dp)
+                       imageVector = icon,
+                       contentDescription = null,
+                       modifier = Modifier
+                           .size(48.dp)
+                           .graphicsLayer { rotationZ = if (swipeFromTopHalf) 180f else 0f },
+                       tint = onAccentColor
                    )
                }
            }
-       }
 
-       // Swipe Feedback Overlay
-       if (isSwipeActive || swipeProgress.value > 0f) {
-           // The pill appears on the side the finger started from (physical direction);
-           // the icon shows what will happen (flipped for the top half in split view).
-           val fromRight = dragOffset < 0
-           val isNext = fromRight != swipeFromTopHalf
-           val overlayAlignment = if (fromRight) Alignment.CenterEnd else Alignment.CenterStart
-           val icon = if (isNext) Icons.Rounded.SkipNext else Icons.Rounded.SkipPrevious
-           
-           Box(
-               modifier = Modifier
-                   .align(overlayAlignment)
-                   .size(100.dp) // Base size
-                   .padding(
-                       start = if(fromRight) 0.dp else 6.dp,
-                       end = if(fromRight) 6.dp else 0.dp
-                   )
-                   .graphicsLayer {
-                        val widthPx = size.width
-                        val initialOffset = if(fromRight) widthPx else -widthPx
-                        translationX = initialOffset * (1f - swipeProgress.value)
-
-                        scaleX = 0.8f + (swipeProgress.value * 0.2f)
-                        scaleY = 0.8f + (swipeProgress.value * 0.2f)
-                   }
-                   .background(
-                        color = accentColor, // No alpha modulation
-                        shape = RoundedCornerShape(
-                            topStart = if(fromRight) 360.dp else 8.dp,
-                            bottomStart = if(fromRight) 360.dp else 8.dp,
-                            topEnd = if(fromRight) 8.dp else 360.dp,
-                            bottomEnd = if(fromRight) 8.dp else 360.dp
-                        )
-                   ),
-               contentAlignment = Alignment.Center
-           ) {
-               Icon(
-                   imageVector = icon,
-                   contentDescription = null,
-                   modifier = Modifier
-                       .size(48.dp)
-                       .graphicsLayer { rotationZ = if (swipeFromTopHalf) 180f else 0f },
-                   tint = onAccentColor
-               )
-           }
-       }
-
-      }
+          }
+        }
     }
 }
 
@@ -2643,6 +2692,9 @@ fun LyricLineRow(
     }
 
     val rowShape = RoundedCornerShape(16.dp)
+    // Adaptive expressive typography: this song's profile (null when off). Per-word styles are
+    // built once per line and reused for every frame.
+    val expressionProfile = com.theveloper.pixelplay.presentation.components.lyrics.LocalLyricExpression.current
 
     if (highlightMode == com.theveloper.pixelplay.data.lyrics.LyricsHighlightMode.LINE || sanitizedWordClusters.isNullOrEmpty()) {
         Column(
@@ -2657,11 +2709,27 @@ fun LyricLineRow(
             // Whole-line text in three layers (bold reserve, regular at rest, bold current) that
             // share one set of line breaks, cross-fading with the line's emphasis.
             val lineLength = sanitizedLine.length.toFloat()
+            val lineExpression = remember(sanitizedLine, expressionProfile, restLineStyle.fontWeight, line.time, lineEndTime) {
+                expressionProfile?.let { profile ->
+                    com.theveloper.pixelplay.presentation.components.lyrics.buildLineExpression(
+                        text = sanitizedLine,
+                        words = com.theveloper.pixelplay.presentation.components.lyrics.expressionWords(
+                            text = sanitizedLine, line = line, lineEndMs = lineEndTime, words = null, layout = null
+                        ),
+                        lineStartMs = line.time.toLong(),
+                        profile = profile,
+                        restWeight = restLineStyle.fontWeight ?: FontWeight.Normal,
+                        activeFor = ::activeLyricWeight
+                    )
+                }
+            }
             com.theveloper.pixelplay.presentation.components.lyrics.LyricLineLayers(
                 text = sanitizedLine,
                 reserveStyle = activeLineStyle,
                 restStyle = restLineStyle,
                 activeStyle = activeLineStyle,
+                restSpans = lineExpression?.restSpans.orEmpty(),
+                activeSpans = lineExpression?.activeSpans.orEmpty(),
                 restColor = unhighlightedColor,
                 unsungColor = accentColor,
                 highlightColor = accentColor,
@@ -2715,11 +2783,28 @@ fun LyricLineRow(
                 )
             }
             val fullLength = wordLayout.text.length.toFloat()
+            val lineExpression = remember(wordLayout, expressionProfile, restLineStyle.fontWeight, lineEndTime) {
+                expressionProfile?.let { profile ->
+                    com.theveloper.pixelplay.presentation.components.lyrics.buildLineExpression(
+                        text = wordLayout.text,
+                        words = com.theveloper.pixelplay.presentation.components.lyrics.expressionWords(
+                            text = wordLayout.text, line = line, lineEndMs = lineEndTime,
+                            words = sanitizedWords, layout = wordLayout
+                        ),
+                        lineStartMs = line.time.toLong(),
+                        profile = profile,
+                        restWeight = restLineStyle.fontWeight ?: FontWeight.Normal,
+                        activeFor = ::activeLyricWeight
+                    )
+                }
+            }
             com.theveloper.pixelplay.presentation.components.lyrics.LyricLineLayers(
                 text = wordLayout.text,
                 reserveStyle = activeLineStyle,
                 restStyle = restLineStyle,
                 activeStyle = activeLineStyle,
+                restSpans = lineExpression?.restSpans.orEmpty(),
+                activeSpans = lineExpression?.activeSpans.orEmpty(),
                 restColor = unhighlightedColor,
                 unsungColor = unhighlightedColor,
                 highlightColor = accentColor,

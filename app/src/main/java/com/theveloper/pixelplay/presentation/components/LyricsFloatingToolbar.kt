@@ -15,7 +15,6 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
-import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.size
@@ -338,7 +337,7 @@ private fun PageButtons(
                 Spacer(Modifier.width(gapW))
             }
 
-            // Instruments: opens the page, then opens / closes the practice area.
+            // Tabs: opens the page, then opens / closes the practice area.
             Row(
                 modifier = Modifier
                     .width(rightW)
@@ -353,10 +352,8 @@ private fun PageButtons(
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                GuitarGlyph(onAccentColor, Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
                 Text(
-                    text = "Instruments",
+                    text = "Tabs",
                     color = onAccentColor,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold,
@@ -365,45 +362,22 @@ private fun PageButtons(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
-                Spacer(Modifier.width(6.dp))
-                Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
-                    val t = progress.coerceIn(0f, 1f)
-                    // Lyrics page: "go there" arrow. Instruments page: chevron that flips when open.
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
-                        contentDescription = null,
-                        tint = onAccentColor,
-                        modifier = Modifier.size(16.dp).graphicsLayer {
-                            alpha = 1f - t
-                            translationX = 10.dp.toPx() * t
-                        },
-                    )
+                // Tabs page only: a chevron that flips as the practice area opens / closes.
+                // (No icon on the lyrics page: the label alone says where it goes.)
+                val t = progress.coerceIn(0f, 1f)
+                if (t > 0.01f) {
+                    Spacer(Modifier.width(6.dp * t))
                     Icon(
                         imageVector = Icons.Rounded.KeyboardArrowUp,
                         contentDescription = if (instrumentsPanelOpen) "Close practice tools" else "Open practice tools",
                         tint = onAccentColor,
-                        modifier = Modifier.size(20.dp).graphicsLayer {
+                        modifier = Modifier.size(20.dp * t).graphicsLayer {
                             alpha = t
-                            translationY = -8.dp.toPx() * (1f - t)
                             rotationZ = chevronTurn
                         },
                     )
                 }
             }
         }
-    }
-}
-
-/** Small guitar for the Instruments button. */
-@Composable
-private fun GuitarGlyph(tint: Color, modifier: Modifier) {
-    androidx.compose.foundation.Canvas(modifier) {
-        val w = size.width
-        val h = size.height
-        val st = androidx.compose.ui.graphics.drawscope.Stroke(width = w * 0.1f)
-        drawCircle(tint, radius = w * 0.21f, center = androidx.compose.ui.geometry.Offset(w * 0.33f, h * 0.7f), style = st)
-        drawCircle(tint, radius = w * 0.15f, center = androidx.compose.ui.geometry.Offset(w * 0.47f, h * 0.5f), style = st)
-        drawCircle(tint, radius = w * 0.06f, center = androidx.compose.ui.geometry.Offset(w * 0.37f, h * 0.65f))
-        drawLine(tint, androidx.compose.ui.geometry.Offset(w * 0.53f, h * 0.45f), androidx.compose.ui.geometry.Offset(w * 0.9f, h * 0.08f), w * 0.1f)
     }
 }

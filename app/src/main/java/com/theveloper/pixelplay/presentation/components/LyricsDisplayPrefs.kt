@@ -198,6 +198,8 @@ data class LyricsDisplayPrefs(
      * the default look and the choices below are kept but not applied.
      */
     val expressiveTypography: Boolean = false,
+    /** Expressive typography adapts to each song's energy, mood, loudness and timing. */
+    val adaptiveTypography: Boolean = true,
     /** Effective values: what lyrics surfaces draw with (defaults while expressive is off). */
     val font: LyricsFont = LyricsFont.DEFAULT,
     val textSize: LyricsTextSize = LyricsTextSize.DEFAULT,
@@ -237,6 +239,7 @@ object LyricsDisplayPrefKeys {
     val FONT = stringPreferencesKey("lyrics_font_v1")
     val TEXT_SIZE = stringPreferencesKey("lyrics_text_size_v1")
     val EXPRESSIVE_TYPOGRAPHY = booleanPreferencesKey("lyrics_expressive_typography_v1")
+    val ADAPTIVE_TYPOGRAPHY = booleanPreferencesKey("lyrics_adaptive_typography_v1")
     val FONT_WEIGHT = stringPreferencesKey("lyrics_font_weight_v1")
     val LINE_SPACING = stringPreferencesKey("lyrics_line_spacing_v1")
     val HEADER_COLLAPSED = booleanPreferencesKey("lyrics_header_collapsed_v1")
@@ -275,6 +278,7 @@ fun lyricsDisplayPrefsFlow(dataStore: DataStore<Preferences>): Flow<LyricsDispla
                 disableBlurAllOver = p[LyricsDisplayPrefKeys.DISABLE_BLUR_ALL_OVER] ?: false,
                 coverLyricsEnabled = p[LyricsDisplayPrefKeys.COVER_LYRICS_ENABLED] ?: false,
                 expressiveTypography = expressive,
+                adaptiveTypography = p[LyricsDisplayPrefKeys.ADAPTIVE_TYPOGRAPHY] ?: true,
                 font = if (expressive) chosenFont else LyricsFont.DEFAULT,
                 textSize = if (expressive) chosenSize else LyricsTextSize.DEFAULT,
                 fontWeight = if (expressive) chosenWeight else LyricsFontWeight.DEFAULT,
@@ -391,7 +395,7 @@ internal fun resolveDisplayLineIndex(lines: List<SyncedLine>, position: Long): I
 
 private const val ROUNDED_AXIS = 100f
 private val lyricsFamilyCache = ConcurrentHashMap<String, FontFamily>()
-private val LYRICS_SHEET_WEIGHTS = intArrayOf(300, 400, 500, 600, 700, 800, 900)
+private val LYRICS_SHEET_WEIGHTS = intArrayOf(200, 300, 400, 500, 600, 700, 800, 900)
 
 @OptIn(ExperimentalTextApi::class)
 private fun variableFont(font: LyricsFont, weight: Int): Font {

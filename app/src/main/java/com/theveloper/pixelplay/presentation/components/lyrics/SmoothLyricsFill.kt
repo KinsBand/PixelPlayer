@@ -29,6 +29,8 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontFamily
@@ -288,6 +290,17 @@ fun sungCharsInLine(
 }
 
 /** Replaces the space at every soft wrap with a newline: same length, fixed line breaks. */
+/** [text] with [spans] applied (ranges clamped to the text so a stale range can't crash). */
+private fun styled(text: String, spans: List<AnnotatedString.Range<SpanStyle>>): AnnotatedString {
+    if (spans.isEmpty()) return AnnotatedString(text)
+    val safe = spans.mapNotNull { r ->
+        val s = r.start.coerceIn(0, text.length)
+        val e = r.end.coerceIn(s, text.length)
+        if (e > s) AnnotatedString.Range(r.item, s, e) else null
+    }
+    return AnnotatedString(text, spanStyles = safe)
+}
+
 private fun withHardBreaks(text: String, result: TextLayoutResult): String {
     if (result.lineCount <= 1) return text
     val chars = text.toCharArray()
@@ -389,9 +402,12 @@ fun SmoothLyricLine(
     sungChars: () -> Float,
     modifier: Modifier = Modifier,
     mode: LyricsHighlightMode = LocalLyricsHighlightMode.current,
-    wordLayout: LyricWordLayout? = null
+    wordLayout: LyricWordLayout? = null,
+    /** Per-word styles (adaptive expressive typography). Ranges index into [text]. */
+    spans: List<AnnotatedString.Range<SpanStyle>> = emptyList()
 ) {
     val layout = remember { mutableStateOf<TextLayoutResult?>(null) }
+    val styledText = remember(text, spans) { styled(text, spans) }
     val density = LocalDensity.current
     val featherPx = remember(style, density) {
         with(density) { (style.fontSize.takeIf { it.isSp }?.toPx() ?: 16.dp.toPx()) * 0.55f }
@@ -403,7 +419,7 @@ fun SmoothLyricLine(
 
     Box(modifier = modifier) {
         Text(
-            text = text,
+            text = styledText,
             style = style,
             color = baseColor,
             textAlign = textAlign,
@@ -411,7 +427,7 @@ fun SmoothLyricLine(
             onTextLayout = { layout.value = it }
         )
         Text(
-            text = text,
+            text = styledText,
             style = style,
             color = highlightColor,
             textAlign = textAlign,
@@ -652,12 +668,22 @@ fun LyricLineLayers(
     sungChars: () -> Float,
     modifier: Modifier = Modifier,
     mode: LyricsHighlightMode = LocalLyricsHighlightMode.current,
-    wordLayout: LyricWordLayout? = null
+    wordLayout: LyricWordLayout? = null,
+    /**
+     * Adaptive expressive typography: per-word styles at rest and on the current line (same
+     * ranges; the current-line ones are heavier). The reserve layer uses the current-line ones,
+     * the widest, so both looks share its line breaks.
+     */
+    restSpans: List<AnnotatedString.Range<SpanStyle>> = emptyList(),
+    activeSpans: List<AnnotatedString.Range<SpanStyle>> = emptyList()
 ) {
     var shown by remember(text) { mutableStateOf(text) }
+    val reserveText = remember(text, activeSpans) { styled(text, activeSpans) }
+    // Hard breaks swap a space for '\n' (same length), so span ranges stay valid.
+    val restText = remember(shown, restSpans) { styled(shown, restSpans) }
     Box(modifier = modifier) {
         Text(
-            text = text,
+            text = reserveText,
             style = reserveStyle,
             color = Color.Transparent,
             textAlign = textAlign,
@@ -668,7 +694,7 @@ fun LyricLineLayers(
             }
         )
         Text(
-            text = shown,
+            text = restText,
             style = restStyle,
             color = restColor,
             textAlign = textAlign,
@@ -685,6 +711,7 @@ fun LyricLineLayers(
             sungChars = sungChars,
             mode = mode,
             wordLayout = wordLayout,
+            spans = activeSpans,
             modifier = Modifier
                 .fillMaxWidth()
                 .graphicsLayer { alpha = emphasis().coerceIn(0f, 1f) }

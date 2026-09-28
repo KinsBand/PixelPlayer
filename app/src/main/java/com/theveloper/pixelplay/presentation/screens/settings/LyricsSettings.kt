@@ -201,6 +201,20 @@ internal fun LyricsSettingsContent(
 
         if (lyricsDisplayPrefs.expressiveTypography) {
             SkillTreeBranch(depth = 1, isLast = false, lineColor = MaterialTheme.colorScheme.primary) {
+                SwitchSettingItem(
+                    settingKey = "lyrics_adaptive_typography",
+                    title = stringResource(R.string.settings_lyrics_adaptive_typography_title),
+                    subtitle = stringResource(R.string.settings_lyrics_adaptive_typography_subtitle),
+                    checked = lyricsDisplayPrefs.adaptiveTypography,
+                    onCheckedChange = { enabled ->
+                        scope.launch {
+                            context.editLyricsDisplayPrefs { it[LyricsDisplayPrefKeys.ADAPTIVE_TYPOGRAPHY] = enabled }
+                        }
+                    },
+                    leadingIcon = { Icon(Icons.Rounded.TextFields, null, tint = MaterialTheme.colorScheme.secondary) }
+                )
+            }
+            SkillTreeBranch(depth = 1, isLast = false, lineColor = MaterialTheme.colorScheme.primary) {
                 ThemeSelectorItem(
                     settingKey = "lyrics_font",
                     label = stringResource(R.string.settings_lyrics_font_title),

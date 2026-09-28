@@ -700,6 +700,8 @@
     <string name="settings_lyrics_size_extra_large">Extra large</string>
     <string name="settings_lyrics_expressive_typography_title">Expressive typography</string>
     <string name="settings_lyrics_expressive_typography_subtitle">Choose the lyrics font, size, weight and line spacing</string>
+    <string name="settings_lyrics_adaptive_typography_title">Adapt to each song</string>
+    <string name="settings_lyrics_adaptive_typography_subtitle">Energy, mood, loudness and held notes shape every word</string>
     <string name="settings_lyrics_weight_title">Lyrics weight</string>
     <string name="settings_lyrics_weight_subtitle">How heavy the lyrics are. The current line is always drawn bolder</string>
     <string name="settings_lyrics_weight_light">Light</string>
