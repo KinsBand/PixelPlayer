@@ -560,6 +560,7 @@ fun HomeScreen(
             onDismissRequest = { showOptionsBottomSheet = false },
             sheetState = sheetState
         ) {
+            com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
             HomeOptionsBottomSheet(
                 onNavigateToMashup = {
                     scope.launch {

@@ -194,6 +194,7 @@ internal fun DeveloperSettingsContent(
             },
             sheetState = paletteRegenerateSheetState
         ) {
+            com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
             PaletteRegenerateSongSheetContent(
                 songs = filteredPaletteSongs,
                 isRunning = isPaletteRegenerateRunning,

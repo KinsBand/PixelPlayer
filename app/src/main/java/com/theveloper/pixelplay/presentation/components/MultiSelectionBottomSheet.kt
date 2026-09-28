@@ -152,6 +152,7 @@ fun MultiSelectionBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState
     ) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Box(
             modifier = Modifier
                 .animateContentSize(animationSpec = tween(durationMillis = 200))

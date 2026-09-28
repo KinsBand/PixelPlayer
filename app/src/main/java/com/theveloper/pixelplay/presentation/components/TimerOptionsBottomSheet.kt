@@ -116,6 +116,7 @@ fun TimerOptionsBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState
     ) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Column(
             modifier = Modifier
                 .padding(horizontal = 18.dp, vertical = 4.dp)

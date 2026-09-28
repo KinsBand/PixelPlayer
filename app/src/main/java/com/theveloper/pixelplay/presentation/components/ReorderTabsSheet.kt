@@ -134,6 +134,7 @@ fun ReorderTabsSheet(
         sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.surface
     ) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Scaffold(
             topBar = {
                 Row(

@@ -3,6 +3,7 @@ package com.theveloper.pixelplay.presentation.screens.search.components
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -113,19 +114,30 @@ fun SearchHomeContent(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            items(suggestions.take(8), key = { "s_$it" }) { query ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onQuery(query) }
-                        .padding(vertical = 10.dp, horizontal = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Rounded.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.width(16.dp))
-                    Text(query, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    IconButton(onClick = { onQuery(query) }) {
-                        Icon(Icons.Rounded.NorthWest, contentDescription = "Search $query", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            // One compact block: the list's 14 dp item spacing between single-line suggestions
+            // made them look scattered, and a 48 dp icon button per row doubled their height.
+            item(key = "suggest_list") {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    suggestions.take(8).forEach { query ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 52.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable(onClickLabel = "Search $query") { onQuery(query) }
+                                .padding(horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Rounded.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.width(16.dp))
+                            Text(query, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Icon(
+                                Icons.Rounded.NorthWest,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(end = 8.dp).size(20.dp)
+                            )
+                        }
                     }
                 }
             }

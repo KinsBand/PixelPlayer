@@ -836,6 +836,7 @@ fun PlaylistDetailScreen(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             tonalElevation = 4.dp,
         ) {
+            com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
             Column(
                 modifier = Modifier
                     .fillMaxWidth()

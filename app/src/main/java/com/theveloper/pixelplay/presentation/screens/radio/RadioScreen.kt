@@ -807,6 +807,7 @@ private fun StationOptionsSheet(
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Column(Modifier.padding(start = 20.dp, end = 20.dp, bottom = 32.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 StationLogo(station, Modifier.size(56.dp))
@@ -905,6 +906,7 @@ private fun LocationSheet(
     }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
             Text(
                 if (chosenCountry == null) "Where are you listening?" else chosenCountry!!.second,

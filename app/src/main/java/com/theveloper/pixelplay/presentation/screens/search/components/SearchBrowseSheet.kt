@@ -31,6 +31,7 @@ fun SearchBrowseSheet(id: String, title: String, player: PlayerViewModel, onDism
         if (addSongSession != null) sawSession = true else if (sawSession) onDismiss()
     }
     ModalBottomSheet(onDismissRequest = onDismiss) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Text(title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(16.dp))
         LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp),
             contentPadding = PaddingValues(bottom = 32.dp)) {

@@ -70,6 +70,7 @@ fun AlbumMultiSelectionOptionSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState
     ) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Column(
             modifier = Modifier
                 .fillMaxWidth()

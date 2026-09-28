@@ -112,6 +112,7 @@ fun MixFeedbackBottomSheet(
         sheetState = sheetState,
         containerColor = colors.surfaceContainerLow
     ) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Column(
             modifier = Modifier
                 .fillMaxWidth()

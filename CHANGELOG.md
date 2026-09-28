@@ -8,7 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
-- **Full screen:** with "Hide status bar" / "Hide gesture bar" on, the bars no longer come back and stay after the back gesture (e.g. on Pixel) or a screen transition; any time they reappear they're hidden again straight away. The two switches moved from General to Appearance.
+- **Full screen:** with "Hide status bar" / "Hide gesture bar" on, the bars no longer come back and stay after the back gesture (e.g. on Pixel) or a screen transition, and they stay hidden while a bottom sheet (lyrics menu, song options…) is open; any time they reappear they're hidden again straight away. The two switches moved from General to Appearance.
+- **Lyrics:** in face-to-face mode the section pills beside the play / pause button have room for their names ("Chorus" was cut to "Cho…").
+- **Search:** the "Because you listen to…" suggestions are compact single-line rows instead of tall, widely spaced ones.
 - **Streaming:** on weak mobile data, online songs no longer play for a moment, stop for a long time and then fail with a playback error. The local stream proxy passed audio on to the player only in 1 MB bursts, so the player ran dry, timed out and reopened while the abandoned downloads kept competing for the connection. Audio now reaches the player as it arrives, a stalled connection is replaced within 10 s from the same byte, abandoned downloads stop, and the player waits for the proxy instead of timing out after 8 s.
 - **Streaming:** when the connection can't keep up, playback no longer stops every second: after repeated buffering it waits for a few more seconds of audio before resuming. The next song is only prepared once the playing song has what it needs.
 - **Streaming:** first plays of online songs no longer fail and fall back to slow extraction when the fast manifest request takes more than 200 ms (the winning manifest was being discarded).

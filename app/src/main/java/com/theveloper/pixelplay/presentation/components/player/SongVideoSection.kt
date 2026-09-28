@@ -693,6 +693,7 @@ private fun VideoVersionSheet(
         containerColor = colors.surfaceContainerLow,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
     ) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
             Text(
                 text = "Video",

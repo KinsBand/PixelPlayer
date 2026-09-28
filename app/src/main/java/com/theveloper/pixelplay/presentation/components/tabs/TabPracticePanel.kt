@@ -287,6 +287,7 @@ fun TabPracticePanel(
         containerColor = containerColor,
         contentColor = onBackgroundColor,
     ) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Column(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -601,6 +602,7 @@ private fun InstrumentsSheet(
         containerColor = containerColor,
         contentColor = onBg,
     ) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Column(
             modifier = Modifier
                 .fillMaxWidth()

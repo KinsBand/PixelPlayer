@@ -118,6 +118,7 @@ fun SongPickerBottomSheet(
         containerColor = MaterialTheme.colorScheme.surface,
         modifier = Modifier.fillMaxSize()
     ) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         SongPickerContent(
             selectedSongIds = selectedSongIds,
             onConfirm = onConfirm,

@@ -188,6 +188,7 @@ fun AiPlaylistSheet(
         onDismissRequest = onDismiss,
         containerColor = colors.surfaceContainerLow
     ) {
+        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Column(
             modifier = Modifier
                 .padding(horizontal = 20.dp, vertical = 8.dp)
