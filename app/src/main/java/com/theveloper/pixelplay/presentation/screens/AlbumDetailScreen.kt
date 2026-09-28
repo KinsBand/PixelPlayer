@@ -2,6 +2,8 @@
 
 package com.theveloper.pixelplay.presentation.screens
 
+import com.theveloper.pixelplay.presentation.components.LocalSongPrimaryTap
+import com.theveloper.pixelplay.presentation.components.handle
 import com.theveloper.pixelplay.presentation.navigation.navigateSafely
 import com.theveloper.pixelplay.presentation.navigation.navigateSafelyReplacing
 
@@ -124,6 +126,7 @@ fun AlbumDetailScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val stablePlayerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
+    val songTap = LocalSongPrimaryTap.current
     val favoriteIds by playerViewModel.favoriteSongIds.collectAsStateWithLifecycle()
     val navBarCompactMode by playerViewModel.navBarCompactMode.collectAsStateWithLifecycle()
 
@@ -394,7 +397,12 @@ fun AlbumDetailScreen(
                                         playerViewModel.selectSongForInfo(song)
                                         showSongInfoBottomSheet = true
                                     },
-                                    onClick = { playerViewModel.showAndPlaySong(song, songs) }
+                                    onClick = {
+                                        // Add Song from lyrics: opens the action sheet instead.
+                                        songTap.handle(song, songs, "Current Context") {
+                                            playerViewModel.showAndPlaySong(song, songs)
+                                        }
+                                    }
                                 )
                             }
                         }

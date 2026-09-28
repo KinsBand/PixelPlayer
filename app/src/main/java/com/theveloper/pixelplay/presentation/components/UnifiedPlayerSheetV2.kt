@@ -69,6 +69,7 @@ import com.theveloper.pixelplay.data.diagnostics.AdvancedPerformanceDiagnostics
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.preferences.sanitizeNavBarCornerRadius
 import com.theveloper.pixelplay.presentation.components.scoped.PlayerAlbumNavigationEffect
+import com.theveloper.pixelplay.presentation.components.scoped.PlayerAddSongNavigationEffect
 import com.theveloper.pixelplay.presentation.components.scoped.PlayerArtistNavigationEffect
 import com.theveloper.pixelplay.presentation.components.scoped.PlayerSheetPredictiveBackHandler
 import androidx.compose.ui.zIndex
@@ -292,6 +293,12 @@ fun UnifiedPlayerSheetV2(
         playerViewModel = playerViewModel
     )
     PlayerAlbumNavigationEffect(
+        navController = navController,
+        sheetCollapsedTargetY = sheetCollapsedTargetY,
+        sheetMotionController = sheetMotionController,
+        playerViewModel = playerViewModel
+    )
+    PlayerAddSongNavigationEffect(
         navController = navController,
         sheetCollapsedTargetY = sheetCollapsedTargetY,
         sheetMotionController = sheetMotionController,

@@ -359,6 +359,27 @@ object SettingsRegistry {
             keywords = listOf("lyrics font", "typeface", "google sans", "roboto flex", "montserrat")
         ),
         SettingEntry(
+            key = "lyrics_expressive_typography",
+            categoryId = "lyrics",
+            titleRes = R.string.settings_lyrics_expressive_typography_title,
+            descriptionRes = R.string.settings_lyrics_expressive_typography_subtitle,
+            keywords = listOf("expressive typography", "lyrics font", "lyrics style", "custom lyrics text")
+        ),
+        SettingEntry(
+            key = "lyrics_font_weight",
+            categoryId = "lyrics",
+            titleRes = R.string.settings_lyrics_weight_title,
+            descriptionRes = R.string.settings_lyrics_weight_subtitle,
+            keywords = listOf("lyrics weight", "bold lyrics", "light lyrics", "thicker text")
+        ),
+        SettingEntry(
+            key = "lyrics_line_spacing",
+            categoryId = "lyrics",
+            titleRes = R.string.settings_lyrics_spacing_title,
+            descriptionRes = R.string.settings_lyrics_spacing_subtitle,
+            keywords = listOf("line spacing", "line height", "lyrics spacing", "leading")
+        ),
+        SettingEntry(
             key = "lyrics_text_size",
             categoryId = "lyrics",
             titleRes = R.string.settings_lyrics_size_title,

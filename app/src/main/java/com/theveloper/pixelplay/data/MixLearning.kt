@@ -109,12 +109,60 @@ interface MixFeedbackDao {
     @Query("DELETE FROM feedback") suspend fun clear()
 }
 
+/**
+ * One lyrics-screen reaction (❤️ 🔥 👌 😐 🥱 👎). Kept apart from likes and from mix feedback:
+ * each [SongReaction] carries its own axis and polarity so the mixer can weigh them differently.
+ */
+@Entity(tableName = "reactions", indices = [Index("songId"), Index("sessionId"), Index("createdAt")])
+data class SongReactionEntry(
+    @PrimaryKey val id: String,
+    val songId: String,
+    val recordingId: String?,
+    val sessionId: String,
+    val mixId: String?,
+    /** [SongReaction] name. */
+    val reaction: String,
+    /** [SongReaction.Axis] name, stored so queries don't need the enum. */
+    val axis: String,
+    val polarity: Int,
+    val strength: Double,
+    val positionMs: Long,
+    val durationMs: Long,
+    val title: String,
+    val artist: String,
+    val createdAt: Long
+)
+
+@Dao
+interface SongReactionDao {
+    @Upsert suspend fun save(entry: SongReactionEntry)
+    @Query("SELECT * FROM reactions WHERE sessionId = :sessionId ORDER BY createdAt DESC")
+    suspend fun forSession(sessionId: String): List<SongReactionEntry>
+    @Query("SELECT * FROM reactions WHERE songId = :songId ORDER BY createdAt DESC LIMIT 1")
+    suspend fun latestFor(songId: String): SongReactionEntry?
+    @Query("SELECT * FROM reactions ORDER BY createdAt DESC LIMIT 2000")
+    suspend fun recent(): List<SongReactionEntry>
+    @Query("DELETE FROM reactions WHERE id NOT IN (SELECT id FROM reactions ORDER BY createdAt DESC LIMIT 5000)")
+    suspend fun compact()
+    @Query("DELETE FROM reactions") suspend fun clear()
+}
+
 // Independent, versioned store so recommendation history does not risk the music catalogue.
-@Database(entities = [MixAttempt::class, MixRecommendation::class, MixFeedbackEntry::class, MicroSkipCooldown::class], version = 4, exportSchema = true)
+@Database(entities = [MixAttempt::class, MixRecommendation::class, MixFeedbackEntry::class, MicroSkipCooldown::class, SongReactionEntry::class], version = 5, exportSchema = true)
 abstract class MixLearningDatabase : RoomDatabase() {
     abstract fun attempts(): MixAttemptDao
     abstract fun feedback(): MixFeedbackDao
+    abstract fun reactions(): SongReactionDao
     companion object {
+        /** v5: lyrics-screen reactions get their own table (see [SongReactions]). */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS reactions (id TEXT NOT NULL PRIMARY KEY, songId TEXT NOT NULL, recordingId TEXT, sessionId TEXT NOT NULL, mixId TEXT, reaction TEXT NOT NULL, axis TEXT NOT NULL, polarity INTEGER NOT NULL, strength REAL NOT NULL, positionMs INTEGER NOT NULL, durationMs INTEGER NOT NULL, title TEXT NOT NULL, artist TEXT NOT NULL, createdAt INTEGER NOT NULL)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_reactions_songId ON reactions(songId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_reactions_sessionId ON reactions(sessionId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_reactions_createdAt ON reactions(createdAt)")
+            }
+        }
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE attempts ADD COLUMN artist TEXT")
@@ -147,7 +195,7 @@ abstract class MixLearningDatabase : RoomDatabase() {
 @Singleton
 class MixLearning @Inject constructor(@ApplicationContext private val context: Context) {
     private val database by lazy {
-        Room.databaseBuilder(context, MixLearningDatabase::class.java, "mix_learning.db").addMigrations(MixLearningDatabase.MIGRATION_1_2, MixLearningDatabase.MIGRATION_2_3, MixLearningDatabase.MIGRATION_3_4).build()
+        Room.databaseBuilder(context, MixLearningDatabase::class.java, "mix_learning.db").addMigrations(MixLearningDatabase.MIGRATION_1_2, MixLearningDatabase.MIGRATION_2_3, MixLearningDatabase.MIGRATION_3_4, MixLearningDatabase.MIGRATION_4_5).build()
     }
     private val storageMutex = Mutex()
     @Volatile private var historyCutoff = 0L
@@ -203,6 +251,8 @@ class MixLearning @Inject constructor(@ApplicationContext private val context: C
     }
     /** Mix feedback table (exclusions, snoozes, removals); owned by [MixFeedback]. */
     internal fun feedbackDao(): MixFeedbackDao = database.feedback()
+    /** Lyrics-screen reactions; owned by [SongReactions]. */
+    internal fun reactionDao(): SongReactionDao = database.reactions()
     suspend fun recordRecommendation(decision: MixRecommendation) = withContext(Dispatchers.IO) {
         storageMutex.withLock {
             if (decision.plannedAt >= historyCutoff) {
@@ -218,6 +268,7 @@ class MixLearning @Inject constructor(@ApplicationContext private val context: C
             database.attempts().clear()
             database.attempts().clearRecommendations()
             database.attempts().clearCooldowns()
+            database.reactions().clear()
         }
     }
 }

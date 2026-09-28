@@ -232,7 +232,8 @@ class PlayerViewModel @Inject constructor(
     private val mediaControllerFactory: com.theveloper.pixelplay.data.media.MediaControllerFactory,
     private val castTokenStore: com.theveloper.pixelplay.data.service.cast.CastTokenStore,
     private val genreCategorizerEngine: com.theveloper.pixelplay.data.analysis.GenreCategorizerEngine,
-    private val heardSongsRepository: HeardSongsRepository
+    private val heardSongsRepository: HeardSongsRepository,
+    private val songReactions: com.theveloper.pixelplay.data.SongReactions
 ) : ViewModel() {
 
     val heardSongs: StateFlow<List<HeardSongItem>> = heardSongsRepository.heardSongs
@@ -700,6 +701,133 @@ class PlayerViewModel @Inject constructor(
     val artistNameNavigationRequests = _artistNameNavigationRequests.asSharedFlow()
     private val _lyricsOpenRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val lyricsOpenRequests = _lyricsOpenRequests.asSharedFlow()
+    /**
+     * Set when the lyrics sheet should open but the full player may not be composed yet (e.g.
+     * coming back from Add Song). The player consumes it with [consumePendingLyricsOpen].
+     */
+    private val _pendingLyricsOpen = MutableStateFlow(false)
+    val pendingLyricsOpen: StateFlow<Boolean> = _pendingLyricsOpen.asStateFlow()
+    fun consumePendingLyricsOpen() { _pendingLyricsOpen.value = false }
+
+    // ── Lyrics screen: Now / Next, Add Song, confirmations, reactions ───────────────────
+
+    /**
+     * The song that plays after the current one, for the collapsed Now / Next bar. Follows the
+     * queue in play order (the app reorders the queue itself for shuffle), wraps with repeat
+     * all, and is null at the end of the queue.
+     */
+    val nextUpSong: StateFlow<Song?> = combine(
+        playbackStateHolder.stablePlayerState,
+        queueFlow
+    ) { stable, queue ->
+        resolveNextUpSong(
+            queue = queue,
+            currentSongId = stable.currentSong?.id,
+            currentIndex = stable.currentMediaItemIndex,
+            repeatMode = stable.repeatMode
+        )
+    }
+        .distinctUntilChanged { a, b -> a?.id == b?.id && a?.albumArtUriString == b?.albumArtUriString && a?.title == b?.title }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Collapsed Now / Next bar: tap on Next = skip to it now, no confirmation. */
+    fun playNextUpNow() {
+        if (nextUpSong.value == null) return
+        nextSong()
+    }
+
+    /** Non-null while the user is choosing a song from the lyrics screen's + button. */
+    private val _addSongSession = MutableStateFlow<AddSongSession?>(null)
+    val addSongSession: StateFlow<AddSongSession?> = _addSongSession.asStateFlow()
+    private val _addSongNavigationRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    /** Collected by the player's navigation effect: collapse the player and open Search. */
+    val addSongNavigationRequests = _addSongNavigationRequests.asSharedFlow()
+    private val _addSongReturnRequests = MutableSharedFlow<AddSongSession>(extraBufferCapacity = 1)
+    /** Collected by the navigation effect: pop back to where the user started. */
+    val addSongReturnRequests = _addSongReturnRequests.asSharedFlow()
+
+    /**
+     * Small "Playing next ✓" pill for the lyrics screen. Held until the sheet shows it (it may
+     * open a moment after the action), then cleared with [consumeLyricsConfirmation].
+     */
+    private val _lyricsConfirmations = MutableStateFlow<LyricsConfirmation?>(null)
+    val lyricsConfirmations: StateFlow<LyricsConfirmation?> = _lyricsConfirmations.asStateFlow()
+
+    /** The lyrics + button: leave the player for Search, keeping track of where we came from. */
+    fun startAddSongFromLyrics() {
+        _addSongSession.value = AddSongSession(originDestinationId = null)
+        _addSongNavigationRequests.tryEmit(Unit)
+    }
+
+    /** Called by the navigation effect once it knows the destination the user started on. */
+    fun attachAddSongOrigin(originDestinationId: Int?) {
+        _addSongSession.update { it?.copy(originDestinationId = originDestinationId) }
+    }
+
+    /**
+     * An action picked in the song action sheet during Add Song: do it, then go straight back
+     * to the lyrics the user came from and show a short confirmation.
+     */
+    fun completeAddSong(action: SongQuickAction, song: Song, contextQueue: List<Song>, queueName: String) {
+        performSongQuickAction(action, song, contextQueue, queueName)
+        val session = _addSongSession.value
+        _addSongSession.value = null
+        if (session != null) _addSongReturnRequests.tryEmit(session)
+        _lyricsConfirmations.value = LyricsConfirmation(action, System.currentTimeMillis())
+        returnToLyrics()
+    }
+
+    /** Back out of Add Song without choosing anything: straight back to the lyrics. */
+    fun cancelAddSong(returnToLyrics: Boolean = true) {
+        val session = _addSongSession.value ?: return
+        _addSongSession.value = null
+        if (returnToLyrics) {
+            _addSongReturnRequests.tryEmit(session)
+            returnToLyrics()
+        }
+    }
+
+    /** Same four actions anywhere a song action sheet is shown. */
+    fun performSongQuickAction(action: SongQuickAction, song: Song, contextQueue: List<Song>, queueName: String) {
+        when (action) {
+            SongQuickAction.PLAY -> {
+                val queue = if (contextQueue.any { it.id == song.id }) contextQueue else listOf(song)
+                showAndPlaySong(song, queue, queueName)
+            }
+            SongQuickAction.NEXT -> addSongNextToQueue(song)
+            SongQuickAction.SOON -> addSongSoon(song)
+            SongQuickAction.QUEUE -> addSongToQueue(song)
+        }
+    }
+
+    private fun returnToLyrics() {
+        showPlayer()
+        expandPlayerSheet()
+        _pendingLyricsOpen.value = true
+        _lyricsOpenRequests.tryEmit(Unit)
+    }
+
+    /** Clears a shown confirmation so it isn't replayed when the lyrics sheet opens again. */
+    fun consumeLyricsConfirmation() {
+        _lyricsConfirmations.value = null
+    }
+
+    /**
+     * A lyrics-screen reaction. Recorded as its own signal (never a like). Only 😐 and 👎 act
+     * right away: the upcoming automatic mix picks are re-planned.
+     */
+    fun reactToCurrentSong(reaction: com.theveloper.pixelplay.data.SongReaction) {
+        val song = stablePlayerState.value.currentSong ?: return
+        val recordingId = mediaController?.currentMediaItem?.let {
+            com.theveloper.pixelplay.data.model.QueueEntryMetadata.read(it).recordingId
+        }
+        songReactions.record(song, reaction, currentPlaybackPosition.value, recordingId)
+        if (reaction == com.theveloper.pixelplay.data.SongReaction.NOT_THE_VIBE ||
+            reaction == com.theveloper.pixelplay.data.SongReaction.DISLIKE
+        ) {
+            refreshAutomaticMixFuture()
+        }
+    }
     private val _searchNavDoubleTapEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val searchNavDoubleTapEvents = _searchNavDoubleTapEvents.asSharedFlow()
     
@@ -2375,6 +2503,7 @@ class PlayerViewModel @Inject constructor(
 
     fun openLyricsSheet() {
         showPlayer()
+        _pendingLyricsOpen.value = true
         _lyricsOpenRequests.tryEmit(Unit)
     }
 
@@ -3070,6 +3199,11 @@ class PlayerViewModel @Inject constructor(
 
     fun addSongNextToQueue(song: Song) {
         playbackDispatchStateHolder.addSongNextToQueue(song)
+    }
+
+    /** Play Soon: after the current song and anything already added with Play next (max 3 ahead). */
+    fun addSongSoon(song: Song) {
+        playbackDispatchStateHolder.addSongSoon(song)
     }
 
     // =====================================================

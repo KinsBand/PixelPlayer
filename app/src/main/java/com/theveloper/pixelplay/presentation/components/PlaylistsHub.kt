@@ -472,9 +472,9 @@ private fun FriendTrackSheet(
             }
             Spacer(Modifier.height(20.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                FriendActionTile(Icons.Rounded.PlayArrow, "Play", Modifier.weight(1f), primary = true) { onAction(FriendTrackAction.PLAY) }
-                FriendActionTile(Icons.AutoMirrored.Rounded.PlaylistPlay, "Play next", Modifier.weight(1f)) { onAction(FriendTrackAction.NEXT) }
-                FriendActionTile(Icons.AutoMirrored.Rounded.QueueMusic, "Add to queue", Modifier.weight(1f)) { onAction(FriendTrackAction.QUEUE) }
+                ActionTile(Icons.Rounded.PlayArrow, "Play", Modifier.weight(1f), primary = true) { onAction(FriendTrackAction.PLAY) }
+                ActionTile(Icons.AutoMirrored.Rounded.PlaylistPlay, "Play next", Modifier.weight(1f)) { onAction(FriendTrackAction.NEXT) }
+                ActionTile(Icons.AutoMirrored.Rounded.QueueMusic, "Add to queue", Modifier.weight(1f)) { onAction(FriendTrackAction.QUEUE) }
             }
             Spacer(Modifier.height(12.dp))
             Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
@@ -486,20 +486,6 @@ private fun FriendTrackSheet(
                     FriendActionRow(Icons.Rounded.Search, "Search in PixelPlayer") { onAction(FriendTrackAction.SEARCH) }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun FriendActionTile(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, modifier: Modifier,
-    primary: Boolean = false, onClick: () -> Unit) {
-    Surface(onClick = onClick, modifier = modifier.height(76.dp), shape = RoundedCornerShape(20.dp),
-        color = if (primary) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = if (primary) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            Icon(icon, null, Modifier.size(24.dp))
-            Spacer(Modifier.height(4.dp))
-            Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, maxLines = 1)
         }
     }
 }

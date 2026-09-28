@@ -22,6 +22,14 @@ fun SearchBrowseSheet(id: String, title: String, player: PlayerViewModel, onDism
         viewModel.open(id)
         onDispose { viewModel.close() }
     }
+    // Add Song from the lyrics screen: a tap opens the action sheet over this one; once an
+    // action is picked (session over), close this sheet too so it can't cover the lyrics.
+    val songTap = com.theveloper.pixelplay.presentation.components.LocalSongPrimaryTap.current
+    val addSongSession by player.addSongSession.collectAsStateWithLifecycle()
+    var sawSession by remember { mutableStateOf(addSongSession != null) }
+    LaunchedEffect(addSongSession) {
+        if (addSongSession != null) sawSession = true else if (sawSession) onDismiss()
+    }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Text(title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(16.dp))
         LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp),
@@ -29,7 +37,13 @@ fun SearchBrowseSheet(id: String, title: String, player: PlayerViewModel, onDism
             items(state.songs, key = { it.id }) { song ->
                 EnhancedSongListItem(song = song, isPlaying = false, isCurrentSong = false,
                     showMoreOptionsButton = false, onMoreOptionsClick = {},
-                    onClick = { player.showAndPlaySong(song, state.songs, title); onDismiss() })
+                    onClick = {
+                        if (songTap != null) {
+                            songTap.onSongTap(song, state.songs, title)
+                        } else {
+                            player.showAndPlaySong(song, state.songs, title); onDismiss()
+                        }
+                    })
             }
             if (state.loading) item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(16.dp)) }
             if (state.error != null) item {

@@ -137,44 +137,6 @@ internal fun LyricsSettingsContent(
             leadingIcon = { Icon(Icons.Rounded.Album, null, tint = MaterialTheme.colorScheme.secondary) }
         )
 
-        ThemeSelectorItem(
-            settingKey = "lyrics_font",
-            label = stringResource(R.string.settings_lyrics_font_title),
-            description = stringResource(R.string.settings_lyrics_font_subtitle),
-            options = mapOf(
-                LyricsFont.SYSTEM.key to stringResource(R.string.settings_lyrics_font_system),
-                LyricsFont.GOOGLE_SANS_ROUNDED.key to stringResource(R.string.settings_lyrics_font_google_sans_rounded),
-                LyricsFont.GOOGLE_SANS_FLEX.key to stringResource(R.string.settings_lyrics_font_google_sans_flex),
-                LyricsFont.ROBOTO_FLEX.key to stringResource(R.string.settings_lyrics_font_roboto_flex),
-                LyricsFont.MONTSERRAT.key to stringResource(R.string.settings_lyrics_font_montserrat)
-            ),
-            selectedKey = lyricsDisplayPrefs.font.key,
-            onSelectionChanged = { key ->
-                scope.launch {
-                    context.editLyricsDisplayPrefs { it[LyricsDisplayPrefKeys.FONT] = LyricsFont.fromKey(key).key }
-                }
-            },
-            leadingIcon = { Icon(Icons.Rounded.TextFields, null, tint = MaterialTheme.colorScheme.secondary) }
-        )
-
-        ThemeSelectorItem(
-            settingKey = "lyrics_text_size",
-            label = stringResource(R.string.settings_lyrics_size_title),
-            description = stringResource(R.string.settings_lyrics_size_subtitle),
-            options = mapOf(
-                LyricsTextSize.SMALL.key to stringResource(R.string.settings_lyrics_size_small),
-                LyricsTextSize.MEDIUM.key to stringResource(R.string.settings_lyrics_size_medium),
-                LyricsTextSize.LARGE.key to stringResource(R.string.settings_lyrics_size_large)
-            ),
-            selectedKey = lyricsDisplayPrefs.textSize.key,
-            onSelectionChanged = { key ->
-                scope.launch {
-                    context.editLyricsDisplayPrefs { it[LyricsDisplayPrefKeys.TEXT_SIZE] = LyricsTextSize.fromKey(key).key }
-                }
-            },
-            leadingIcon = { Icon(Icons.Rounded.FormatSize, null, tint = MaterialTheme.colorScheme.secondary) }
-        )
-
         SwitchSettingItem(
             settingKey = "immersive_lyrics",
             title = stringResource(R.string.settings_immersive_lyrics_title),
@@ -219,6 +181,109 @@ internal fun LyricsSettingsContent(
                         }
                     },
                     leadingIcon = { Icon(Icons.Rounded.ScreenRotation, null, tint = MaterialTheme.colorScheme.secondary) }
+                )
+            }
+        }
+
+        // Expressive typography: next to Immersive lyrics. Its choices hang off it while it's on.
+        SwitchSettingItem(
+            settingKey = "lyrics_expressive_typography",
+            title = stringResource(R.string.settings_lyrics_expressive_typography_title),
+            subtitle = stringResource(R.string.settings_lyrics_expressive_typography_subtitle),
+            checked = lyricsDisplayPrefs.expressiveTypography,
+            onCheckedChange = { enabled ->
+                scope.launch {
+                    context.editLyricsDisplayPrefs { it[LyricsDisplayPrefKeys.EXPRESSIVE_TYPOGRAPHY] = enabled }
+                }
+            },
+            leadingIcon = { Icon(Icons.Rounded.TextFields, null, tint = MaterialTheme.colorScheme.secondary) }
+        )
+
+        if (lyricsDisplayPrefs.expressiveTypography) {
+            SkillTreeBranch(depth = 1, isLast = false, lineColor = MaterialTheme.colorScheme.primary) {
+                ThemeSelectorItem(
+                    settingKey = "lyrics_font",
+                    label = stringResource(R.string.settings_lyrics_font_title),
+                    description = stringResource(R.string.settings_lyrics_font_subtitle),
+                    options = mapOf(
+                        LyricsFont.SYSTEM.key to stringResource(R.string.settings_lyrics_font_system),
+                        LyricsFont.GOOGLE_SANS_ROUNDED.key to stringResource(R.string.settings_lyrics_font_google_sans_rounded),
+                        LyricsFont.GOOGLE_SANS_FLEX.key to stringResource(R.string.settings_lyrics_font_google_sans_flex),
+                        LyricsFont.ROBOTO_FLEX.key to stringResource(R.string.settings_lyrics_font_roboto_flex),
+                        LyricsFont.MONTSERRAT.key to stringResource(R.string.settings_lyrics_font_montserrat)
+                    ),
+                    selectedKey = lyricsDisplayPrefs.chosenFont.key,
+                    onSelectionChanged = { key ->
+                        scope.launch {
+                            context.editLyricsDisplayPrefs { it[LyricsDisplayPrefKeys.FONT] = LyricsFont.fromKey(key).key }
+                        }
+                    },
+                    leadingIcon = { Icon(Icons.Rounded.TextFields, null, tint = MaterialTheme.colorScheme.secondary) }
+                )
+            }
+            SkillTreeBranch(depth = 1, isLast = false, lineColor = MaterialTheme.colorScheme.primary) {
+                ThemeSelectorItem(
+                    settingKey = "lyrics_text_size",
+                    label = stringResource(R.string.settings_lyrics_size_title),
+                    description = stringResource(R.string.settings_lyrics_size_subtitle),
+                    options = mapOf(
+                        LyricsTextSize.SMALL.key to stringResource(R.string.settings_lyrics_size_small),
+                        LyricsTextSize.MEDIUM.key to stringResource(R.string.settings_lyrics_size_medium),
+                        LyricsTextSize.LARGE.key to stringResource(R.string.settings_lyrics_size_large),
+                        LyricsTextSize.EXTRA_LARGE.key to stringResource(R.string.settings_lyrics_size_extra_large)
+                    ),
+                    selectedKey = lyricsDisplayPrefs.chosenTextSize.key,
+                    onSelectionChanged = { key ->
+                        scope.launch {
+                            context.editLyricsDisplayPrefs { it[LyricsDisplayPrefKeys.TEXT_SIZE] = LyricsTextSize.fromKey(key).key }
+                        }
+                    },
+                    leadingIcon = { Icon(Icons.Rounded.FormatSize, null, tint = MaterialTheme.colorScheme.secondary) }
+                )
+            }
+            SkillTreeBranch(depth = 1, isLast = false, lineColor = MaterialTheme.colorScheme.primary) {
+                ThemeSelectorItem(
+                    settingKey = "lyrics_font_weight",
+                    label = stringResource(R.string.settings_lyrics_weight_title),
+                    description = stringResource(R.string.settings_lyrics_weight_subtitle),
+                    options = mapOf(
+                        com.theveloper.pixelplay.presentation.components.LyricsFontWeight.LIGHT.key to stringResource(R.string.settings_lyrics_weight_light),
+                        com.theveloper.pixelplay.presentation.components.LyricsFontWeight.REGULAR.key to stringResource(R.string.settings_lyrics_weight_regular),
+                        com.theveloper.pixelplay.presentation.components.LyricsFontWeight.MEDIUM.key to stringResource(R.string.settings_lyrics_weight_medium),
+                        com.theveloper.pixelplay.presentation.components.LyricsFontWeight.SEMIBOLD.key to stringResource(R.string.settings_lyrics_weight_semibold)
+                    ),
+                    selectedKey = lyricsDisplayPrefs.chosenFontWeight.key,
+                    onSelectionChanged = { key ->
+                        scope.launch {
+                            context.editLyricsDisplayPrefs {
+                                it[LyricsDisplayPrefKeys.FONT_WEIGHT] =
+                                    com.theveloper.pixelplay.presentation.components.LyricsFontWeight.fromKey(key).key
+                            }
+                        }
+                    },
+                    leadingIcon = { Icon(Icons.Rounded.TextFields, null, tint = MaterialTheme.colorScheme.secondary) }
+                )
+            }
+            SkillTreeBranch(depth = 1, isLast = true, lineColor = MaterialTheme.colorScheme.primary) {
+                ThemeSelectorItem(
+                    settingKey = "lyrics_line_spacing",
+                    label = stringResource(R.string.settings_lyrics_spacing_title),
+                    description = stringResource(R.string.settings_lyrics_spacing_subtitle),
+                    options = mapOf(
+                        com.theveloper.pixelplay.presentation.components.LyricsLineSpacing.TIGHT.key to stringResource(R.string.settings_lyrics_spacing_tight),
+                        com.theveloper.pixelplay.presentation.components.LyricsLineSpacing.NORMAL.key to stringResource(R.string.settings_lyrics_spacing_normal),
+                        com.theveloper.pixelplay.presentation.components.LyricsLineSpacing.RELAXED.key to stringResource(R.string.settings_lyrics_spacing_relaxed)
+                    ),
+                    selectedKey = lyricsDisplayPrefs.chosenLineSpacing.key,
+                    onSelectionChanged = { key ->
+                        scope.launch {
+                            context.editLyricsDisplayPrefs {
+                                it[LyricsDisplayPrefKeys.LINE_SPACING] =
+                                    com.theveloper.pixelplay.presentation.components.LyricsLineSpacing.fromKey(key).key
+                            }
+                        }
+                    },
+                    leadingIcon = { Icon(Icons.Rounded.FormatSize, null, tint = MaterialTheme.colorScheme.secondary) }
                 )
             }
         }
