@@ -522,9 +522,12 @@ fun UnifiedPlayerSheetV2(
     val isQueueVisible = sheetOverlayState.isQueueVisible
     val bottomSheetOpenFraction = sheetOverlayState.bottomSheetOpenFraction
     val queueScrimAlpha = sheetOverlayState.queueScrimAlpha
-    val shouldRenderQueueHost by remember(internalIsKeyboardVisible, selectedSongForInfo) {
+    // The queue layer steps aside while the keyboard is up for other screens (Search), but
+    // never while the queue itself is open: its "Song or artist…" box and the save-as-playlist
+    // search open the keyboard, and removing the layer then closed the menu under the finger.
+    val shouldRenderQueueHost by remember(internalIsKeyboardVisible, selectedSongForInfo, showQueueSheet) {
         derivedStateOf {
-            !internalIsKeyboardVisible || selectedSongForInfo != null
+            !internalIsKeyboardVisible || selectedSongForInfo != null || showQueueSheet
         }
     }
     val isQueueTelemetryActive = showQueueSheet

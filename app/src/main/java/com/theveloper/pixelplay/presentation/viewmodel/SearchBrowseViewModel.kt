@@ -37,6 +37,25 @@ class SearchBrowseViewModel @Inject constructor(
 
     fun close() { request?.cancel(); currentId = null }
 
+    /**
+     * Every track on an online playlist page (following its "load more" pages, up to
+     * [maxPages]), so search can open it as a normal playlist page. Stateless: it doesn't touch
+     * [state], so it can't disturb a browse sheet using this same view model.
+     */
+    suspend fun loadAllSongs(id: String, maxPages: Int = 10): List<Song> {
+        val songs = LinkedHashMap<String, Song>()
+        val seen = mutableSetOf<String>()
+        var continuation: String? = null
+        repeat(maxPages) {
+            val page = client.browse(id, continuation)
+            api.hydrate(page.songs).forEach { songs.putIfAbsent(it.id, it) }
+            val next = page.continuation ?: return songs.values.toList()
+            if (!seen.add(next)) return songs.values.toList()
+            continuation = next
+        }
+        return songs.values.toList()
+    }
+
     fun loadMore() {
         val id = currentId ?: return
         if (mutableState.value.loading) return

@@ -703,6 +703,19 @@ class MainActivity : ComponentActivity() {
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentRoute = navBackStackEntry?.destination?.route
 
+        // Leaving Search for another tab: whatever is in the search bar is kept as a recent
+        // search and the bar is emptied. Opening a result (album, artist, playlist…) doesn't
+        // count as leaving, so Back still returns to the same results.
+        LaunchedEffect(currentRoute) {
+            if (currentRoute == Screen.Home.route || currentRoute == Screen.Library.route) {
+                val typed = playerViewModel.searchQuery.trim()
+                if (typed.isNotEmpty()) {
+                    playerViewModel.onSearchQuerySubmitted(typed)
+                    playerViewModel.updateSearchQuery("")
+                }
+            }
+        }
+
 
         val routesWithHiddenNavigationBar = remember {
             setOf(

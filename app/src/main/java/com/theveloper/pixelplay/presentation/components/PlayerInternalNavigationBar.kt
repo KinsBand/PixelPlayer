@@ -70,6 +70,11 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalFocusManager
@@ -379,12 +384,31 @@ private fun InlineNavSearchBar(
     val voicePhase = voiceCapture?.phase
     val voiceLive = voicePhase == VoiceCapturePhase.Listening || voicePhase == VoiceCapturePhase.Hearing
 
+    // Focus the field once, when the user opens Search. Saved across activity recreation, so
+    // coming back to PixelPlayer on the Search tab doesn't pop the keyboard up by itself.
+    var autoFocusDone by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         // Opened by voice search: the words are typed in by the microphone, so no keyboard.
-        if (voiceActive) return@LaunchedEffect
+        if (voiceActive || autoFocusDone) return@LaunchedEffect
+        autoFocusDone = true
         delay(380L) // wait for 380ms navigation transition to settle before showing keyboard
         focusRequester.requestFocus()
         keyboardController?.show()
+    }
+
+    // Leaving the app drops the field's focus and the keyboard. Otherwise, on return, the
+    // focused field brought the keyboard back (or left its insets behind) and the screen acted
+    // as if the search bar were being typed in.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                keyboardController?.hide()
+                focusManager.clearFocus(force = true)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     LaunchedEffect(voiceActive) {

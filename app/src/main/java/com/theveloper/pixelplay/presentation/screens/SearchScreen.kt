@@ -1078,6 +1078,44 @@ fun SearchResultsList(
     remoteCollection?.let { (id, title) ->
         SearchBrowseSheet(id = id, title = title, player = playerViewModel, onDismiss = { remoteCollection = null })
     }
+
+    // Online playlists open like library playlists: their tracks are fetched and shown on the
+    // normal Playlist page (not the quick browse sheet), and Play plays the whole playlist.
+    val remotePlaylistLoader: com.theveloper.pixelplay.presentation.viewmodel.SearchBrowseViewModel = hiltViewModel()
+    val remotePlaylistScope = rememberCoroutineScope()
+    var openingRemotePlaylistId by remember { mutableStateOf<String?>(null) }
+    fun openRemotePlaylist(browseId: String, playlist: Playlist, play: Boolean) {
+        if (openingRemotePlaylistId != null) return
+        openingRemotePlaylistId = browseId
+        remotePlaylistScope.launch {
+            val songs = try {
+                remotePlaylistLoader.loadAllSongs(browseId)
+            } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
+                openingRemotePlaylistId = null
+                throw cancelled
+            } catch (e: Exception) {
+                emptyList()
+            }
+            openingRemotePlaylistId = null
+            if (songs.isEmpty()) {
+                playerViewModel.sendToast("Couldn't load this playlist")
+                return@launch
+            }
+            if (play) {
+                playerViewModel.playSongs(songs, songs.first(), playlist.name)
+            } else {
+                val page = Playlist(
+                    id = "${PlaylistViewModel.GENERATED_MIX_PREFIX}search:$browseId",
+                    name = playlist.name,
+                    songIds = songs.map { it.id },
+                    coverImageUri = playlist.coverImageUri
+                )
+                PlaylistViewModel.registerTransientPlaylist(page, songs)
+                navController.navigateSafely(Screen.PlaylistDetail.createRoute(page.id))
+            }
+            onItemSelected()
+        }
+    }
     val artistResults = remember(results, currentFilter) {
         // Only the "All" tab mixes credited song artists into the shelf; the category tabs show
         // exactly the category that was asked for.
@@ -1315,14 +1353,23 @@ fun SearchResultsList(
                                 SearchResultPlaylistItem(
                                     playlist = item.playlist,
                                     playlistSongs = playlistSongs,
-                                    onPlayClick = { if (item.browseId != null) remoteCollection = item.browseId to item.playlist.name else onPlayClick() },
-                                    onOpenClick = { if (item.browseId != null) remoteCollection = item.browseId to item.playlist.name else onOpenClick() },
+                                    onPlayClick = { val id = item.browseId; if (id != null) openRemotePlaylist(id, item.playlist, play = true) else onPlayClick() },
+                                    onOpenClick = { val id = item.browseId; if (id != null) openRemotePlaylist(id, item.playlist, play = false) else onOpenClick() },
                                     isSelected = isSelected,
                                     selectionIndex = selectionIndex,
                                     isSelectionMode = isPlaylistSelectionMode,
                                     onLongPress = { if (item.browseId == null) onPlaylistLongPress(item.playlist) },
                                     onSelectionToggle = { if (item.browseId == null) onPlaylistSelectionToggle(item.playlist) }
                                 )
+                                // Fetching an online playlist's tracks before its page opens.
+                                if (item.browseId != null && openingRemotePlaylistId == item.browseId) {
+                                    androidx.compose.material3.LinearProgressIndicator(
+                                        modifier = Modifier
+                                            .align(Alignment.BottomCenter)
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 24.dp)
+                                    )
+                                }
                             }
                         }
                     }
