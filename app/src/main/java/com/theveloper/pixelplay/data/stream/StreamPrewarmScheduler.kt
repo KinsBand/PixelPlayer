@@ -34,9 +34,12 @@ class StreamPrewarmScheduler internal constructor(
     private val isMetered: () -> Boolean,
     private val clock: () -> Long,
     private val scope: CoroutineScope,
+    /** Opens the search and manifest hosts' connections; each is a no-op while still pooled. */
+    private val warmConnections: suspend () -> Unit = {},
 ) {
     @Inject constructor(
         proxy: YouTubeStreamProxy,
+        innerTube: com.theveloper.pixelplay.data.youtube.InnerTubeClient,
         @ApplicationContext context: Context,
     ) : this(
         prewarm = { id, headBytes -> proxy.prewarm(id, headBytes) },
@@ -46,6 +49,12 @@ class StreamPrewarmScheduler internal constructor(
         },
         clock = System::currentTimeMillis,
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+        warmConnections = {
+            kotlinx.coroutines.coroutineScope {
+                launch { innerTube.warmUpSearch() }
+                launch { proxy.warmUp() }
+            }
+        },
     )
 
     enum class Reason(val headBytes: Int, val countsAgainstBudget: Boolean) {
@@ -69,6 +78,23 @@ class StreamPrewarmScheduler internal constructor(
 
     /** A song row is being pressed. */
     fun onPress(videoId: String) = schedule(listOf(videoId), Reason.PRESS)
+
+    /**
+     * Search was opened: the first query and the first tap will follow within seconds, so open
+     * both connections now instead of paying DNS, TCP and TLS on them. A few hundred bytes.
+     */
+    fun onSearchOpened() {
+        if (YouTubeRateLimit.isLimited(clock())) return
+        scope.launch {
+            try {
+                warmConnections()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Timber.tag(TAG).d(e, "Connection warm-up skipped")
+            }
+        }
+    }
 
     /** The press turned into a scroll: drop the job unless it already started. */
     fun onPressCancelled(videoId: String) = cancelWaiting(Reason.PRESS) { it == videoId }

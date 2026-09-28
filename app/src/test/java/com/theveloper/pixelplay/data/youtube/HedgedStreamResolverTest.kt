@@ -29,6 +29,19 @@ class HedgedStreamResolverTest {
         assertTrue(directCancelled)
     }
 
+    @Test fun `direct result still wins while full extraction is in flight`() = runTest {
+        // The usual cold lookup on a phone: direct takes longer than the hedge, so extraction
+        // has started. Cancelling that loser must not throw away the winner's manifest.
+        var fallbackCancelled = false
+        val result = resolveWithHedgedFallback(
+            direct = { delay(400); "direct" },
+            fallback = { try { awaitCancellation() } finally { fallbackCancelled = true } }
+        )
+        assertEquals("direct", result)
+        assertEquals(400, currentTime)
+        assertTrue(fallbackCancelled)
+    }
+
     @Test fun `empty direct result starts fallback without waiting for hedge`() = runTest {
         assertEquals("fallback", resolveWithHedgedFallback(
             direct = { delay(20); null }, fallback = { delay(50); "fallback" }

@@ -48,4 +48,17 @@ class LoadControlBufferProfileTest {
             assertThat(profile.maxBufferMs).isAtLeast(profile.minBufferMs)
         }
     }
+
+    @Test
+    fun bothProfiles_keepTheResumeRewindInMemory() {
+        // A long pause resumes 7 s earlier. That audio must still be buffered, or the rewind
+        // throws away the read-ahead and a stream waits on the network before playing again.
+        for (isLowRam in listOf(false, true)) {
+            val profile = loadControlBufferProfileFor(isLowRam, heapLimitBytes = 256L * 1024 * 1024)
+
+            assertThat(profile.backBufferMs.toLong()).isAtLeast(SmartResumePolicy.REWIND_MS + 1_000)
+            // Kept small: it is allocated from the same byte budget as the read-ahead.
+            assertThat(profile.backBufferMs).isAtMost(profile.minBufferMs)
+        }
+    }
 }

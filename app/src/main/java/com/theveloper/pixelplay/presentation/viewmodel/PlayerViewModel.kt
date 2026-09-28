@@ -1059,6 +1059,8 @@ class PlayerViewModel @Inject constructor(
                 if (index !in queue.indices) return@onEach
                 val upcoming = queue.subList(index + 1, minOf(queue.size, index + 1 + LYRICS_PREFETCH_AHEAD))
                 lyricsStateHolder.prefetchUpcoming(upcoming.toList())
+                // The next song's full-player / notification cover, so it shows the moment it starts.
+                upcoming.firstOrNull()?.let(::prefetchPlayerArtwork)
             }
             .launchIn(viewModelScope)
 
@@ -3591,6 +3593,11 @@ class PlayerViewModel @Inject constructor(
      */
     fun onSongPressed(song: Song) {
         searchStateHolder.onSongPressed(song)
+        prefetchPlayerArtwork(song)
+    }
+
+    /** Downloads [song]'s online cover into the disk cache at the size the player will ask for. */
+    private fun prefetchPlayerArtwork(song: Song) {
         song.albumArtUriString?.takeIf { it.startsWith("https://") }?.let { url ->
             context.imageLoader.enqueue(
                 ImageRequest.Builder(context)
@@ -3604,6 +3611,8 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun onSongPressCancelled(song: Song) = searchStateHolder.onSongPressCancelled(song)
+
+    fun onSearchScreenShown() = searchStateHolder.onSearchScreenShown()
 
     fun loadSearchHistory(limit: Int = 15) {
         searchStateHolder.loadSearchHistory(limit)

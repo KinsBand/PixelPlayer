@@ -374,7 +374,7 @@ Implemented on branch `claude/magical-mccarthy-gv9uau`.
 | 4.3 Artwork on press | Done (1024 px variant into the disk cache) | `PlayerViewModel.onSongPressed` |
 | 5.1–5.4 Head cache, stream-before-resolve, 1 MiB first range | Done. The "rendition memo" is the cache's file names (`<id>.<itag>.<clen>.<bitrate>.<ext>`), so no Room table was needed. Heads fill from normal plays at no extra cost and from prewarm; the next song gets a 256 KB head | `StreamHeadCache`, `CloudStreamProxy.serveChunked`, `YouTubeStreamProxy` |
 | 5.5 Full replay cache | Not done (optional) | |
-| 6 Field-masked `/player` | **Not done**: marked experimental and high-risk in the plan; needs device measurements first | |
+| 6 Field-masked `/player` | **Done 2026-09-28**, without a remote flag: the mask switches itself off for the session after a 400 that an unmasked retry fixes, and the request is still raced against NewPipe. Visitor data is now reused instead of fetched per lookup. See `docs/musify-deep-dive-speedups.md` | `data/youtube/VisionOsPlayer.kt` |
 | 7.1 Placeholder from list tier | Done | `OptimizedAlbumArt.smallerArtworkKeyCandidates` |
 | 7.2 Tiers | **No change needed**: at the default "High" quality (800 px) the player, notification and widget already share the 1024 px variant. Mapping above 1024 px was left alone so the "Original" quality setting is still respected | |
 | 7.3 Google player-tier enlargement | **No change needed**: YouTube Music thumbnails are already upgraded to 1400 px when search results are parsed | |

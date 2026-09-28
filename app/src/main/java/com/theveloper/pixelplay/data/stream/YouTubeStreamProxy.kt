@@ -31,6 +31,32 @@ class YouTubeStreamProxy @Inject constructor(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>) = size > 100
     }
     private val compatibleIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val connectionPool = okHttpClient.connectionPool
+
+    init {
+        // Stream URLs and pooled connections belong to the network they were made on.
+        (context.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager)?.let { connectivity ->
+            runCatching {
+                connectivity.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+                    private var current: android.net.Network? = null
+                    override fun onAvailable(network: android.net.Network) {
+                        val previous = current
+                        current = network
+                        if (previous != null && previous != network) onDefaultNetworkChanged()
+                    }
+                })
+            }.onFailure { timber.log.Timber.tag("YouTubeProxy").w(it, "Network changes are not observed") }
+        }
+    }
+
+    /**
+     * The default network changed (e.g. Wi-Fi to mobile). Idle connections would still route
+     * through the old network, and signed URLs name its IP address, so neither is reused.
+     */
+    internal fun onDefaultNetworkChanged() {
+        connectionPool.evictAll()
+        youTubeStreamExtractor.onNetworkChanged()
+    }
 
     /** Called only when the player restarts extraction at a time position, not a byte offset. */
     fun useCompatibleRendition(id: String) {
@@ -108,6 +134,9 @@ class YouTubeStreamProxy @Inject constructor(
             youTubeStreamExtractor.streamManifest(cleanId)
         }
     }
+
+    /** Prepares the manifest route (connection and visitor data) before anything is tapped. */
+    suspend fun warmUp() = youTubeStreamExtractor.warmUp()
 
     /** True when [id] can start from cached bytes without waiting for its stream URL. */
     fun hasCachedHead(id: String): Boolean = cachedHeadFor(id.removePrefix("yt_")) != null

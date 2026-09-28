@@ -45,7 +45,12 @@ class SmartResumePolicy {
         if (elapsed < 30_000L) return ResumeAction(positionMs, 0)
         val target = if (elapsed > 300_000L && phraseStartMs != null && phraseStartMs in 0..positionMs) {
             phraseStartMs
-        } else (positionMs - 7_000L).coerceAtLeast(0)
+        } else (positionMs - REWIND_MS).coerceAtLeast(0)
         return ResumeAction(target, 300L)
+    }
+
+    companion object {
+        /** How far a long pause rewinds; the players keep this much audio behind the playhead. */
+        const val REWIND_MS = 7_000L
     }
 }

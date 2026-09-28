@@ -22,12 +22,14 @@ class StreamPrewarmSchedulerTest {
     private var metered = false
     private var now = 1_000_000L
     private var gate: CompletableDeferred<Unit>? = null
+    private val warmUps = java.util.concurrent.atomic.AtomicInteger()
 
     private val scheduler = StreamPrewarmScheduler(
         prewarm = { id, headBytes -> calls += id to headBytes; gate?.await() },
         isMetered = { metered },
         clock = { now },
         scope = scope,
+        warmConnections = { warmUps.incrementAndGet() },
     )
 
     private fun ids(count: Int, prefix: Char = 'a') = List(count) { index -> "$prefix${"%010d".format(index)}" }
@@ -91,5 +93,19 @@ class StreamPrewarmSchedulerTest {
         awaitIdle()
         assertTrue(calls.none { it.first.startsWith("a") }, calls.toString())
         assertEquals(4, calls.size)
+    }
+
+    @Test fun `opening search warms the connections without speculating on any song`() {
+        scheduler.onSearchOpened()
+        runBlocking { withTimeout(2_000) { while (warmUps.get() == 0) delay(5) } }
+        assertEquals(1, warmUps.get())
+        assertTrue(calls.isEmpty())
+    }
+
+    @Test fun `opening search while rate limited opens nothing`() {
+        YouTubeRateLimit.report(now)
+        scheduler.onSearchOpened()
+        runBlocking { delay(100) }
+        assertEquals(0, warmUps.get())
     }
 }

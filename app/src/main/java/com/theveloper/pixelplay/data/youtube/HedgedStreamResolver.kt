@@ -5,6 +5,8 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -21,7 +23,9 @@ internal suspend fun <T : Any> resolveWithHedgedFallback(
         block()
     } catch (cancelled: CancellationException) {
         // A provider may itself be cancelled; don't leave a receiver waiting for its result.
-        this@coroutineScope.cancel(cancelled)
+        // A loser cancelled below because the other branch won must not cancel the scope too:
+        // that threw the winning manifest away and failed the play.
+        if (currentCoroutineContext().isActive) this@coroutineScope.cancel(cancelled)
         throw cancelled
     } catch (_: Exception) {
         null
