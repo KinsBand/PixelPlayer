@@ -338,6 +338,13 @@ object SettingsRegistry {
             keywords = listOf("immersive", "lyrics", "auto hide", "large text")
         ),
         SettingEntry(
+            key = "hide_bars_in_lyrics",
+            categoryId = "lyrics",
+            titleRes = R.string.settings_hide_bars_in_lyrics_title,
+            descriptionRes = R.string.settings_hide_bars_in_lyrics_subtitle,
+            keywords = listOf("lyrics", "full screen", "fullscreen", "status bar", "gesture bar", "navigation bar", "hide", "immersive")
+        ),
+        SettingEntry(
             key = "auto_hide_delay",
             categoryId = "lyrics",
             titleRes = R.string.settings_auto_hide_delay_title,

@@ -11,6 +11,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -41,11 +43,14 @@ import kotlinx.coroutines.flow.map
 data class SystemBarsPrefs(
     val hideStatusBar: Boolean = false,
     val hideNavigationBar: Boolean = false,
+    /** Hide both bars while the lyrics screen is open, even when the app keeps them visible. */
+    val hideBarsInLyrics: Boolean = true,
 )
 
 object SystemBarsPrefKeys {
     val HIDE_STATUS_BAR = booleanPreferencesKey("hide_status_bar_v1")
     val HIDE_NAVIGATION_BAR = booleanPreferencesKey("hide_navigation_bar_v1")
+    val HIDE_BARS_IN_LYRICS = booleanPreferencesKey("hide_bars_in_lyrics_v1")
 }
 
 fun systemBarsPrefsFlow(context: Context): Flow<SystemBarsPrefs> =
@@ -54,6 +59,7 @@ fun systemBarsPrefsFlow(context: Context): Flow<SystemBarsPrefs> =
             SystemBarsPrefs(
                 hideStatusBar = p[SystemBarsPrefKeys.HIDE_STATUS_BAR] ?: false,
                 hideNavigationBar = p[SystemBarsPrefKeys.HIDE_NAVIGATION_BAR] ?: false,
+                hideBarsInLyrics = p[SystemBarsPrefKeys.HIDE_BARS_IN_LYRICS] ?: true,
             )
         }
         .distinctUntilChanged()
@@ -72,6 +78,48 @@ suspend fun Context.setHideStatusBar(hide: Boolean) {
 
 suspend fun Context.setHideNavigationBar(hide: Boolean) {
     applicationContext.dataStore.edit { it[SystemBarsPrefKeys.HIDE_NAVIGATION_BAR] = hide }
+}
+
+suspend fun Context.setHideBarsInLyrics(hide: Boolean) {
+    applicationContext.dataStore.edit { it[SystemBarsPrefKeys.HIDE_BARS_IN_LYRICS] = hide }
+}
+
+/**
+ * How many lyrics screens are showing right now (normally 0 or 1). Snapshot state, so the
+ * activity-level effect and any open sheet's window react as soon as lyrics open or close.
+ */
+private object LyricsOnScreen {
+    var count by mutableIntStateOf(0)
+}
+
+/**
+ * Put inside the lyrics screen. While [active] (lyrics open and the player expanded) and
+ * "Hide status & gesture bars in lyrics" is on, both bars are hidden: portrait, landscape and
+ * face-to-face. They come back (unless the app-wide options keep them hidden) as soon as the
+ * lyrics close, the player collapses, or this leaves the composition.
+ */
+@Composable
+fun HideSystemBarsWhileInLyrics(active: Boolean) {
+    if (!active) return
+    DisposableEffect(Unit) {
+        LyricsOnScreen.count++
+        onDispose { LyricsOnScreen.count = (LyricsOnScreen.count - 1).coerceAtLeast(0) }
+    }
+}
+
+/**
+ * The bars that should be hidden right now: the app-wide choice, plus both bars while lyrics
+ * are on screen with "Hide status & gesture bars in lyrics" on.
+ */
+@Composable
+private fun rememberEffectiveSystemBarsPrefs(): SystemBarsPrefs {
+    val prefs = rememberSystemBarsPrefs()
+    val inLyrics = LyricsOnScreen.count > 0
+    return if (inLyrics && prefs.hideBarsInLyrics) {
+        prefs.copy(hideStatusBar = true, hideNavigationBar = true)
+    } else {
+        prefs
+    }
 }
 
 /** Shows or hides the bars on [activity]'s window. Safe to call repeatedly. */
@@ -108,7 +156,7 @@ private const val REHIDE_DELAY_MS = 250L
  */
 @Composable
 fun SystemBarsVisibilityEffect(activity: Activity) {
-    val prefs = rememberSystemBarsPrefs()
+    val prefs = rememberEffectiveSystemBarsPrefs()
     val lifecycleOwner = LocalLifecycleOwner.current
 
     LaunchedEffect(prefs) { applySystemBarsVisibility(activity, prefs) }
@@ -169,7 +217,7 @@ private fun View.dialogWindow(): Window? {
 fun KeepSystemBarsHiddenInDialog() {
     val view = LocalView.current
     val window = remember(view) { view.dialogWindow() } ?: return
-    val prefs = rememberSystemBarsPrefs()
+    val prefs = rememberEffectiveSystemBarsPrefs()
     val bars = rememberSystemBarsShown()
     LaunchedEffect(window, prefs) {
         if (prefs.hideStatusBar || prefs.hideNavigationBar) hideChosenBars(window, prefs)

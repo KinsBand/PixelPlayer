@@ -2043,6 +2043,59 @@ fun LyricsSheet(
                 }
             }
 
+           // Face-to-face, landscape: the reactions sit on the centre seam instead of the corners.
+           // Positive at the top middle (its reactions drop down out of it and rise back up after
+           // a pick); negative at the bottom middle (its reactions rise up out of it).
+           val splitReactionCallback = onReaction
+           val showSplitReactions = splitReactionCallback != null &&
+               currentSong != null &&
+               performanceView == PerformanceView.Lyrics &&
+               splitActive &&
+               isLandscape
+           AnimatedVisibility(
+               visible = showSplitReactions,
+               enter = fadeIn(tween(420, easing = LinearOutSlowInEasing)),
+               exit = fadeOut(tween(220, easing = FastOutLinearInEasing)),
+               modifier = Modifier
+                   .align(Alignment.TopCenter)
+                   .zIndex(3f)
+                   .padding(top = paddingValues.calculateTopPadding() + 12.dp)
+           ) {
+               if (splitReactionCallback != null) {
+                   ReactionCorner(
+                       side = ReactionSide.POSITIVE,
+                       state = reactionState,
+                       triggerContainer = sheetColors.surfaceSecondary,
+                       triggerContent = sheetColors.onSurfaceSecondary,
+                       ringColor = sheetColors.reactionPositive,
+                       onSelect = splitReactionCallback,
+                       idleAlpha = { chromeIdleAlpha },
+                       expandDownward = true
+                   )
+               }
+           }
+           AnimatedVisibility(
+               visible = showSplitReactions,
+               enter = fadeIn(tween(420, easing = LinearOutSlowInEasing)),
+               exit = fadeOut(tween(220, easing = FastOutLinearInEasing)),
+               modifier = Modifier
+                   .align(Alignment.BottomCenter)
+                   .zIndex(3f)
+                   .padding(bottom = paddingValues.calculateBottomPadding() + 12.dp)
+           ) {
+               if (splitReactionCallback != null) {
+                   ReactionCorner(
+                       side = ReactionSide.NEGATIVE,
+                       state = reactionState,
+                       triggerContainer = sheetColors.surfaceSecondary,
+                       triggerContent = sheetColors.onSurfaceSecondary,
+                       ringColor = sheetColors.reactionNegative,
+                       onSelect = splitReactionCallback,
+                       idleAlpha = { chromeIdleAlpha }
+                   )
+               }
+           }
+
            // Landscape: the arrow and its shortcuts sit centred under the song half, not on the seam.
            val overlayShiftX = if (isLandscape) {
                (configuration.screenWidthDp.dp / 4) * (if (lyricsDisplayPrefs.landscapeLyricsOnLeft) 1f else -1f)

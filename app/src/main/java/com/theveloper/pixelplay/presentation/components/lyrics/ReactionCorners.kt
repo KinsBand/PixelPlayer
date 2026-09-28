@@ -177,6 +177,10 @@ fun Modifier.dismissReactionMenuOnOutsideTap(state: ReactionMenuState): Modifier
 /**
  * One corner: the trigger at the bottom and, while open, its reactions stacked above it.
  * Place it with `Modifier.align(BottomStart / BottomEnd)` inside an overlay Box.
+ *
+ * With [expandDownward] the trigger sits at the top instead and the reactions drop down out of
+ * it (face-to-face landscape puts the positive trigger at the top centre); after a pick they
+ * rise back up into it. Place that one with `Modifier.align(TopCenter)`.
  */
 @Composable
 fun ReactionCorner(
@@ -189,6 +193,8 @@ fun ReactionCorner(
     modifier: Modifier = Modifier,
     /** Idle-dimming: lower when the screen hasn't been touched for a while. */
     idleAlpha: () -> Float = { 1f },
+    /** Trigger on top, reactions open below it (they close back upwards). */
+    expandDownward: Boolean = false,
 ) {
     val haptics = LocalHapticFeedback.current
     val touchSlop = LocalViewConfiguration.current.touchSlop
@@ -277,85 +283,101 @@ fun ReactionCorner(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(ITEM_GAP)
     ) {
-        if (showItems) {
-            // Farthest first so the nearest reaction sits right above the trigger.
-            for (index in reactions.indices.reversed()) {
-                val reaction = reactions[index]
-                val p = progress[index]
-                val hovered = state.hovered == reaction
-                val hoverScale by animateFloatAsState(
-                    targetValue = if (hovered) 1.25f else 1f,
-                    animationSpec = spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMedium),
-                    label = "reactionHover"
-                )
-                val travel = (ITEM_SIZE + ITEM_GAP) * (index + 1)
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .size(ITEM_SIZE)
-                        .onGloballyPositioned { itemBounds[index] = it.boundsInParent() }
-                        .graphicsLayer {
-                            val t = p.value
-                            // Rises out of the trigger: starts at its centre, small and clear.
-                            translationY = (1f - t) * travel.toPx()
-                            val s = lerp(0.4f, 1f, t.coerceIn(0f, 1.2f)) * hoverScale
-                            scaleX = s
-                            scaleY = s
-                            alpha = t.coerceIn(0f, 1f)
-                            transformOrigin = TransformOrigin.Center
-                        }
-                        .clip(CircleShape)
-                        .background(if (hovered) ringColor.copy(alpha = 0.28f) else triggerContainer.copy(alpha = 0.92f))
-                        .semantics {
-                            role = Role.Button
-                            contentDescription = reaction.label
-                            onClick(label = reaction.label) { select(reaction); true }
-                        }
-                ) {
-                    Text(text = reaction.emoji, fontSize = 22.sp)
+        val items: @Composable () -> Unit = {
+            if (showItems) {
+                // Nearest reaction next to the trigger: farthest first when opening upwards,
+                // nearest first when opening downwards.
+                val order = if (expandDownward) reactions.indices else reactions.indices.reversed()
+                for (index in order) {
+                    val reaction = reactions[index]
+                    val p = progress[index]
+                    val hovered = state.hovered == reaction
+                    val hoverScale by animateFloatAsState(
+                        targetValue = if (hovered) 1.25f else 1f,
+                        animationSpec = spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMedium),
+                        label = "reactionHover"
+                    )
+                    val travel = (ITEM_SIZE + ITEM_GAP) * (index + 1)
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(ITEM_SIZE)
+                            .onGloballyPositioned { itemBounds[index] = it.boundsInParent() }
+                            .graphicsLayer {
+                                val t = p.value
+                                // Comes out of the trigger: starts at its centre, small and clear.
+                                // Opening upwards it rises; opening downwards it drops.
+                                val direction = if (expandDownward) -1f else 1f
+                                translationY = direction * (1f - t) * travel.toPx()
+                                val s = lerp(0.4f, 1f, t.coerceIn(0f, 1.2f)) * hoverScale
+                                scaleX = s
+                                scaleY = s
+                                alpha = t.coerceIn(0f, 1f)
+                                transformOrigin = TransformOrigin.Center
+                            }
+                            .clip(CircleShape)
+                            .background(if (hovered) ringColor.copy(alpha = 0.28f) else triggerContainer.copy(alpha = 0.92f))
+                            .semantics {
+                                role = Role.Button
+                                contentDescription = reaction.label
+                                onClick(label = reaction.label) { select(reaction); true }
+                            }
+                    ) {
+                        Text(text = reaction.emoji, fontSize = 22.sp)
+                    }
                 }
             }
         }
 
         // ── Trigger ──
-        val triggerAlpha = if (isOpen) 1f else idleAlpha()
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .size(TRIGGER_SIZE)
-                .onGloballyPositioned { triggerBounds = it.boundsInParent() }
-                .graphicsLayer { alpha = triggerAlpha }
-                .clip(CircleShape)
-                .background(if (isOpen) ringColor.copy(alpha = 0.22f) else triggerContainer)
-                .semantics {
-                    role = Role.Button
-                    contentDescription = if (side == ReactionSide.POSITIVE) "Positive reactions" else "Negative reactions"
-                    onClick {
-                        if (state.openSide == side) state.close() else state.open(side)
-                        true
+        val trigger: @Composable () -> Unit = {
+            val triggerAlpha = if (isOpen) 1f else idleAlpha()
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(TRIGGER_SIZE)
+                    .onGloballyPositioned { triggerBounds = it.boundsInParent() }
+                    .graphicsLayer { alpha = triggerAlpha }
+                    .clip(CircleShape)
+                    .background(if (isOpen) ringColor.copy(alpha = 0.22f) else triggerContainer)
+                    .semantics {
+                        role = Role.Button
+                        contentDescription = if (side == ReactionSide.POSITIVE) "Positive reactions" else "Negative reactions"
+                        onClick {
+                            if (state.openSide == side) state.close() else state.open(side)
+                            true
+                        }
+                    }
+            ) {
+                val echo = state.echo?.takeIf { it in reactions }
+                AnimatedContent(
+                    targetState = echo,
+                    transitionSpec = {
+                        (scaleIn(initialScale = 0.5f, animationSpec = spring(dampingRatio = 0.45f, stiffness = 600f)) + fadeIn(tween(120)))
+                            .togetherWith(scaleOut(targetScale = 0.6f) + fadeOut(tween(120)))
+                    },
+                    label = "reactionTriggerEcho"
+                ) { shown ->
+                    if (shown != null) {
+                        Text(text = shown.emoji, fontSize = 20.sp)
+                    } else {
+                        Icon(
+                            imageVector = if (side == ReactionSide.POSITIVE) Icons.Rounded.SentimentSatisfied else Icons.Rounded.SentimentDissatisfied,
+                            contentDescription = null,
+                            tint = if (isOpen) ringColor else triggerContent,
+                            modifier = Modifier.size(22.dp)
+                        )
                     }
                 }
-        ) {
-            val echo = state.echo?.takeIf { it in reactions }
-            AnimatedContent(
-                targetState = echo,
-                transitionSpec = {
-                    (scaleIn(initialScale = 0.5f, animationSpec = spring(dampingRatio = 0.45f, stiffness = 600f)) + fadeIn(tween(120)))
-                        .togetherWith(scaleOut(targetScale = 0.6f) + fadeOut(tween(120)))
-                },
-                label = "reactionTriggerEcho"
-            ) { shown ->
-                if (shown != null) {
-                    Text(text = shown.emoji, fontSize = 20.sp)
-                } else {
-                    Icon(
-                        imageVector = if (side == ReactionSide.POSITIVE) Icons.Rounded.SentimentSatisfied else Icons.Rounded.SentimentDissatisfied,
-                        contentDescription = null,
-                        tint = if (isOpen) ringColor else triggerContent,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
             }
+        }
+
+        if (expandDownward) {
+            trigger()
+            items()
+        } else {
+            items()
+            trigger()
         }
     }
 }

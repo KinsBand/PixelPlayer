@@ -18,6 +18,7 @@ import androidx.compose.material.icons.rounded.HourglassBottom
 import androidx.compose.material.icons.rounded.BlurOn
 import androidx.compose.material.icons.rounded.AutoAwesomeMotion
 import androidx.compose.material.icons.rounded.FormatSize
+import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.ScreenRotation
 import androidx.compose.material.icons.rounded.ViewAgenda
 import androidx.compose.material.icons.rounded.TextFields
@@ -50,6 +51,8 @@ import com.theveloper.pixelplay.presentation.components.rememberLyricsDisplayPre
 import com.theveloper.pixelplay.presentation.components.IMMERSIVE_TIMEOUT_OFF
 import com.theveloper.pixelplay.presentation.components.subcomps.SkillTreeBranch
 import kotlinx.coroutines.launch
+import com.theveloper.pixelplay.utils.rememberSystemBarsPrefs
+import com.theveloper.pixelplay.utils.setHideBarsInLyrics
 import kotlin.math.roundToInt
 import com.theveloper.pixelplay.presentation.navigation.Screen
 import com.theveloper.pixelplay.presentation.screens.SettingsItem
@@ -144,6 +147,19 @@ internal fun LyricsSettingsContent(
             checked = uiState.immersiveLyricsEnabled,
             onCheckedChange = { settingsViewModel.setImmersiveLyricsEnabled(it) },
             leadingIcon = { Icon(painterResource(R.drawable.rounded_lyrics_24), null, tint = MaterialTheme.colorScheme.secondary) }
+        )
+
+        // Full screen just for lyrics: hides the status and gesture bars while lyrics are open.
+        val systemBarsPrefs = rememberSystemBarsPrefs()
+        SwitchSettingItem(
+            settingKey = "hide_bars_in_lyrics",
+            title = stringResource(R.string.settings_hide_bars_in_lyrics_title),
+            subtitle = stringResource(R.string.settings_hide_bars_in_lyrics_subtitle),
+            checked = systemBarsPrefs.hideBarsInLyrics,
+            onCheckedChange = { hide ->
+                scope.launch { context.setHideBarsInLyrics(hide) }
+            },
+            leadingIcon = { Icon(Icons.Rounded.Fullscreen, null, tint = MaterialTheme.colorScheme.secondary) }
         )
 
         // Settings that only exist while immersive is on hang off it like a skill tree.

@@ -1199,6 +1199,11 @@ fun FullPlayerContent(
             }
         }
     }
+    // "Hide status & gesture bars in lyrics": both bars go away while lyrics are open (portrait,
+    // landscape and face-to-face) and come back when they close or the player collapses.
+    com.theveloper.pixelplay.utils.HideSystemBarsWhileInLyrics(
+        active = showLyricsSheet && currentSheetState == PlayerSheetState.EXPANDED
+    )
     AnimatedVisibility(
         visible = showLyricsSheet,
         enter = slideInVertically(

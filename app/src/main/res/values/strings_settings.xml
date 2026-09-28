@@ -225,6 +225,8 @@
     <string name="settings_lyrics_screen_section">Lyrics Screen</string>
     <string name="settings_immersive_lyrics_title">Immersive Lyrics</string>
     <string name="settings_immersive_lyrics_subtitle">Hides the bottom controls and enlarges the text. Swipe down to hide, swipe up to bring them back.</string>
+    <string name="settings_hide_bars_in_lyrics_title">Hide status &amp; gesture bars in lyrics</string>
+    <string name="settings_hide_bars_in_lyrics_subtitle">Lyrics use the full screen in portrait, landscape and face-to-face. The bars come back when you leave lyrics. Swipe in from an edge to see them</string>
     <string name="settings_auto_hide_delay_title">Auto-hide Delay</string>
     <string name="settings_auto_hide_delay_subtitle">Time before controls hide.</string>
     <string name="settings_auto_hide_delay_3s">3s</string>
