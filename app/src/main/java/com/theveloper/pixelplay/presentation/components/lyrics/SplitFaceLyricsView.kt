@@ -1,16 +1,28 @@
 package com.theveloper.pixelplay.presentation.components.lyrics
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,10 +34,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
@@ -34,6 +52,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
@@ -47,12 +68,21 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * Face-to-face lyrics: shown in immersive mode when the "Face-to-face lyrics" setting is on.
  *
- * Top → bottom:
- *   header pill (upright, read by the person at the bottom edge, at their far end)
+ * Portrait, top → bottom:
+ *   minimised song bar (upright, read by the person at the bottom edge, at their far end)
  *   lyrics turned 180° (read by the person at the top edge)
- *   centre divider
+ *   centre divider: section pills either side of a small play / pause button
  *   lyrics upright (read by the person at the bottom edge)
- *   header pill turned 180° (read by the person at the top edge, at their far end)
+ *   minimised song bar turned 180° (read by the person at the top edge, at their far end)
+ *
+ * Landscape ([landscape]), left | centre | right:
+ *   the left half is the right half turned 180° as a whole (for the person at the top edge)
+ *   a vertical divider with the play / pause button in the middle
+ *   the right half, upright (for the person at the bottom edge): the section pill at its top,
+ *   the lyrics filling it, and the minimised song bar at its bottom turned 180° so the person
+ *   across the table reads it at their far end.
+ *
+ * Tapping the current song in either bar leaves face-to-face mode ([headerPill] wires that up).
  *
  * Each half is the same [SyncedLyricsList] the main sheet uses, so every lyrics setting
  * (animated lyrics, blur + strength, "disable blur all over", highlight mode, alignment,
@@ -80,28 +110,97 @@ internal fun SplitFaceLyricsView(
     onLineClick: (SyncedLine) -> Unit,
     onSeekTo: (Long) -> Unit,
     onBackgroundTap: () -> Unit,
+    /** The minimised song bar (cover, title, next song). */
     headerPill: @Composable (Modifier) -> Unit,
     modifier: Modifier = Modifier,
     /**
      * The song part playing now (from the song structure), given the most width it may use.
-     * Shown twice beside the centre divider: in the gap to its left, upright, for the person at
-     * the bottom; and in the gap to its right, turned 180°, for the person at the top.
+     * Portrait: beside the centre divider, upright on its left for the person at the bottom and
+     * turned on its right for the person at the top. Landscape: at the top of each half.
      */
     sectionChip: (@Composable (maxWidth: Dp) -> Unit)? = null,
     /** Re-centres both halves together when the user's typography changes. */
     relayoutKey: Any? = null,
+    /** Small play / pause button on the centre divider. Hidden when null. */
+    isPlaying: Boolean = false,
+    onPlayPause: (() -> Unit)? = null,
+    playPauseContainer: Color = accentColor,
+    playPauseContent: Color = Color.White,
+    /** Side-by-side halves for a phone lying sideways between two people. */
+    landscape: Boolean = false,
 ) {
+    val tapModifier = Modifier.clickable(
+        interactionSource = remember { MutableInteractionSource() },
+        indication = null,
+        onClick = onBackgroundTap
+    )
+    val half: @Composable (Modifier, Boolean) -> Unit = { halfModifier, rotated ->
+        LyricsHalf(
+            modifier = halfModifier,
+            rotated = rotated,
+            lines = lines,
+            playbackPositionFlow = playbackPositionFlow,
+            lyricsSyncOffset = lyricsSyncOffset,
+            positionOverrideMs = positionOverrideMs,
+            accentColor = accentColor,
+            textStyle = textStyle,
+            autoscrollAnimationSpec = autoscrollAnimationSpec,
+            useAnimatedLyrics = useAnimatedLyrics,
+            highlightMode = highlightMode,
+            animatedLyricsBlurEnabled = animatedLyricsBlurEnabled,
+            animatedLyricsBlurStrength = animatedLyricsBlurStrength,
+            lyricsAlignment = lyricsAlignment,
+            showTranslation = showTranslation,
+            showRomanization = showRomanization,
+            onLineClick = onLineClick,
+            onSeekTo = onSeekTo,
+            relayoutKey = relayoutKey,
+        )
+    }
+    val playPause: @Composable () -> Unit = {
+        if (onPlayPause != null) {
+            CentrePlayPauseButton(
+                isPlaying = isPlaying,
+                onClick = onPlayPause,
+                containerColor = playPauseContainer,
+                contentColor = playPauseContent
+            )
+        }
+    }
+
+    if (landscape) {
+        Row(
+            modifier = modifier
+                .fillMaxSize()
+                .then(tapModifier),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Top person: the right half's layout turned 180° as a whole.
+            LandscapePanel(
+                rotated = true,
+                half = half,
+                headerPill = headerPill,
+                sectionChip = sectionChip
+            )
+            VerticalCentreDivider(accentColor = accentColor, playPause = playPause)
+            // Bottom person: upright.
+            LandscapePanel(
+                rotated = false,
+                half = half,
+                headerPill = headerPill,
+                sectionChip = sectionChip
+            )
+        }
+        return
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onBackgroundTap
-            ),
+            .then(tapModifier),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Header for the bottom viewer, at their far end (physical top).
+        // Song bar for the bottom viewer, at their far end (physical top).
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -112,35 +211,12 @@ internal fun SplitFaceLyricsView(
             headerPill(Modifier)
         }
 
-        val half: @Composable ColumnScope.(Boolean) -> Unit = { rotated ->
-            LyricsHalf(
-                rotated = rotated,
-                lines = lines,
-                playbackPositionFlow = playbackPositionFlow,
-                lyricsSyncOffset = lyricsSyncOffset,
-                positionOverrideMs = positionOverrideMs,
-                accentColor = accentColor,
-                textStyle = textStyle,
-                autoscrollAnimationSpec = autoscrollAnimationSpec,
-                useAnimatedLyrics = useAnimatedLyrics,
-                highlightMode = highlightMode,
-                animatedLyricsBlurEnabled = animatedLyricsBlurEnabled,
-                animatedLyricsBlurStrength = animatedLyricsBlurStrength,
-                lyricsAlignment = lyricsAlignment,
-                showTranslation = showTranslation,
-                showRomanization = showRomanization,
-                onLineClick = onLineClick,
-                onSeekTo = onSeekTo,
-                relayoutKey = relayoutKey,
-            )
-        }
+        half(Modifier.weight(1f).fillMaxWidth(), true)        // top viewer, turned 180°
+        CentreDivider(accentColor, sectionChip, playPause, hasPlayPause = onPlayPause != null)
+        half(Modifier.weight(1f).fillMaxWidth(), false)       // bottom viewer, upright
 
-        half(true)        // top viewer, turned 180°
-        CentreDivider(accentColor, sectionChip)
-        half(false)       // bottom viewer, upright
-
-        // Header for the top viewer, at their far end (physical bottom). Replaces the
-        // "show controls" arrow; tapping it brings the controls back like any other tap.
+        // Song bar for the top viewer, at their far end (physical bottom). Replaces the
+        // "show controls" arrow; tapping the song in it leaves face-to-face mode.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -155,10 +231,161 @@ internal fun SplitFaceLyricsView(
     }
 }
 
+/**
+ * One side of the landscape face-to-face layout, read by the person at the bottom edge when
+ * upright: section pill at the top (their far end), lyrics in the middle, and the song bar at the
+ * bottom turned 180° for the person across the table. [rotated] turns the whole panel.
+ */
+@Composable
+private fun RowScope.LandscapePanel(
+    rotated: Boolean,
+    half: @Composable (Modifier, Boolean) -> Unit,
+    headerPill: @Composable (Modifier) -> Unit,
+    sectionChip: (@Composable (maxWidth: Dp) -> Unit)?,
+) {
+    BoxWithConstraints(
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .then(
+                if (rotated) {
+                    Modifier
+                        .graphicsLayer { rotationZ = 180f }
+                        .clearAndSetSemantics { }
+                } else Modifier
+            )
+    ) {
+        val panelWidth = maxWidth
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                // The status / navigation bars sit on the long edges in landscape.
+                .statusBarsPadding()
+                .navigationBarsPadding(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            if (sectionChip != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp, bottom = 2.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    sectionChip(panelWidth * 0.6f)
+                }
+            }
+            // The panel's own rotation already faces the right reader, so the lyrics inside it
+            // are drawn upright.
+            half(Modifier.weight(1f).fillMaxWidth(), false)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 4.dp)
+                    .graphicsLayer { rotationZ = 180f }
+                    .clearAndSetSemantics { },
+                contentAlignment = Alignment.CenterStart
+            ) {
+                headerPill(Modifier)
+            }
+        }
+    }
+}
+
+/**
+ * Small play / pause on the divider. The shape morphs (circle while paused, rounded square while
+ * playing) like the big button, and the icon swaps with a scale-and-fade.
+ */
+@Composable
+private fun CentrePlayPauseButton(
+    isPlaying: Boolean,
+    onClick: () -> Unit,
+    containerColor: Color,
+    contentColor: Color,
+) {
+    val haptics = LocalHapticFeedback.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val corner by animateDpAsState(
+        targetValue = if (isPlaying) 11.dp else 18.dp,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "splitPlayPauseCorner"
+    )
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed) 0.86f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "splitPlayPausePress"
+    )
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .graphicsLayer {
+                scaleX = pressScale
+                scaleY = pressScale
+            }
+            .clip(RoundedCornerShape(corner))
+            .background(containerColor)
+            .clickable(interactionSource = interaction, indication = null, role = Role.Button) {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        AnimatedContent(
+            targetState = isPlaying,
+            transitionSpec = {
+                (fadeIn() + scaleIn(initialScale = 0.6f)).togetherWith(fadeOut() + scaleOut(targetScale = 0.6f))
+            },
+            label = "splitPlayPauseIcon"
+        ) { playing ->
+            Icon(
+                imageVector = if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                contentDescription = if (playing) "Pause" else "Play",
+                tint = contentColor,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+/** Landscape divider: a vertical line through the middle of the screen, play / pause at its centre. */
+@Composable
+private fun VerticalCentreDivider(
+    accentColor: Color,
+    playPause: @Composable () -> Unit,
+) {
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxHeight()
+            .width(48.dp)
+    ) {
+        val lineHeight = maxHeight * 0.22f
+        Column(
+            modifier = Modifier.align(Alignment.Center),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(
+                Modifier
+                    .width(1.5.dp)
+                    .height(lineHeight)
+                    .background(accentColor.copy(alpha = 0.3f), RoundedCornerShape(1.dp))
+            )
+            Box(Modifier.padding(vertical = 8.dp)) { playPause() }
+            Box(
+                Modifier
+                    .width(1.5.dp)
+                    .height(lineHeight)
+                    .background(accentColor.copy(alpha = 0.3f), RoundedCornerShape(1.dp))
+            )
+        }
+    }
+}
+
 private val EdgeFade: Dp = 28.dp
 
 @Composable
-private fun ColumnScope.LyricsHalf(
+private fun LyricsHalf(
+    modifier: Modifier,
     rotated: Boolean,
     lines: List<SyncedLine>,
     playbackPositionFlow: StateFlow<Long>,
@@ -193,9 +420,7 @@ private fun ColumnScope.LyricsHalf(
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
 
     BoxWithConstraints(
-        modifier = Modifier
-            .weight(1f)
-            .fillMaxWidth()
+        modifier = modifier
             .clipToBounds()
             .then(
                 if (rotated) {
@@ -267,16 +492,24 @@ private fun ColumnScope.LyricsHalf(
 private fun CentreDivider(
     accentColor: Color,
     sectionChip: (@Composable (maxWidth: Dp) -> Unit)?,
+    playPause: @Composable () -> Unit,
+    hasPlayPause: Boolean,
 ) {
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            .height(if (sectionChip != null) 34.dp else 14.dp)
+            .height(
+                when {
+                    hasPlayPause -> 44.dp
+                    sectionChip != null -> 34.dp
+                    else -> 14.dp
+                }
+            )
     ) {
-        // Lines are 20 % of the width each, so the gaps either side are ~30 % minus the dot.
+        // Lines are 20 % of the width each, so the gaps either side are ~30 % minus the button.
         val lineWidth = maxWidth * 0.2f
-        val dotBlock = 22.dp
-        val gap = (maxWidth - lineWidth * 2 - dotBlock) / 2
+        val centreBlock = if (hasPlayPause) 52.dp else 22.dp
+        val gap = (maxWidth - lineWidth * 2 - centreBlock) / 2
         val chipMax = (gap - 20.dp).coerceAtLeast(48.dp)
 
         Row(
@@ -290,12 +523,17 @@ private fun CentreDivider(
                     .height(1.5.dp)
                     .background(accentColor.copy(alpha = 0.3f), RoundedCornerShape(1.dp))
             )
-            Box(
-                Modifier
-                    .padding(horizontal = 8.dp)
-                    .size(6.dp)
-                    .background(accentColor.copy(alpha = 0.6f), CircleShape)
-            )
+            if (hasPlayPause) {
+                // Where the dot was: a small play / pause between the two dashes.
+                Box(Modifier.padding(horizontal = 8.dp)) { playPause() }
+            } else {
+                Box(
+                    Modifier
+                        .padding(horizontal = 8.dp)
+                        .size(6.dp)
+                        .background(accentColor.copy(alpha = 0.6f), CircleShape)
+                )
+            }
             Box(
                 Modifier
                     .width(lineWidth)

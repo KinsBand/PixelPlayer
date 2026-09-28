@@ -679,6 +679,13 @@ object SettingsRegistry {
             keywords = listOf("face to face", "split", "share", "both sides", "upside down", "karaoke", "table")
         ),
         SettingEntry(
+            key = "lyrics_landscape_lyrics_left",
+            categoryId = "lyrics",
+            titleRes = R.string.settings_lyrics_landscape_lyrics_left_title,
+            descriptionRes = R.string.settings_lyrics_landscape_lyrics_left_subtitle,
+            keywords = listOf("landscape", "sideways", "horizontal", "sidebar", "left", "right", "swap", "lyrics side")
+        ),
+        SettingEntry(
             key = "camera_cutout_island_overlay",
             categoryId = "appearance",
             titleRes = R.string.settings_camera_island_title,

@@ -21,11 +21,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextLayoutResult
@@ -380,17 +386,146 @@ internal fun resolveWordState(starts: IntArray, ends: IntArray, p: Float): Activ
     return ActiveWordState(-1, 0, 0, 0f)
 }
 
+// ── Sung-word / sung-letter motion ────────────────────────────────────────────────────────
+
+/** One piece of a line drawn lifted: [rect] in text coordinates, moved up by [dy] and scaled. */
+internal class LiftedPiece(val rect: Rect, val dy: Float, val scale: Float)
+
+private fun easeOutCubic(t: Float): Float {
+    val u = 1f - t.coerceIn(0f, 1f)
+    return 1f - u * u * u
+}
+
+private fun easeInOutSine(t: Float): Float =
+    (0.5f - 0.5f * kotlin.math.cos(Math.PI * t.coerceIn(0f, 1f))).toFloat()
+
+/**
+ * How lifted the word being sung is at fill [u] (0..1): it rises quickly as the word starts,
+ * floats while it's held and settles back as it ends, so the next word takes over without a jump.
+ */
+internal fun wordLiftAmount(u: Float): Float {
+    if (u <= 0f || u >= 1f) return 0f
+    val rise = easeOutCubic(u / 0.22f)
+    val settle = 1f - easeInOutSine(((u - 0.68f) / 0.32f).coerceIn(0f, 1f))
+    return rise * settle
+}
+
+/**
+ * How lifted a letter [d] characters behind the singing cursor is: it rises while it's sung
+ * (0..1) and eases back down over the next [wave] letters, so a soft wave follows the voice.
+ */
+internal fun letterLiftAmount(d: Float, wave: Float): Float = when {
+    d <= 0f -> 0f
+    d <= 1f -> easeOutCubic(d)
+    wave <= 0f -> 0f
+    d <= 1f + wave -> 1f - easeInOutSine((d - 1f) / wave)
+    else -> 0f
+}
+
+/** The pieces of the line that should be drawn lifted right now (empty = draw it flat). */
+internal fun liftedPieces(
+    result: TextLayoutResult,
+    p: Float,
+    length: Int,
+    text: String,
+    mode: LyricsHighlightMode,
+    wordStarts: IntArray,
+    wordEnds: IntArray,
+    motion: LyricMotion,
+): List<LiftedPiece> {
+    if (p <= 0f || p >= length || length == 0) return emptyList()
+    if (mode == LyricsHighlightMode.PHONEME) {
+        if (motion.letterLift <= 0f) return emptyList()
+        val cursor = floor(p).toInt()
+        val from = (cursor - kotlin.math.ceil(motion.letterWave).toInt() - 1).coerceAtLeast(0)
+        val to = cursor.coerceAtMost(length - 1)
+        if (from > to) return emptyList()
+        val out = ArrayList<LiftedPiece>(to - from + 1)
+        for (i in from..to) {
+            if (text[i].isWhitespace()) continue
+            val amount = letterLiftAmount(p - i, motion.letterWave)
+            if (amount < 0.02f) continue
+            val box = result.getBoundingBox(i)
+            if (box.width <= 0f || box.height <= 0f) continue
+            out += LiftedPiece(box, box.height * motion.letterLift * amount, 1f + motion.letterLift * 0.6f * amount)
+        }
+        return out
+    }
+    if (motion.wordLift <= 0f && motion.wordScale <= 0f) return emptyList()
+    val active = resolveWordState(wordStarts, wordEnds, p)
+    if (active.activeIndex < 0) return emptyList()
+    val amount = wordLiftAmount(active.fillProgress)
+    if (amount < 0.02f) return emptyList()
+    val out = ArrayList<LiftedPiece>(2)
+    // A word can wrap over two visual lines: lift each part on its own line.
+    val firstLine = result.getLineForOffset(active.wordStart.coerceIn(0, length - 1))
+    val lastLine = result.getLineForOffset((active.wordEnd - 1).coerceIn(0, length - 1))
+    for (line in firstLine..lastLine) {
+        val ls = result.getLineStart(line)
+        val le = result.getLineEnd(line, visibleEnd = true)
+        val s = active.wordStart.coerceIn(ls, le)
+        val e = active.wordEnd.coerceIn(s, le)
+        if (e <= s) continue
+        val xa = result.getHorizontalPosition(s, usePrimaryDirection = true)
+        val xb = result.getHorizontalPosition(e, usePrimaryDirection = true)
+        val top = result.getLineTop(line)
+        val bottom = result.getLineBottom(line)
+        if (abs(xb - xa) < 1f) continue
+        out += LiftedPiece(
+            rect = Rect(minOf(xa, xb), top, maxOf(xa, xb), bottom),
+            dy = (bottom - top) * motion.wordLift * amount,
+            scale = 1f + motion.wordScale * amount
+        )
+    }
+    return out
+}
+
+private val LayerPaint = Paint()
+
+/**
+ * Draws [layer] (the text plus anything masked onto it) with [pieces] lifted: the rest of the
+ * line in place, each piece moved up and scaled around its own centre. Each piece gets its own
+ * layer, so a mask drawn by [layer] moves with the glyphs it belongs to and never touches the
+ * neighbouring text.
+ */
+private fun ContentDrawScope.drawWithLifts(pieces: List<LiftedPiece>, layer: ContentDrawScope.() -> Unit) {
+    if (pieces.isEmpty()) {
+        layer()
+        return
+    }
+    val self = this
+    val bounds = Rect(0f, 0f, size.width, size.height)
+    withTransform({ pieces.forEach { clipRect(it.rect.left, it.rect.top, it.rect.right, it.rect.bottom, ClipOp.Difference) } }) {
+        drawContext.canvas.saveLayer(bounds, LayerPaint)
+        self.layer()
+        drawContext.canvas.restore()
+    }
+    pieces.forEach { piece ->
+        val c = piece.rect.center
+        withTransform({
+            translate(0f, -piece.dy)
+            scale(piece.scale, piece.scale, pivot = c)
+            clipRect(piece.rect.left, piece.rect.top, piece.rect.right, piece.rect.bottom)
+        }) {
+            drawContext.canvas.saveLayer(piece.rect.inflate(piece.rect.height), LayerPaint)
+            self.layer()
+            drawContext.canvas.restore()
+        }
+    }
+}
+
 /**
  * One lyric line as whole text (natural spacing and kerning — no per-word boxes), with the sung
  * part painted over a dim copy.
  *
  * For [LyricsHighlightMode.WORD] and [LyricsHighlightMode.AUTO] modes, words are treated as
- * cohesive units: active words are masked at word boundaries with continuous progressive alpha
- * and accompanied by a fluid radiant bloom/glow brush, keeping glyph outlines 100% intact and
- * clean without letter slicing.
+ * cohesive units: the word being sung fills with continuous progressive alpha and a fluid bloom,
+ * and lifts and swells a little while it's held before settling back as the next word starts.
  *
- * For [LyricsHighlightMode.PHONEME] mode, backward compatibility is maintained with fine-grained
- * letter-level gradient wiping.
+ * For [LyricsHighlightMode.PHONEME] mode the fill is a soft letter-level wipe, and a small wave of
+ * lifted letters follows the voice.
+ *
+ * How far words and letters move comes from [motion] (each song's own with adaptive typography).
  */
 @Composable
 fun SmoothLyricLine(
@@ -404,7 +539,8 @@ fun SmoothLyricLine(
     mode: LyricsHighlightMode = LocalLyricsHighlightMode.current,
     wordLayout: LyricWordLayout? = null,
     /** Per-word styles (adaptive expressive typography). Ranges index into [text]. */
-    spans: List<AnnotatedString.Range<SpanStyle>> = emptyList()
+    spans: List<AnnotatedString.Range<SpanStyle>> = emptyList(),
+    motion: LyricMotion = LocalLyricMotion.current
 ) {
     val layout = remember { mutableStateOf<TextLayoutResult?>(null) }
     val styledText = remember(text, spans) { styled(text, spans) }
@@ -416,6 +552,12 @@ fun SmoothLyricLine(
     val wordStarts = wordLayout?.starts ?: defaultBoundaries.first
     val wordEnds = wordLayout?.ends ?: defaultBoundaries.second
     val length = text.length
+    val motionState = rememberUpdatedState(motion)
+
+    fun piecesNow(p: Float): List<LiftedPiece> {
+        val result = layout.value ?: return emptyList()
+        return liftedPieces(result, p, length, text, mode, wordStarts, wordEnds, motionState.value)
+    }
 
     Box(modifier = modifier) {
         Text(
@@ -423,7 +565,13 @@ fun SmoothLyricLine(
             style = style,
             color = baseColor,
             textAlign = textAlign,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                // The unsung copy moves with the sung one, so a lifted word never leaves a ghost.
+                .drawWithContent {
+                    val pieces = piecesNow(sungChars())
+                    drawWithLifts(pieces) { drawContent() }
+                },
             onTextLayout = { layout.value = it }
         )
         Text(
@@ -437,211 +585,251 @@ fun SmoothLyricLine(
                 .drawWithContent {
                     val p = sungChars()
                     if (p <= 0f) return@drawWithContent
-                    drawContent()
-                    if (p >= length) return@drawWithContent
-                    val result = layout.value ?: return@drawWithContent
-                    val w = size.width
-
-                    if (mode == LyricsHighlightMode.PHONEME) {
-                        for (line in 0 until result.lineCount) {
-                            val ls = result.getLineStart(line)
-                            val le = result.getLineEnd(line, visibleEnd = true)
-                            val top = result.getLineTop(line)
-                            val bottom = result.getLineBottom(line)
-                            if (p >= le) continue
-                            if (p <= ls) {
-                                drawRect(
-                                    color = Color.Black,
-                                    topLeft = Offset(0f, top),
-                                    size = Size(w, bottom - top),
-                                    blendMode = BlendMode.DstOut
-                                )
-                                continue
-                            }
-                            val rtl = result.getParagraphDirection(ls) == androidx.compose.ui.text.style.ResolvedTextDirection.Rtl
-                            val i = floor(p).toInt().coerceIn(ls, (le - 1).coerceAtLeast(ls))
-                            val t = p - i
-                            val a = result.getHorizontalPosition(i, usePrimaryDirection = true)
-                            val b = if (i + 1 < le) {
-                                result.getHorizontalPosition(i + 1, usePrimaryDirection = true)
-                            } else {
-                                if (rtl) result.getLineLeft(line) else result.getLineRight(line)
-                            }
-                            val x = a + (b - a) * t
-                            val feather = featherPx
-                            if (!rtl) {
-                                drawRect(
-                                    brush = Brush.horizontalGradient(
-                                        0f to Color.Transparent,
-                                        1f to Color.Black,
-                                        startX = x - feather,
-                                        endX = x + feather * 0.35f
-                                    ),
-                                    topLeft = Offset(x - feather, top),
-                                    size = Size((w - (x - feather)).coerceAtLeast(0f), bottom - top),
-                                    blendMode = BlendMode.DstOut
-                                )
-                            } else {
-                                drawRect(
-                                    brush = Brush.horizontalGradient(
-                                        0f to Color.Black,
-                                        1f to Color.Transparent,
-                                        startX = x - feather * 0.35f,
-                                        endX = x + feather
-                                    ),
-                                    topLeft = Offset(0f, top),
-                                    size = Size((x + feather).coerceAtMost(w), bottom - top),
-                                    blendMode = BlendMode.DstOut
-                                )
-                            }
-                        }
-                    } else {
-                        // WORD and AUTO modes: cohesive word-level progressive highlighting
-                        val activeWord = resolveWordState(wordStarts, wordEnds, p)
-
-                        for (line in 0 until result.lineCount) {
-                            val ls = result.getLineStart(line)
-                            val le = result.getLineEnd(line, visibleEnd = true)
-                            val top = result.getLineTop(line)
-                            val bottom = result.getLineBottom(line)
-                            val lineH = bottom - top
-                            if (lineH <= 0f) continue
-
-                            if (p <= ls) {
-                                drawRect(
-                                    color = Color.Black,
-                                    topLeft = Offset(0f, top),
-                                    size = Size(w, lineH),
-                                    blendMode = BlendMode.DstOut
-                                )
-                                continue
-                            }
-
-                            if (p >= le) {
-                                continue
-                            }
-
-                            val rtl = result.getParagraphDirection(ls) == androidx.compose.ui.text.style.ResolvedTextDirection.Rtl
-
-                            if (activeWord.activeIndex != -1 && activeWord.wordEnd > ls && activeWord.wordStart < le) {
-                                val kStart = activeWord.wordStart.coerceIn(ls, le)
-                                val kEnd = activeWord.wordEnd.coerceIn(kStart, le)
-                                val xA = result.getHorizontalPosition(kStart, usePrimaryDirection = true)
-                                val xB = result.getHorizontalPosition(kEnd, usePrimaryDirection = true)
-                                val wordLeft = minOf(xA, xB)
-                                val wordRight = maxOf(xA, xB)
-                                val wordW = (wordRight - wordLeft).coerceAtLeast(0f)
-
-                                val u = activeWord.fillProgress
-                                // Smoothstep easing for fluid progressive fill
-                                val activeWordFill = (u * u * (3f - 2f * u)).coerceIn(0f, 1f)
-
-                                // Mask active word with continuous progressive alpha (keeping glyphs 100% intact)
-                                val eraseAlpha = (1f - activeWordFill).coerceIn(0f, 1f)
-                                if (eraseAlpha > 0.001f && wordW > 0f) {
-                                    drawRect(
-                                        color = Color.Black.copy(alpha = eraseAlpha),
-                                        topLeft = Offset(wordLeft, top),
-                                        size = Size(wordW, lineH),
-                                        blendMode = BlendMode.DstOut
-                                    )
-                                }
-
-                                // Erase future unsung portion of this visual line
-                                if (!rtl) {
-                                    val futureLeft = wordRight
-                                    val futureW = (w - futureLeft).coerceAtLeast(0f)
-                                    if (futureW > 0f) {
-                                        drawRect(
-                                            color = Color.Black,
-                                            topLeft = Offset(futureLeft, top),
-                                            size = Size(futureW, lineH),
-                                            blendMode = BlendMode.DstOut
-                                        )
-                                    }
-                                } else {
-                                    val futureW = wordLeft.coerceAtLeast(0f)
-                                    if (futureW > 0f) {
-                                        drawRect(
-                                            color = Color.Black,
-                                            topLeft = Offset(0f, top),
-                                            size = Size(futureW, lineH),
-                                            blendMode = BlendMode.DstOut
-                                        )
-                                    }
-                                }
-
-                                // Fluid radiant bloom/glow brush
-                                val bloomIntensity = kotlin.math.sin(Math.PI * u).toFloat().coerceIn(0f, 1f)
-                                if (bloomIntensity > 0.01f && wordW > 0f) {
-                                    val glowCenter = wordLeft + wordW * u
-                                    val glowRadius = (wordW * 0.9f).coerceAtLeast(featherPx * 2.5f)
-
-                                    // Ambient luminous halo behind the active word
-                                    val ambientHaloBrush = Brush.radialGradient(
-                                        colors = listOf(
-                                            highlightColor.copy(alpha = 0.28f * bloomIntensity),
-                                            highlightColor.copy(alpha = 0.08f * bloomIntensity),
-                                            Color.Transparent
-                                        ),
-                                        center = Offset(wordLeft + wordW * 0.5f, (top + bottom) * 0.5f),
-                                        radius = ((wordRight - wordLeft) * 0.85f).coerceAtLeast(lineH)
-                                    )
-                                    drawCircle(
-                                        brush = ambientHaloBrush,
-                                        radius = ((wordRight - wordLeft) * 0.85f).coerceAtLeast(lineH),
-                                        center = Offset(wordLeft + wordW * 0.5f, (top + bottom) * 0.5f),
-                                        blendMode = BlendMode.DstOver
-                                    )
-
-                                    // Luminous radiant bloom over the active word glyphs
-                                    val glyphBloomBrush = Brush.horizontalGradient(
-                                        0.0f to highlightColor.copy(alpha = 0f),
-                                        0.3f to highlightColor.copy(alpha = 0.35f * bloomIntensity),
-                                        0.5f to Color.White.copy(alpha = 0.55f * bloomIntensity),
-                                        0.7f to highlightColor.copy(alpha = 0.35f * bloomIntensity),
-                                        1.0f to highlightColor.copy(alpha = 0f),
-                                        startX = (glowCenter - glowRadius).coerceAtLeast(0f),
-                                        endX = (glowCenter + glowRadius).coerceAtMost(w)
-                                    )
-                                    drawRect(
-                                        brush = glyphBloomBrush,
-                                        topLeft = Offset(wordLeft, top),
-                                        size = Size(wordW, lineH),
-                                        blendMode = BlendMode.SrcAtop
-                                    )
-                                }
-                            } else {
-                                // Singing is resting between words on this line
-                                val pInt = floor(p).toInt().coerceIn(ls, le)
-                                val splitX = result.getHorizontalPosition(pInt, usePrimaryDirection = true)
-
-                                if (!rtl) {
-                                    val futureW = (w - splitX).coerceAtLeast(0f)
-                                    if (futureW > 0f) {
-                                        drawRect(
-                                            color = Color.Black,
-                                            topLeft = Offset(splitX, top),
-                                            size = Size(futureW, lineH),
-                                            blendMode = BlendMode.DstOut
-                                        )
-                                    }
-                                } else {
-                                    val futureW = splitX.coerceAtLeast(0f)
-                                    if (futureW > 0f) {
-                                        drawRect(
-                                            color = Color.Black,
-                                            topLeft = Offset(0f, top),
-                                            size = Size(futureW, lineH),
-                                            blendMode = BlendMode.DstOut
-                                        )
-                                    }
-                                }
-                            }
-                        }
+                    if (p >= length) {
+                        drawContent()
+                        return@drawWithContent
+                    }
+                    val result = layout.value
+                    if (result == null) {
+                        drawContent()
+                        return@drawWithContent
+                    }
+                    val pieces = piecesNow(p)
+                    drawWithLifts(pieces) {
+                        drawContent()
+                        drawSungMask(result, p, mode, wordStarts, wordEnds, featherPx, highlightColor)
                     }
                 }
         )
+    }
+}
+
+/**
+ * Erases the unsung part of the highlight copy (DstOut) and adds the bloom on the word being sung.
+ * Must run right after the highlight text is drawn, in the same layer.
+ */
+private fun DrawScope.drawSungMask(
+    result: TextLayoutResult,
+    p: Float,
+    mode: LyricsHighlightMode,
+    wordStarts: IntArray,
+    wordEnds: IntArray,
+    featherPx: Float,
+    highlightColor: Color,
+) {
+    val w = size.width
+
+    if (mode == LyricsHighlightMode.PHONEME) {
+        for (line in 0 until result.lineCount) {
+            val ls = result.getLineStart(line)
+            val le = result.getLineEnd(line, visibleEnd = true)
+            val top = result.getLineTop(line)
+            val bottom = result.getLineBottom(line)
+            if (p >= le) continue
+            if (p <= ls) {
+                drawRect(
+                    color = Color.Black,
+                    topLeft = Offset(0f, top),
+                    size = Size(w, bottom - top),
+                    blendMode = BlendMode.DstOut
+                )
+                continue
+            }
+            val rtl = result.getParagraphDirection(ls) == androidx.compose.ui.text.style.ResolvedTextDirection.Rtl
+            val i = floor(p).toInt().coerceIn(ls, (le - 1).coerceAtLeast(ls))
+            val t = p - i
+            val a = result.getHorizontalPosition(i, usePrimaryDirection = true)
+            val b = if (i + 1 < le) {
+                result.getHorizontalPosition(i + 1, usePrimaryDirection = true)
+            } else {
+                if (rtl) result.getLineLeft(line) else result.getLineRight(line)
+            }
+            val x = a + (b - a) * t
+            val feather = featherPx
+            if (!rtl) {
+                drawRect(
+                    brush = Brush.horizontalGradient(
+                        0f to Color.Transparent,
+                        1f to Color.Black,
+                        startX = x - feather,
+                        endX = x + feather * 0.35f
+                    ),
+                    topLeft = Offset(x - feather, top),
+                    size = Size((w - (x - feather)).coerceAtLeast(0f), bottom - top),
+                    blendMode = BlendMode.DstOut
+                )
+            } else {
+                drawRect(
+                    brush = Brush.horizontalGradient(
+                        0f to Color.Black,
+                        1f to Color.Transparent,
+                        startX = x - feather * 0.35f,
+                        endX = x + feather
+                    ),
+                    topLeft = Offset(0f, top),
+                    size = Size((x + feather).coerceAtMost(w), bottom - top),
+                    blendMode = BlendMode.DstOut
+                )
+            }
+            // A soft glow riding the wipe edge, so the letter being sung shines as it fills.
+            val glowR = (bottom - top) * 0.6f
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(highlightColor.copy(alpha = 0.22f), Color.Transparent),
+                    center = Offset(x, (top + bottom) * 0.5f),
+                    radius = glowR
+                ),
+                radius = glowR,
+                center = Offset(x, (top + bottom) * 0.5f),
+                blendMode = BlendMode.DstOver
+            )
+        }
+        return
+    }
+
+    // WORD and AUTO modes: cohesive word-level progressive highlighting
+    val activeWord = resolveWordState(wordStarts, wordEnds, p)
+
+    for (line in 0 until result.lineCount) {
+        val ls = result.getLineStart(line)
+        val le = result.getLineEnd(line, visibleEnd = true)
+        val top = result.getLineTop(line)
+        val bottom = result.getLineBottom(line)
+        val lineH = bottom - top
+        if (lineH <= 0f) continue
+
+        if (p <= ls) {
+            drawRect(
+                color = Color.Black,
+                topLeft = Offset(0f, top),
+                size = Size(w, lineH),
+                blendMode = BlendMode.DstOut
+            )
+            continue
+        }
+
+        if (p >= le) {
+            continue
+        }
+
+        val rtl = result.getParagraphDirection(ls) == androidx.compose.ui.text.style.ResolvedTextDirection.Rtl
+
+        if (activeWord.activeIndex != -1 && activeWord.wordEnd > ls && activeWord.wordStart < le) {
+            val kStart = activeWord.wordStart.coerceIn(ls, le)
+            val kEnd = activeWord.wordEnd.coerceIn(kStart, le)
+            val xA = result.getHorizontalPosition(kStart, usePrimaryDirection = true)
+            val xB = result.getHorizontalPosition(kEnd, usePrimaryDirection = true)
+            val wordLeft = minOf(xA, xB)
+            val wordRight = maxOf(xA, xB)
+            val wordW = (wordRight - wordLeft).coerceAtLeast(0f)
+
+            val u = activeWord.fillProgress
+            // Smoothstep easing for fluid progressive fill
+            val activeWordFill = (u * u * (3f - 2f * u)).coerceIn(0f, 1f)
+
+            // Mask active word with continuous progressive alpha (keeping glyphs 100% intact)
+            val eraseAlpha = (1f - activeWordFill).coerceIn(0f, 1f)
+            if (eraseAlpha > 0.001f && wordW > 0f) {
+                drawRect(
+                    color = Color.Black.copy(alpha = eraseAlpha),
+                    topLeft = Offset(wordLeft, top),
+                    size = Size(wordW, lineH),
+                    blendMode = BlendMode.DstOut
+                )
+            }
+
+            // Erase future unsung portion of this visual line
+            if (!rtl) {
+                val futureLeft = wordRight
+                val futureW = (w - futureLeft).coerceAtLeast(0f)
+                if (futureW > 0f) {
+                    drawRect(
+                        color = Color.Black,
+                        topLeft = Offset(futureLeft, top),
+                        size = Size(futureW, lineH),
+                        blendMode = BlendMode.DstOut
+                    )
+                }
+            } else {
+                val futureW = wordLeft.coerceAtLeast(0f)
+                if (futureW > 0f) {
+                    drawRect(
+                        color = Color.Black,
+                        topLeft = Offset(0f, top),
+                        size = Size(futureW, lineH),
+                        blendMode = BlendMode.DstOut
+                    )
+                }
+            }
+
+            // Fluid radiant bloom/glow brush
+            val bloomIntensity = sin(Math.PI * u).toFloat().coerceIn(0f, 1f)
+            if (bloomIntensity > 0.01f && wordW > 0f) {
+                val glowCenter = wordLeft + wordW * u
+                val glowRadius = (wordW * 0.9f).coerceAtLeast(featherPx * 2.5f)
+
+                // Ambient luminous halo behind the active word
+                val haloRadius = (wordW * 0.85f).coerceAtLeast(lineH)
+                val haloCenter = Offset(wordLeft + wordW * 0.5f, (top + bottom) * 0.5f)
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            highlightColor.copy(alpha = 0.28f * bloomIntensity),
+                            highlightColor.copy(alpha = 0.08f * bloomIntensity),
+                            Color.Transparent
+                        ),
+                        center = haloCenter,
+                        radius = haloRadius
+                    ),
+                    radius = haloRadius,
+                    center = haloCenter,
+                    blendMode = BlendMode.DstOver
+                )
+
+                // Luminous radiant bloom over the active word glyphs
+                val glyphBloomBrush = Brush.horizontalGradient(
+                    0.0f to highlightColor.copy(alpha = 0f),
+                    0.3f to highlightColor.copy(alpha = 0.35f * bloomIntensity),
+                    0.5f to Color.White.copy(alpha = 0.55f * bloomIntensity),
+                    0.7f to highlightColor.copy(alpha = 0.35f * bloomIntensity),
+                    1.0f to highlightColor.copy(alpha = 0f),
+                    startX = (glowCenter - glowRadius).coerceAtLeast(0f),
+                    endX = (glowCenter + glowRadius).coerceAtMost(w)
+                )
+                drawRect(
+                    brush = glyphBloomBrush,
+                    topLeft = Offset(wordLeft, top),
+                    size = Size(wordW, lineH),
+                    blendMode = BlendMode.SrcAtop
+                )
+            }
+        } else {
+            // Singing is resting between words on this line
+            val pInt = floor(p).toInt().coerceIn(ls, le)
+            val splitX = result.getHorizontalPosition(pInt, usePrimaryDirection = true)
+
+            if (!rtl) {
+                val futureW = (w - splitX).coerceAtLeast(0f)
+                if (futureW > 0f) {
+                    drawRect(
+                        color = Color.Black,
+                        topLeft = Offset(splitX, top),
+                        size = Size(futureW, lineH),
+                        blendMode = BlendMode.DstOut
+                    )
+                }
+            } else {
+                val futureW = splitX.coerceAtLeast(0f)
+                if (futureW > 0f) {
+                    drawRect(
+                        color = Color.Black,
+                        topLeft = Offset(0f, top),
+                        size = Size(futureW, lineH),
+                        blendMode = BlendMode.DstOut
+                    )
+                }
+            }
+        }
     }
 }
 

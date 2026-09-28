@@ -16,11 +16,16 @@ import com.theveloper.pixelplay.data.database.serializeJsonObject
 import com.theveloper.pixelplay.data.model.AudioTech
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.repository.MusicRepository
+import com.theveloper.pixelplay.data.youtube.YouTubeRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -62,17 +67,32 @@ sealed interface SongVersionsState {
     data class Loaded(val versions: List<SongVersion>) : SongVersionsState
 }
 
+/** Versions of the song found online (studio, live, acoustic, remixes, covers…). */
+sealed interface OnlineVersionsState {
+    data object Idle : OnlineVersionsState
+    data object Loading : OnlineVersionsState
+    @Immutable
+    data class Loaded(val versions: List<SongVersion>) : OnlineVersionsState
+    data object Failed : OnlineVersionsState
+}
+
 /**
  * Finds other versions of a song in the local library: same primary artist, same base title
  * (title with version tags like "(Live)" or "- Remastered 2011" stripped). The original is
- * listed first.
+ * listed first. On request it also searches online for every version of the song.
  */
 @HiltViewModel
 class AudioDetailsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val musicRepository: MusicRepository,
-    private val musicDao: MusicDao
+    private val musicDao: MusicDao,
+    private val youTubeRepository: YouTubeRepository
 ) : ViewModel() {
+
+    private val _onlineVersions = MutableStateFlow<OnlineVersionsState>(OnlineVersionsState.Idle)
+    val onlineVersions: StateFlow<OnlineVersionsState> = _onlineVersions.asStateFlow()
+    private var onlineSongId: String? = null
+    private var onlineJob: Job? = null
 
     private val _scanState = MutableStateFlow<AudioScanState>(AudioScanState.Idle)
     val scanState: StateFlow<AudioScanState> = _scanState.asStateFlow()
@@ -87,6 +107,11 @@ class AudioDetailsViewModel @Inject constructor(
     fun load(song: Song) {
         if (loadedSongId == song.id && _versions.value is SongVersionsState.Loaded) return
         loadedSongId = song.id
+        if (onlineSongId != song.id) {
+            onlineJob?.cancel()
+            onlineSongId = null
+            _onlineVersions.value = OnlineVersionsState.Idle
+        }
         scanJob?.cancel()
         _scanState.value = AudioScanState.Idle
         loadJob?.cancel()
@@ -100,6 +125,70 @@ class AudioDetailsViewModel @Inject constructor(
                 listOf(SongVersion(song, SongVersionMatcher.versionTag(song.title), isOriginal = true))
             }
             _versions.value = SongVersionsState.Loaded(result)
+        }
+    }
+
+    /**
+     * Searches online for every version of [song]: the plain title plus live, acoustic, remix
+     * and cover queries, merged and filtered to results whose base title matches. Songs already
+     * in the local list are left out. Runs once per song; [force] retries after a failure.
+     */
+    fun loadOnline(song: Song, force: Boolean = false) {
+        val state = _onlineVersions.value
+        if (!force && onlineSongId == song.id &&
+            (state is OnlineVersionsState.Loading || state is OnlineVersionsState.Loaded)
+        ) return
+        onlineSongId = song.id
+        onlineJob?.cancel()
+        _onlineVersions.value = OnlineVersionsState.Loading
+        onlineJob = viewModelScope.launch {
+            _onlineVersions.value = try {
+                OnlineVersionsState.Loaded(findOnlineVersions(song))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Online version search failed for ${song.id}: ${e.message}")
+                OnlineVersionsState.Failed
+            }
+        }
+    }
+
+    private suspend fun findOnlineVersions(song: Song): List<SongVersion> {
+        val base = SongVersionMatcher.baseTitle(song.title)
+        if (base.isBlank()) return emptyList()
+        val artist = SongVersionMatcher.primaryArtist(song.artist)
+        val queries = listOf(
+            "$base $artist",
+            "$base $artist live",
+            "$base $artist acoustic",
+            "$base $artist remix",
+            "$base cover"
+        ).map { it.replace(Regex("""\s+"""), " ").trim() }.distinct()
+
+        val results = coroutineScope {
+            queries.map { query ->
+                async {
+                    try {
+                        withTimeoutOrNull(ONLINE_QUERY_TIMEOUT_MS) { youTubeRepository.searchSongs(query) }.orEmpty()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Online query '$query' failed: ${e.message}")
+                        null
+                    }
+                }
+            }.awaitAll()
+        }
+        if (results.all { it == null }) error("All online version queries failed")
+
+        val localIds = (_versions.value as? SongVersionsState.Loaded)
+            ?.versions?.mapNotNull { it.song.youtubeId ?: it.song.id }?.toSet().orEmpty()
+        return withContext(Dispatchers.Default) {
+            SongVersionMatcher.orderOnlineVersions(
+                current = song,
+                candidates = results.filterNotNull().flatten(),
+                excludeIds = localIds + setOfNotNull(song.id, song.youtubeId)
+            )
         }
     }
 
@@ -230,6 +319,8 @@ class AudioDetailsViewModel @Inject constructor(
 }
 
 private const val TAG = "AudioDetailsViewModel"
+private const val ONLINE_QUERY_TIMEOUT_MS = 12_000L
+private const val MAX_ONLINE_VERSIONS = 25
 
 internal object SongVersionMatcher {
     private val versionKeywords = listOf(
@@ -290,6 +381,67 @@ internal object SongVersionMatcher {
     }
 
     private fun Song.yearOrMax(): Int = year.takeIf { it > 0 } ?: Int.MAX_VALUE
+
+    private val nonWord = Regex("""[^\p{L}\p{N}]+""")
+
+    private fun String.squash(): String = lowercase(Locale.ROOT).replace(nonWord, " ").trim()
+
+    private val fillerWords = setOf(
+        "official", "video", "audio", "lyrics", "lyric", "hd", "hq", "4k", "music", "visualizer",
+        "visualiser", "performance", "session", "sessions", "version", "feat", "ft", "featuring",
+        "with", "and", "x", "the", "by", "from", "at", "in", "on", "topic", "vevo", "full", "song"
+    )
+
+    /**
+     * True when [candidate]'s title is [base] with only version/feature tags, artist names or
+     * filler ("Official Video") around it, so "Love" doesn't match "I Love You".
+     */
+    fun titleMatchesBase(candidate: String, base: String, artists: String = ""): Boolean {
+        val baseWords = base.squash().split(' ').filter { it.isNotEmpty() }
+        if (baseWords.isEmpty()) return false
+        val candidateWords = baseTitle(candidate).squash().split(' ').filter { it.isNotEmpty() }
+        val start = (0..candidateWords.size - baseWords.size).firstOrNull { i ->
+            candidateWords.subList(i, i + baseWords.size) == baseWords
+        } ?: return false
+        val leftover = candidateWords.subList(0, start) + candidateWords.subList(start + baseWords.size, candidateWords.size)
+        if (leftover.isEmpty()) return true
+        val allowed = artists.squash().split(' ').toSet()
+        return leftover.all { word ->
+            word in allowed || word in fillerWords || word.all(Char::isDigit) ||
+                versionKeywords.any { keyword -> keyword.split(' ').any { word.startsWith(it) } }
+        }
+    }
+
+    /**
+     * Online results that are versions of [current]: same base title, not already listed.
+     * The same artist's versions come first (untagged studio versions before tagged ones),
+     * then other artists' covers.
+     */
+    fun orderOnlineVersions(current: Song, candidates: List<Song>, excludeIds: Set<String>): List<SongVersion> {
+        val base = baseTitle(current.title)
+        val currentArtist = primaryArtist(current.artist)
+        return candidates
+            .asSequence()
+            .filter { it.id !in excludeIds && (it.youtubeId == null || it.youtubeId !in excludeIds) }
+            .distinctBy { it.youtubeId ?: it.id }
+            .filter { titleMatchesBase(it.title, base, "${current.artist} ${it.artist}") }
+            .map { candidate ->
+                val tag = versionTag(candidate.title)
+                val sameArtist = currentArtist.isNotEmpty() &&
+                    (primaryArtist(candidate.artist) == currentArtist ||
+                        candidate.artist.lowercase(Locale.ROOT).contains(currentArtist))
+                Triple(candidate, tag, sameArtist)
+            }
+            .sortedWith(
+                compareByDescending<Triple<Song, String?, Boolean>> { it.third }
+                    .thenBy { it.second != null }
+            )
+            .take(MAX_ONLINE_VERSIONS)
+            .map { (song, tag, sameArtist) ->
+                SongVersion(song, tag ?: if (sameArtist) null else "Cover", isOriginal = false)
+            }
+            .toList()
+    }
 
     fun orderVersions(current: Song, candidates: List<Song>): List<SongVersion> {
         val base = baseTitle(current.title)

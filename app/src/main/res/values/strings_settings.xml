@@ -812,6 +812,8 @@
     <!-- Face-to-face lyrics -->
     <string name="settings_lyrics_split_face_title">Face-to-face lyrics</string>
     <string name="settings_lyrics_split_face_subtitle">In full-screen lyrics, split the screen so people on both sides can read along</string>
+    <string name="settings_lyrics_landscape_lyrics_left_title">Landscape: lyrics on the left</string>
+    <string name="settings_lyrics_landscape_lyrics_left_subtitle">Sideways, the song and controls sit on one half and the lyrics on the other. Turn on to put the lyrics on the left</string>
     <string name="settings_lyrics_split_face_needs_immersive">Needs immersive lyrics</string>
 
     <!-- Camera island -->

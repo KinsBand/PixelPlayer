@@ -57,7 +57,8 @@ import com.theveloper.pixelplay.presentation.components.SmartImage
 /**
  * Collapsed form of the lyrics header: one compact bar, Now on the left (at most half the
  * width, visually dominant) and Next on the right (quieter). Tapping the Next half skips to that
- * song straight away. The expand button restores the full header card.
+ * song straight away. The expand button restores the full header card. Face-to-face mode uses the
+ * bar without the expand button, and tapping its current song leaves face-to-face ([onNowClick]).
  *
  * When the queue moves forward (the song that was Next becomes Now), both halves slide left so the
  * bar reads as the queue progressing; any other change (previous, a new queue) just crossfades.
@@ -77,6 +78,12 @@ internal fun CollapsedNowNextBar(
     modifier: Modifier = Modifier,
     /** 0..1 alpha for the quieter Next half when the screen has been idle. */
     nextAlpha: () -> Float = { 1f },
+    /** Tap on the current song (cover + title). Not clickable when null. */
+    onNowClick: (() -> Unit)? = null,
+    /** Spoken action for [onNowClick], e.g. "Leave face-to-face lyrics". */
+    nowClickLabel: String? = null,
+    /** Face-to-face has no room for the full card, so it hides the expand button. */
+    showExpand: Boolean = true,
 ) {
     val haptics = LocalHapticFeedback.current
 
@@ -107,7 +114,18 @@ internal fun CollapsedNowNextBar(
             ) { song ->
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(start = 6.dp)
+                    modifier = Modifier
+                        .then(
+                            if (onNowClick != null) {
+                                Modifier
+                                    .clip(CircleShape)
+                                    .clickable(role = Role.Button, onClickLabel = nowClickLabel) {
+                                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onNowClick()
+                                    }
+                            } else Modifier
+                        )
+                        .padding(start = 6.dp, end = if (showExpand) 0.dp else 14.dp)
                 ) {
                     SmartImage(
                         model = song?.albumArtUriString ?: R.drawable.rounded_album_24,
@@ -125,16 +143,18 @@ internal fun CollapsedNowNextBar(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
                     )
-                    IconButton(
-                        onClick = onExpand,
-                        modifier = Modifier.size(40.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.KeyboardArrowDown,
-                            contentDescription = "Expand song details",
-                            tint = contentColor.copy(alpha = 0.8f),
-                            modifier = Modifier.size(22.dp)
-                        )
+                    if (showExpand) {
+                        IconButton(
+                            onClick = onExpand,
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.KeyboardArrowDown,
+                                contentDescription = "Expand song details",
+                                tint = contentColor.copy(alpha = 0.8f),
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
                     }
                 }
             }

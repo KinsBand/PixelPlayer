@@ -18,7 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Streaming:** resuming after a long pause plays the 7 s rewind from memory instead of refetching the song.
 - **Streaming:** the two songs after the next one also get their manifests ready (three in all), and the next song's cover is prefetched.
 - **Search:** opening Search pre-opens the search and playback connections, so the first query and first tap skip the connection setup.
+- **Lyrics:** livelier transitions. A new current line rises into place and lands with a small spring; the word being sung lifts and swells while it's held and settles as the next one starts; in letter mode a soft wave of lifted letters follows the voice, with a glow on the wipe edge. The unsung copy moves with the sung one so nothing ghosts. Turned off by the system "Remove animations" setting.
+- **Lyrics:** adaptive expressive typography now visibly changes per song. Each song gets its own size, line height, tracking and base weight, per-word emphasis is stronger, and the motion above (how far words jump, how bouncy lines land) follows the song. Songs without an audio analysis get their voice from their genre and lyric pacing instead of all looking the same.
+- **Lyrics:** face-to-face mode shows the minimised song bar (cover, title, next song) instead of the full card; the section pill beside the centre line stays. Tapping the current song leaves face-to-face mode.
 ### Added
+- **Audio details:** Versions also searches online for every version of the song (studio, live, acoustic, remixes and covers), listed under the library's versions. Tapping one plays it.
+- **Lyrics:** sideways, the lyrics screen splits in two: the song card (full or minimised, with the song structure) and the controls on one half, the lyrics on the other using its full height. Settings → Lyrics (and the lyrics menu) can put the lyrics on the left instead.
+- **Lyrics:** face-to-face mode sideways puts the two readers' halves side by side (the left one turned 180°), each with its section pill at the top and the minimised song bar at the bottom, and a play / pause button on the centre line.
+- **Lyrics:** face-to-face mode has a small play / pause button where the dot on the centre line was.
 - **Lyrics:** the top song card can collapse into a compact Now / Next bar (swipe up or the chevron; swipe down or the arrow to expand). Tapping Next skips to that song straight away, and when a song ends the bar slides left as the queue moves on.
 - **Lyrics:** a + button (toolbar, and next to the arrow in immersive) opens Search to add a song. Tapping a song there opens a small Play / Next / Soon / Queue sheet; picking one goes straight back to the lyrics with a short "Playing next ✓" style confirmation. Other buttons on song cards work as before.
 - **Queue:** Play Soon — lands after the current song and anything already added with Play next, at most three songs ahead.
