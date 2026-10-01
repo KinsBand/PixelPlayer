@@ -58,6 +58,11 @@ class YouTubeRepositoryImpl @Inject constructor(
         return searchItems(query, SearchFilterType.SONGS).filterIsInstance<SearchResultItem.SongItem>().map { it.song }
     }
 
+    override suspend fun moreSongs(query: String, reset: Boolean): Pair<List<Song>, Boolean> {
+        if (reset) apiService.resetMoreSongs(query)
+        return apiService.moreSongs(query).getOrThrow()
+    }
+
     override suspend fun resolveStreamUrl(videoId: String): String? {
         return streamExtractor.getStreamUrl(videoId)
     }

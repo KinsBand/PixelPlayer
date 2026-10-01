@@ -2,6 +2,8 @@ package com.theveloper.pixelplay.data.recognition.shizuku
 
 import com.theveloper.pixelplay.data.model.HeardSongItem
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.data.recognition.RecentlyHeardRepository
+import com.theveloper.pixelplay.data.recognition.RecentlyHeardSource
 import com.theveloper.pixelplay.data.repository.HeardSongsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -13,7 +15,8 @@ import javax.inject.Singleton
 @Singleton
 class PixelNowPlayingBridge @Inject constructor(
     private val shizukuManager: ShizukuManager,
-    private val heardSongsRepository: HeardSongsRepository
+    private val heardSongsRepository: HeardSongsRepository,
+    private val recentlyHeardRepository: RecentlyHeardRepository
 ) {
     companion object {
         const val NOW_PLAYING_URI = "content://com.google.intelligence.sense.ambientmusic.history/entries"
@@ -43,7 +46,10 @@ class PixelNowPlayingBridge @Inject constructor(
                 val title = fields["song_title"] ?: fields["title"] ?: fields["name"]
                 val artist = fields["artist_name"] ?: fields["artist"] ?: ""
                 val timestampStr = fields["timestamp"] ?: fields["detected_time"] ?: fields["date"]
-                val timestamp = timestampStr?.toLongOrNull() ?: System.currentTimeMillis()
+                // Some builds store seconds, others milliseconds.
+                val timestamp = timestampStr?.toLongOrNull()
+                    ?.let { if (it in 1..99_999_999_999L) it * 1000 else it }
+                    ?: System.currentTimeMillis()
 
                 if (!title.isNullOrBlank()) {
                     val id = fields["_id"] ?: fields["song_id"] ?: UUID.randomUUID().toString()
@@ -80,12 +86,14 @@ class PixelNowPlayingBridge @Inject constructor(
         result.fold(
             onSuccess = { rawOutput ->
                 val parsed = parseContentQueryOutput(rawOutput)
-                // Merge into heardSongsRepository
+                // Now Playing history goes to Recently heard with its real times. It is not
+                // pushed into the conversation list (that fed the ambient pill with old songs).
                 for (item in parsed) {
-                    heardSongsRepository.addOrUpvote(
-                        song = item.song,
-                        isOnlineMatch = true,
-                        rawPhrase = "Now Playing"
+                    recentlyHeardRepository.record(
+                        title = item.song.title,
+                        artist = item.song.artist.takeUnless { it == "Unknown Artist" }.orEmpty(),
+                        heardAtEpochMs = item.detectedAtEpochMs,
+                        source = RecentlyHeardSource.NOW_PLAYING_HISTORY
                     )
                 }
                 parsed.ifEmpty { heardSongsRepository.heardSongs.value }

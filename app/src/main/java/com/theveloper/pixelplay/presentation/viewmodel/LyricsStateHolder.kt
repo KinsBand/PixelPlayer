@@ -7,6 +7,8 @@ import com.theveloper.pixelplay.data.media.SongMetadataEditor
 import com.theveloper.pixelplay.data.model.Lyrics
 import com.theveloper.pixelplay.data.model.LyricsSourcePreference
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.data.lyrics.autosync.LyricsAutoSync
+import com.theveloper.pixelplay.data.preferences.LyricsSyncOffsetState
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
 import com.theveloper.pixelplay.data.repository.LyricsSearchResult
 import com.theveloper.pixelplay.data.repository.MusicRepository
@@ -26,8 +28,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -70,10 +77,15 @@ class LyricsStateHolder @Inject constructor(
     private var upgradeJob: Job? = null
     private var prefetchJob: Job? = null
     private var loadCallback: LyricsLoadCallback? = null
+    private var playerState: StateFlow<StablePlayerState>? = null
 
-    // Sync offset per song in milliseconds
+    // Sync offset per song in milliseconds (manual if set, else automatic, else 0)
     private val _currentSongSyncOffset = MutableStateFlow(0)
     val currentSongSyncOffset: StateFlow<Int> = _currentSongSyncOffset.asStateFlow()
+
+    // Where the current song's offset comes from (manual / automatic)
+    private val _currentSongSyncOffsetState = MutableStateFlow(LyricsSyncOffsetState())
+    val currentSongSyncOffsetState: StateFlow<LyricsSyncOffsetState> = _currentSongSyncOffsetState.asStateFlow()
 
     // Lyrics search UI state
     private val _searchUiState = MutableStateFlow<LyricsSearchUiState>(LyricsSearchUiState.Idle)
@@ -96,6 +108,7 @@ class LyricsStateHolder @Inject constructor(
     /**
      * Initialize with coroutine scope and callback from ViewModel.
      */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun initialize(
         coroutineScope: CoroutineScope,
         callback: LyricsLoadCallback,
@@ -103,16 +116,55 @@ class LyricsStateHolder @Inject constructor(
     ) {
         scope = coroutineScope
         loadCallback = callback
+        playerState = stablePlayerState
 
+        // Follow the current song's offset, including automatic offsets that arrive later.
         coroutineScope.launch {
             stablePlayerState
                 .map { it.currentSong?.id }
                 .distinctUntilChanged()
-                .collect { songId ->
-                    if (songId != null) {
-                        updateSyncOffsetForSong(songId)
-                    }
+                .flatMapLatest { songId ->
+                    if (songId == null) flowOf(LyricsSyncOffsetState())
+                    else userPreferencesRepository.getLyricsSyncOffsetStateFlow(songId)
                 }
+                .collect { state ->
+                    _currentSongSyncOffsetState.value = state
+                    _currentSongSyncOffset.value = state.effectiveMs
+                }
+        }
+
+        // Measure the offset automatically once the current song's synced lyrics are in (a saved
+        // result applies at once; a new measurement waits until the user settles on the song).
+        coroutineScope.launch {
+            combine(
+                stablePlayerState
+                    .map { it.currentSong to it.lyrics }
+                    .distinctUntilChanged { a, b -> a.first?.id == b.first?.id && a.second?.synced == b.second?.synced },
+                userPreferencesRepository.lyricsAutoSyncEnabledFlow.distinctUntilChanged()
+            ) { songAndLyrics, enabled -> Triple(songAndLyrics.first, songAndLyrics.second, enabled) }
+                .mapLatest { (song, lyrics, enabled) ->
+                    if (song == null || !enabled || lyrics?.synced.isNullOrEmpty()) return@mapLatest
+                    requestAutoSync(song, lyrics, lookAhead = false)
+                }
+                .collect { }
+        }
+    }
+
+    /**
+     * Asks [LyricsAutoSync] to measure [song]'s offset for [lyrics] unless auto-sync is off or the
+     * user already set an offset for this song by hand. No-op when auto-sync isn't installed.
+     */
+    private suspend fun requestAutoSync(song: Song, lyrics: Lyrics?, lookAhead: Boolean) {
+        val autoSync = LyricsAutoSync.get() ?: return
+        if (lyrics?.synced.isNullOrEmpty()) return
+        try {
+            if (!userPreferencesRepository.lyricsAutoSyncEnabledFlow.first()) return
+            if (userPreferencesRepository.hasManualLyricsSyncOffset(song.id)) return
+            autoSync.request(song, lyrics, lookAhead)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            // Best effort: lyrics keep their own timing.
         }
     }
 
@@ -182,9 +234,16 @@ class LyricsStateHolder @Inject constructor(
         prefetchJob?.cancel()
         if (songs.isEmpty()) return
         prefetchJob = scope?.launch(Dispatchers.IO) {
-            for (song in songs) {
+            for ((index, song) in songs.withIndex()) {
                 try {
-                    musicRepository.prefetchLyrics(song)
+                    val synced = musicRepository.prefetchLyrics(song)
+                    // Measure the next song's lyrics offset now, so it is ready when it starts.
+                    if (synced && index == 0) {
+                        musicRepository.getStoredLyrics(song)?.first?.let { stored ->
+                            val cleaned = com.theveloper.pixelplay.utils.LyricsCleanup.clean(stored, song.title, song.artist)
+                            requestAutoSync(song, cleaned, lookAhead = true)
+                        }
+                    }
                 } catch (cancellation: CancellationException) {
                     throw cancellation
                 } catch (_: Exception) {
@@ -221,6 +280,19 @@ class LyricsStateHolder @Inject constructor(
         scope?.launch {
             userPreferencesRepository.setLyricsSyncOffset(songId, offsetMs)
             _currentSongSyncOffset.value = offsetMs
+        }
+    }
+
+    /**
+     * Drop the user's offset for a song so the automatic one (if any) applies again.
+     */
+    fun resetSyncOffsetToAuto(songId: String) {
+        scope?.launch {
+            userPreferencesRepository.clearLyricsSyncOffset(songId)
+            // The state flow collected in initialize() publishes the new effective value.
+            val state = playerState?.value ?: return@launch
+            val song = state.currentSong?.takeIf { it.id == songId } ?: return@launch
+            requestAutoSync(song, state.lyrics, lookAhead = false)
         }
     }
 
@@ -601,6 +673,7 @@ class LyricsStateHolder @Inject constructor(
         prefetchJob?.cancel()
         scope = null
         loadCallback = null
+        playerState = null
     }
 
     private companion object {

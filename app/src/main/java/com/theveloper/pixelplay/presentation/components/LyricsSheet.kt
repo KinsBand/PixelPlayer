@@ -77,6 +77,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import com.theveloper.pixelplay.presentation.components.lyrics.scrollSpec
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -120,6 +122,14 @@ import com.theveloper.pixelplay.presentation.components.subcomps.PlayerSeekBar
 import com.theveloper.pixelplay.presentation.viewmodel.LyricsSearchUiState
 import com.theveloper.pixelplay.presentation.viewmodel.StablePlayerState
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
+import com.theveloper.pixelplay.ui.theme.MotionTokens
+import com.theveloper.pixelplay.ui.theme.rememberSystemReducedMotion
+import androidx.compose.animation.core.snap
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.lerp
 import com.theveloper.pixelplay.utils.BubblesLine
 import com.theveloper.pixelplay.presentation.components.lyrics.SplitFaceLyricsView
 import com.theveloper.pixelplay.presentation.components.lyrics.CustomLyricsEditor
@@ -169,6 +179,9 @@ import com.theveloper.pixelplay.utils.MultiLangRomanizer
 
 private object UnsetRelayoutKey
 private class RelayoutTracker { var key: Any? = UnsetRelayoutKey }
+
+/** DataStore key: Instruments page shows live lyrics above the tab ("Lyrics + Tab"). */
+private const val LYRICS_WITH_TAB_KEY = "lyrics_tab_combined_view"
 
 /** Largest lyric size (sp) full screen, immersive included. */
 private const val MAX_LYRIC_FONT_SP = 40f
@@ -353,6 +366,9 @@ fun LyricsSheet(
     onDismissLyricsSearch: () -> Unit,
     lyricsSyncOffset: Int,
     onLyricsSyncOffsetChange: (Int) -> Unit,
+    lyricsSyncOffsetIsAutomatic: Boolean = false,
+    lyricsSyncOffsetIsManual: Boolean = false,
+    onLyricsSyncOffsetResetToAutomatic: (() -> Unit)? = null,
     lyricsTextStyle: TextStyle,
     colorScheme: ColorScheme,
     onBackClick: () -> Unit,
@@ -506,6 +522,18 @@ fun LyricsSheet(
     }
     val coroutineScope = rememberCoroutineScope()
 
+    // Instruments page "Lyrics + Tab" mode (options menu toggle, off by default, remembered).
+    val lyricsWithTabFlow = remember(context) {
+        context.dataStore.data.map { it[booleanPreferencesKey(LYRICS_WITH_TAB_KEY)] ?: false }
+    }
+    val lyricsWithTab by lyricsWithTabFlow.collectAsStateWithLifecycle(initialValue = false)
+    val setLyricsWithTab: (Boolean) -> Unit = { enabled ->
+        coroutineScope.launch {
+            context.dataStore.edit { prefs -> prefs[booleanPreferencesKey(LYRICS_WITH_TAB_KEY)] = enabled }
+        }
+    }
+    val reducedMotion = rememberSystemReducedMotion()
+
     // Apply FLAG_KEEP_SCREEN_ON via the window when enabled
     val view = LocalView.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
@@ -650,12 +678,19 @@ fun LyricsSheet(
     //    or a swipe up from the bottom, brings them back.
     //  - Delay off (manual): they never hide or come back by themselves. Swipe them down to
     //    hide, swipe up from the bottom (or tap the arrow) to bring them back.
+    // Face-to-face stays on once it's open: changing songs (swipes, Next, the song ending),
+    // touches, lyrics reloading and rotating between portrait and landscape all keep it. Only
+    // tapping the song playing now (or turning the setting off) leaves it.
+    var faceToFaceHold by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    val faceToFaceHoldState = rememberUpdatedState(faceToFaceHold)
     val immersivePageAllows = performanceView == PerformanceView.Instruments || showSyncedLyrics == true
     val immersiveActive = immersiveLyricsEnabled && immersivePageAllows && !isImmersiveTemporarilyDisabled
     val immersiveManual = immersiveActive && immersiveLyricsTimeout <= IMMERSIVE_TIMEOUT_OFF
     val immersiveManualState = rememberUpdatedState(immersiveManual)
-    LaunchedEffect(immersiveActive, immersiveManual, lastInteractionTime, immersiveLyricsTimeout) {
+    LaunchedEffect(immersiveActive, immersiveManual, lastInteractionTime, immersiveLyricsTimeout, faceToFaceHold) {
         when {
+            // Face-to-face keeps the controls hidden, even while the next song's lyrics load.
+            faceToFaceHold -> immersiveMode = true
             !immersiveActive -> immersiveMode = false
             // Manual: leave the controls exactly as the user put them.
             immersiveManual -> Unit
@@ -677,7 +712,7 @@ fun LyricsSheet(
     /** Any touch: restarts the auto-hide timer. In manual mode it doesn't unhide the controls. */
     fun resetImmersiveTimer() {
         lastInteractionTime = System.currentTimeMillis()
-        if (!immersiveManualState.value) immersiveMode = false
+        if (!immersiveManualState.value && !faceToFaceHoldState.value) immersiveMode = false
     }
 
     /** Swipe up from the bottom / the arrow button: always brings the controls back. */
@@ -693,6 +728,7 @@ fun LyricsSheet(
      */
     fun exitFaceToFace() {
         hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+        faceToFaceHold = false
         showControlsNow()
         coroutineScope.launch {
             context.editLyricsDisplayPrefs { it[LyricsDisplayPrefKeys.SPLIT_FACE_VIEW] = false }
@@ -712,11 +748,24 @@ fun LyricsSheet(
 
     // Face-to-face split view: immersive + setting on + synced lyrics on the lyrics page.
     val lyricsDisplayPrefs by rememberLyricsDisplayPrefs()
-    val splitActive = immersiveMode &&
-        lyricsDisplayPrefs.splitFaceView &&
-        showSyncedLyrics == true &&
-        performanceView == PerformanceView.Lyrics &&
-        !lyrics?.synced.isNullOrEmpty()
+    // Opens with immersive + setting on + synced lyrics; once open it's held (see faceToFaceHold),
+    // so a song without synced lyrics yet shows a short note in the split instead of closing it.
+    val splitActive = performanceView == PerformanceView.Lyrics && (
+        faceToFaceHold || (
+            immersiveMode &&
+                lyricsDisplayPrefs.splitFaceView &&
+                showSyncedLyrics == true &&
+                !lyrics?.synced.isNullOrEmpty()
+            )
+        )
+    LaunchedEffect(splitActive) { if (splitActive) faceToFaceHold = true }
+    // Turning the setting off elsewhere lets go too (only a real on → off change: the prefs start
+    // from defaults for a moment after rotation).
+    var lastSplitPref by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(lyricsDisplayPrefs.splitFaceView) {
+        if (lastSplitPref == true && !lyricsDisplayPrefs.splitFaceView) faceToFaceHold = false
+        lastSplitPref = lyricsDisplayPrefs.splitFaceView
+    }
     val splitActiveState = rememberUpdatedState(splitActive)
     val isLandscapeState = rememberUpdatedState(isLandscape)
     var swipeFromTopHalf by remember { mutableStateOf(false) }
@@ -1001,7 +1050,9 @@ fun LyricsSheet(
         com.theveloper.pixelplay.presentation.components.lyrics.LocalLyricMotion provides when {
             systemAnimationsOff -> com.theveloper.pixelplay.presentation.components.lyrics.LyricMotion.Still
             else -> expressionProfile?.motion ?: com.theveloper.pixelplay.presentation.components.lyrics.LyricMotion.Default
-        }
+        },
+        com.theveloper.pixelplay.presentation.components.lyrics.LocalLyricAnimationStyle provides lyricsDisplayPrefs.animationStyle,
+        com.theveloper.pixelplay.presentation.components.lyrics.LocalLyricReducedMotion provides systemAnimationsOff
     ) {
         Scaffold(
             modifier = modifier
@@ -1020,62 +1071,8 @@ fun LyricsSheet(
                     scaleY = scale
                     translationY = lerp(0f, size.height * 0.08f, p)
                 }
-                .clip(RoundedCornerShape(32.dp))
-                .pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragStart = { startOffset ->
-                            isSwipeActive = true
-                            hasTriggeredAction = false
-                            dragOffset = 0f
-                            // In the split view the top half (the left half in landscape) is read
-                            // from the other side of the phone, so left/right are reversed for them.
-                            swipeFromTopHalf = splitActiveState.value && if (isLandscapeState.value) {
-                                startOffset.x < size.width / 2f
-                            } else {
-                                startOffset.y < size.height / 2f
-                            }
-                            resetImmersiveTimer()
-                            coroutineScope.launch {
-                                swipeProgress.snapTo(0f)
-                            }
-                        },
-                        onDragEnd = {
-                            isSwipeActive = false
-                            val committed = abs(dragOffset) > swipeThresholdPx && !hasTriggeredAction 
-                        
-                            if (committed) {
-                                val goNext = (dragOffset < 0) != swipeFromTopHalf
-                                if (goNext) onNext() else onPrev()
-                                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                            }
-
-                            coroutineScope.launch {
-                                 swipeProgress.animateTo(0f, tween(200))
-                                 dragOffset = 0f
-                            }
-                        },
-                        onDragCancel = {
-                            isSwipeActive = false
-                            dragOffset = 0f
-                            coroutineScope.launch {
-                                swipeProgress.animateTo(0f, tween(200))
-                            }
-                        },
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            resetImmersiveTimer()
-                        
-                            if (!hasTriggeredAction) {
-                                dragOffset += dragAmount.x
-                                val progress = (abs(dragOffset) / swipeThresholdPx).coerceIn(0f, 1f)
-                            
-                                coroutineScope.launch {
-                                    swipeProgress.snapTo(progress)
-                                }
-                            }
-                        }
-                    )
-                },
+                // No left/right swipe to change songs here: use the skip buttons.
+                .clip(RoundedCornerShape(32.dp)),
             containerColor = containerColor,
             contentColor = contentColor,
             // Removed TopBar and FAB
@@ -1245,9 +1242,9 @@ fun LyricsSheet(
                     }
                 }
 
-                val lyricsBlock: @Composable BoxScope.(lyricsTop: Dp) -> Unit = { lyricsTop ->
-                    when (performanceView) {
-                        PerformanceView.Lyrics -> {
+                // The lyrics page body (loading / synced / plain), exactly as the user has it set up.
+                // Shared by the Lyrics page and the Instruments page's "Lyrics + Tab" mode.
+                val lyricsPaneContent: @Composable (lyricsTop: Dp, paneModifier: Modifier) -> Unit = { lyricsTop, paneModifier ->
                             AnimatedContent(
                                 targetState = showSyncedLyrics,
                                 transitionSpec = {
@@ -1264,7 +1261,7 @@ fun LyricsSheet(
                                     }
                                 },
                                 label = "LyricsModeAnimatedContent",
-                                modifier = Modifier.fillMaxSize()
+                                modifier = paneModifier
                             ) { currentShowSynced ->
                                 when (currentShowSynced) {
                                     null -> {
@@ -1446,22 +1443,84 @@ fun LyricsSheet(
                                     }
                                 }
                             }
+                }
+
+                val lyricsBlock: @Composable BoxScope.(lyricsTop: Dp) -> Unit = { lyricsTop ->
+                    when (performanceView) {
+                        PerformanceView.Lyrics -> {
+                            lyricsPaneContent(lyricsTop, Modifier.fillMaxSize())
                         }
                     PerformanceView.Instruments -> {
                         tabPractice?.let { practice ->
-                            InstrumentsPerformanceView(
-                                controller = practice,
-                                onBackgroundColor = onBackgroundColor,
-                                accentColor = accentColor,
-                                modifier = Modifier.fillMaxSize(),
-                                // A tap while the controls are hidden only brings them back.
-                                onUserInteraction = {
-                                    val wasHidden = immersiveMode
-                                    resetImmersiveTimer()
-                                    // Swallow the tap only if it brought the controls back.
-                                    wasHidden && !immersiveMode
-                                }
+                            // "Lyrics + Tab": live lyrics on top, the tab below, equal heights. The
+                            // split follows the space left by the header and the controls deck, so
+                            // immersive (deck hidden) grows both panes equally.
+                            val lyricsTabFraction by animateFloatAsState(
+                                targetValue = if (lyricsWithTab) 1f else 0f,
+                                animationSpec = when {
+                                    reducedMotion -> snap()
+                                    lyricsWithTab -> tween(
+                                        durationMillis = MotionTokens.DurationMedium4,
+                                        easing = MotionTokens.EmphasizedDecelerate
+                                    )
+                                    else -> tween(
+                                        durationMillis = MotionTokens.DurationMedium1,
+                                        easing = MotionTokens.EmphasizedAccelerate
+                                    )
+                                },
+                                label = "lyricsTabFraction"
                             )
+                            val combinedShown = lyricsTabFraction > 0.001f
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(top = lyricsTop * lyricsTabFraction)
+                            ) {
+                                if (combinedShown) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .weight(lyricsTabFraction)
+                                            .graphicsLayer {
+                                                alpha = lyricsTabFraction
+                                                translationY = -(1f - lyricsTabFraction) * 24.dp.toPx()
+                                            }
+                                            .clipToBounds()
+                                            .semantics { paneTitle = "Lyrics" }
+                                    ) {
+                                        lyricsPaneContent(12.dp, Modifier.fillMaxSize())
+                                    }
+                                    HorizontalDivider(
+                                        modifier = Modifier
+                                            .padding(horizontal = 24.dp)
+                                            .graphicsLayer { alpha = lyricsTabFraction },
+                                        color = onBackgroundColor.copy(alpha = 0.12f)
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .weight(1f)
+                                        .clipToBounds()
+                                        .semantics { paneTitle = "Tab" }
+                                ) {
+                                    InstrumentsPerformanceView(
+                                        controller = practice,
+                                        onBackgroundColor = onBackgroundColor,
+                                        accentColor = accentColor,
+                                        modifier = Modifier.fillMaxSize(),
+                                        // A tap while the controls are hidden only brings them back.
+                                        onUserInteraction = {
+                                            val wasHidden = immersiveMode
+                                            resetImmersiveTimer()
+                                            // Swallow the tap only if it brought the controls back.
+                                            wasHidden && !immersiveMode
+                                        },
+                                        contentTopInset = lerp(110.dp, 8.dp, lyricsTabFraction),
+                                        contentBottomInset = lerp(160.dp, 24.dp, lyricsTabFraction)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1628,6 +1687,9 @@ fun LyricsSheet(
                                 .padding(bottom = 8.dp),
                             offsetMillis = lyricsSyncOffset,
                             onOffsetChange = onLyricsSyncOffsetChange,
+                            isAutomatic = lyricsSyncOffsetIsAutomatic,
+                            hasManualOffset = lyricsSyncOffsetIsManual,
+                            onResetToAutomatic = onLyricsSyncOffsetResetToAutomatic,
                             backgroundColor = backgroundColor,
                             accentColor = sheetColors.syncButtonContainer,
                             onAccentColor = sheetColors.syncButtonContent,
@@ -1938,7 +2000,12 @@ fun LyricsSheet(
                                     controller = practice,
                                     contentColor = contentColor,
                                     accentColor = accentColor,
-                                    itemBackgroundColor = contentColor.copy(alpha = 0.08f)
+                                    itemBackgroundColor = contentColor.copy(alpha = 0.08f),
+                                    lyricsWithTab = lyricsWithTab,
+                                    onLyricsWithTabChange = { enabled ->
+                                        resetImmersiveTimer()
+                                        setLyricsWithTab(enabled)
+                                    }
                                 )
                             }
                         }
@@ -1955,7 +2022,21 @@ fun LyricsSheet(
                     scaleOut(targetScale = 0.98f, animationSpec = tween(220, easing = FastOutLinearInEasing)),
                 modifier = Modifier.fillMaxSize()
             ) {
-                lyrics?.synced?.takeIf { it.isNotEmpty() }?.let { synced ->
+                val splitLines = lyrics?.synced?.takeIf { it.isNotEmpty() }
+                if (splitLines == null) {
+                    // Between songs (or a song without synced lyrics): stay face-to-face.
+                    FaceToFaceWaiting(
+                        message = if (isLoadingLyrics || lyrics == null) "Loading lyrics…" else "No synced lyrics for this song",
+                        songTitle = currentSong?.title,
+                        contentColor = onBackgroundColor,
+                        accentColor = accentColor,
+                        onLeave = { exitFaceToFace() },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(containerColor)
+                    )
+                }
+                splitLines?.let { synced ->
                     val chipStructure = songStructure?.takeIf { lyricsDisplayPrefs.showSongStructure }
                     SplitFaceLyricsView(
                         lines = synced,
@@ -2230,53 +2311,6 @@ fun LyricsSheet(
                }
            }
 
-           // Swipe Feedback Overlay
-           if (isSwipeActive || swipeProgress.value > 0f) {
-               // The pill appears on the side the finger started from (physical direction);
-               // the icon shows what will happen (flipped for the top half in split view).
-               val fromRight = dragOffset < 0
-               val isNext = fromRight != swipeFromTopHalf
-               val overlayAlignment = if (fromRight) Alignment.CenterEnd else Alignment.CenterStart
-               val icon = if (isNext) Icons.Rounded.SkipNext else Icons.Rounded.SkipPrevious
-           
-               Box(
-                   modifier = Modifier
-                       .align(overlayAlignment)
-                       .size(100.dp) // Base size
-                       .padding(
-                           start = if(fromRight) 0.dp else 6.dp,
-                           end = if(fromRight) 6.dp else 0.dp
-                       )
-                       .graphicsLayer {
-                            val widthPx = size.width
-                            val initialOffset = if(fromRight) widthPx else -widthPx
-                            translationX = initialOffset * (1f - swipeProgress.value)
-
-                            scaleX = 0.8f + (swipeProgress.value * 0.2f)
-                            scaleY = 0.8f + (swipeProgress.value * 0.2f)
-                       }
-                       .background(
-                            color = accentColor, // No alpha modulation
-                            shape = RoundedCornerShape(
-                                topStart = if(fromRight) 360.dp else 8.dp,
-                                bottomStart = if(fromRight) 360.dp else 8.dp,
-                                topEnd = if(fromRight) 8.dp else 360.dp,
-                                bottomEnd = if(fromRight) 8.dp else 360.dp
-                            )
-                       ),
-                   contentAlignment = Alignment.Center
-               ) {
-                   Icon(
-                       imageVector = icon,
-                       contentDescription = null,
-                       modifier = Modifier
-                           .size(48.dp)
-                           .graphicsLayer { rotationZ = if (swipeFromTopHalf) 180f else 0f },
-                       tint = onAccentColor
-                   )
-               }
-           }
-
           }
         }
     }
@@ -2343,6 +2377,11 @@ fun SyncedLyricsList(
 ) {
     // Long pauses get their own music-note row; short ones keep the previous line lit.
     val lines = remember(lines) { withInstrumentalBreaks(lines) }
+    val animationStyle = com.theveloper.pixelplay.presentation.components.lyrics.LocalLyricAnimationStyle.current
+    val reducedMotion = com.theveloper.pixelplay.presentation.components.lyrics.LocalLyricReducedMotion.current
+    // A new style re-centres the current line once (its line scale / lift can change row size).
+    @Suppress("NAME_SHADOWING")
+    val relayoutKey = remember(relayoutKey, animationStyle) { relayoutKey to animationStyle }
     val density = LocalDensity.current
     val playbackPosition by playbackPositionFlow.collectAsStateWithLifecycle()
     val position = remember(playbackPosition, lyricsSyncOffset, positionOverrideMs) {
@@ -2494,27 +2533,22 @@ fun SyncedLyricsList(
                 return@LaunchedEffect
             }
 
-            // Music Style Dynamic Velocity
-            val dynamicAnimationSpec = if (useAnimatedLyrics) {
-                val currentLineTime = when {
-                    hasIntro && activeLazyIndex == 0 -> 0
-                    hasOutro && activeLazyIndex == outroItemIndex -> lastLineEndTime.toInt()
-                    else -> lines.getOrNull(activeLazyIndex - introOffset)?.time ?: 0
-                }
-                val nextLineTime = when {
-                    hasIntro && activeLazyIndex == 0 -> introEndTime
-                    hasOutro && activeLazyIndex == outroItemIndex -> (lastLineEndTime + 3000L).toInt()
-                    else -> lines.getOrNull(activeLazyIndex - introOffset + 1)?.time ?: (currentLineTime + 1000)
-                }
-                val timeDiff = (nextLineTime - currentLineTime).coerceIn(250, 2000)
-
-                tween<Float>(
-                    durationMillis = timeDiff,
-                    easing = FastOutSlowInEasing
-                )
-            } else {
-                autoscrollAnimationSpec
+            // The style owns the line handover: its scroll is bounded by the time until the next
+            // line, so movement never falls behind the song. Highlighting doesn't wait for it.
+            val currentLineTime = when {
+                hasIntro && activeLazyIndex == 0 -> 0
+                hasOutro && activeLazyIndex == outroItemIndex -> lastLineEndTime.toInt()
+                else -> lines.getOrNull(activeLazyIndex - introOffset)?.time ?: 0
             }
+            val nextLineTime = when {
+                hasIntro && activeLazyIndex == 0 -> introEndTime
+                hasOutro && activeLazyIndex == outroItemIndex -> (lastLineEndTime + 3000L).toInt()
+                else -> lines.getOrNull(activeLazyIndex - introOffset + 1)?.time ?: (currentLineTime + 3000)
+            }
+            val dynamicAnimationSpec = animationStyle.scrollSpec(
+                gapMs = (nextLineTime - currentLineTime).toLong().coerceAtLeast(0L),
+                reducedMotion = reducedMotion
+            )
 
             animateToSnapIndex(
                 listState = listState,
@@ -2713,7 +2747,10 @@ fun LyricLineRow(
         derivedStateOf { position in line.time.toLong()..<lineEndTime }
     }
     val isCurrentLine = isCurrentLineRaw && highlightBloomTrigger
-    val unhighlightedColor = LocalContentColor.current.copy(alpha = 0.38f)
+    val nextLineBoost = com.theveloper.pixelplay.presentation.components.lyrics.LocalLyricAnimationStyle.current.spec.nextLineBoost
+    val unhighlightedColor = LocalContentColor.current.copy(
+        alpha = if (nextLineBoost > 0f && distanceFromCurrent == 1 && position < line.time) 0.38f + nextLineBoost else 0.38f
+    )
     val lineColor by animateColorAsState(
         targetValue = if (isCurrentLine) accentColor else unhighlightedColor,
         animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
@@ -2726,46 +2763,78 @@ fun LyricLineRow(
     )
     // 0 → 1 as the line becomes current, 1 → 0 as it leaves. Drives the normal↔bold crossfade
     // and how strongly the sung colour shows, so nothing snaps on a line change.
+    // Lyric animation style (Settings → Lyrics → Animation style): line handover and emphasis.
+    val animStyle = com.theveloper.pixelplay.presentation.components.lyrics.LocalLyricAnimationStyle.current
+    val styleSpec = animStyle.spec
+    val styleReduced = com.theveloper.pixelplay.presentation.components.lyrics.LocalLyricReducedMotion.current
+    val handoverMs = remember(styleSpec, line.time, nextTime) {
+        com.theveloper.pixelplay.presentation.components.lyrics.boundedDuration(styleSpec.handoverMs, nextTime.toLong() - line.time.toLong(), 0.4f)
+    }
     val lineEmphasis by animateFloatAsState(
         targetValue = if (isCurrentLine) 1f else 0f,
-        animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing),
+        animationSpec = when {
+            styleReduced -> tween(durationMillis = com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort3)
+            handoverMs == 0 -> snap()
+            isCurrentLine -> tween(durationMillis = handoverMs, easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate)
+            else -> tween(durationMillis = (handoverMs * 0.65f).toInt().coerceAtLeast(1), easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate)
+        },
         label = "lineEmphasis"
     )
     val emphasisProvider: () -> Float = { lineEmphasis }
 
-    // Line → line: the new current line rises into place and lands with a small spring pop
-    // (bounce and speed follow the song's motion), while the line it replaces eases back.
-    val lineMotion = com.theveloper.pixelplay.presentation.components.lyrics.LocalLyricMotion.current
+    // Line → line, following the style: most presets ease the line in with no overshoot; Flow and
+    // Playful use a small, quickly damped spring; Glass and Playful slightly enlarge the current
+    // line (graphicsLayer only, so wrapping never changes).
     val arrival = remember { Animatable(0f) }
-    LaunchedEffect(isCurrentLine) {
+    LaunchedEffect(isCurrentLine, styleSpec, styleReduced) {
         if (isCurrentLine) {
             arrival.animateTo(
                 1f,
-                spring(dampingRatio = lineMotion.lineDamping, stiffness = lineMotion.lineStiffness)
+                when {
+                    styleReduced || handoverMs == 0 -> snap()
+                    styleSpec.handover == com.theveloper.pixelplay.presentation.components.lyrics.LineHandover.SPRING && handoverMs >= com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium1 ->
+                        spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMediumLow)
+                    else -> tween(handoverMs, easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate)
+                }
             )
         } else {
-            arrival.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow))
+            arrival.animateTo(
+                0f,
+                if (styleReduced || handoverMs == 0) snap()
+                else tween((handoverMs * 0.65f).toInt().coerceAtLeast(1), easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate)
+            )
         }
     }
-    val arrivalRisePx = with(LocalDensity.current) { lineMotion.lineRise.dp.toPx() }
+    val arrivalRisePx = with(LocalDensity.current) { styleSpec.activeLiftDp.dp.toPx() }
     val arrivalPivotX = when (lyricsAlignment) {
         "center" -> 0.5f
         "right" -> 1f
         else -> 0f
     }
+    val softBlurCache = remember { LyricLineBlurCache() }
+    val softBlurPx = with(LocalDensity.current) {
+        if (styleSpec.neighbourBlurDp > 0f && !isCurrentLine && !styleReduced && animatedLyricsBlurEnabled &&
+            android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S && distanceFromCurrent in 1..3
+        ) (styleSpec.neighbourBlurDp * distanceFromCurrent.coerceAtMost(2)).dp.toPx() else 0f
+    }
     val arrivalModifier = Modifier.graphicsLayer {
         val a = arrival.value
-        if (isCurrentLine) {
-            // 0.965 → 1 (a spring overshoot swells it just past 1 before it settles).
-            val s = 0.965f + 0.035f * a
-            scaleX = s
-            scaleY = s
-            translationY = (1f - a).coerceAtLeast(0f) * arrivalRisePx
+        if (styleReduced) {
+            scaleX = 1f; scaleY = 1f; translationY = 0f
         } else {
-            // Leaving (and resting) lines recede a touch.
-            val s = 0.985f + 0.015f * a
+            val s = 1f + (styleSpec.activeScale - 1f) * a
             scaleX = s
             scaleY = s
+            translationY = if (isCurrentLine) (1f - a).coerceAtLeast(0f) * arrivalRisePx else 0f
+        }
+        if (!isCurrentLine && distanceFromCurrent > 0 && styleSpec.neighbourAlpha < 1f) {
+            alpha = styleSpec.neighbourAlpha
+        }
+        val blurPx = kotlin.math.round(softBlurPx)
+        if (blurPx >= 1f) {
+            renderEffect = softBlurCache.effectFor(blurPx)
+        } else {
+            renderEffect = null
         }
         transformOrigin = TransformOrigin(arrivalPivotX, 0.5f)
     }
@@ -2911,6 +2980,19 @@ fun LyricLineRow(
                 .then(arrivalModifier)
                 .fillMaxWidth()
                 .clip(rowShape)
+                .drawBehind {
+                    // Neon: a broad, faint band of light behind the current line.
+                    if (styleSpec.lineBand) {
+                        val e = lineEmphasis
+                        if (e > 0.01f) drawRect(
+                            brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                0f to Color.Transparent,
+                                0.5f to accentColor.copy(alpha = 0.12f * e),
+                                1f to Color.Transparent
+                            )
+                        )
+                    }
+                }
                 .background(activePillColor)
                 .clickable { onClick() }
                 .padding(vertical = verticalPadding, horizontal = 12.dp),
@@ -2980,6 +3062,19 @@ fun LyricLineRow(
                 .then(arrivalModifier)
                 .fillMaxWidth()
                 .clip(rowShape)
+                .drawBehind {
+                    // Neon: a broad, faint band of light behind the current line.
+                    if (styleSpec.lineBand) {
+                        val e = lineEmphasis
+                        if (e > 0.01f) drawRect(
+                            brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                0f to Color.Transparent,
+                                0.5f to accentColor.copy(alpha = 0.12f * e),
+                                1f to Color.Transparent
+                            )
+                        )
+                    }
+                }
                 .background(activePillColor)
                 .clickable { onClick() }
                 .padding(vertical = verticalPadding, horizontal = 12.dp),
@@ -2987,6 +3082,9 @@ fun LyricLineRow(
         ) {
             // The whole line as one text (natural spacing, apostrophes and kerning), with the
             // sung part painted over it word by word / letter by letter.
+            val wordTimeline = remember(sanitizedWords, fillEndTime) {
+                com.theveloper.pixelplay.presentation.components.lyrics.LyricWordTimeline.of(requireNotNull(sanitizedWords), fillEndTime)
+            }
             val wordLayout = remember(sanitizedLine, sanitizedWords) {
                 com.theveloper.pixelplay.presentation.components.lyrics.buildLyricWordLayout(
                     sanitizedLine,
@@ -3022,6 +3120,8 @@ fun LyricLineRow(
                 textAlign = textAlign,
                 emphasis = emphasisProvider,
                 wordLayout = wordLayout,
+                timeline = wordTimeline,
+                nowMs = { clock?.now() ?: position },
                 sungChars = {
                     val now = clock?.now() ?: position
                     when {
@@ -3569,5 +3669,60 @@ private class LyricLineBlurCache {
             effect = it
             radiusPx = radius
         }
+    }
+}
+
+/**
+ * Face-to-face placeholder while the next song's lyrics load (or when it has none): the same
+ * note for both people, the top copy turned around. Tapping the song name leaves face-to-face,
+ * like tapping the song playing now in the split.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FaceToFaceWaiting(
+    message: String,
+    songTitle: String?,
+    contentColor: Color,
+    accentColor: Color,
+    onLeave: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val half: @Composable (Modifier) -> Unit = { m ->
+        Column(
+            m.fillMaxWidth().padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                message,
+                style = MaterialTheme.typography.titleMedium,
+                color = contentColor.copy(alpha = 0.8f),
+                textAlign = TextAlign.Center
+            )
+            if (!songTitle.isNullOrBlank()) {
+                Spacer(Modifier.height(10.dp))
+                Surface(
+                    onClick = onLeave,
+                    shape = CircleShape,
+                    color = accentColor.copy(alpha = 0.18f),
+                    contentColor = accentColor
+                ) {
+                    Text(
+                        songTitle,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                            .semantics { contentDescription = "Leave face-to-face lyrics" }
+                    )
+                }
+            }
+        }
+    }
+    Column(modifier) {
+        half(Modifier.weight(1f).graphicsLayer { rotationZ = 180f })
+        half(Modifier.weight(1f))
     }
 }

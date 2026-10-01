@@ -165,6 +165,8 @@ class MusicService : MediaLibraryService() {
     @Inject
     lateinit var listeningStatsTracker: ListeningStatsTracker
     @Inject
+    lateinit var discordPresence: com.theveloper.pixelplay.data.presence.DiscordPresenceManager
+    @Inject
     lateinit var continuousMixRuntime: com.theveloper.pixelplay.data.ContinuousMixRuntime
     @Inject
     lateinit var ambientSuggestionController: AmbientSuggestionController
@@ -1326,6 +1328,7 @@ class MusicService : MediaLibraryService() {
             // non-urgent work (AI generation, incremental sync) while audio
             // is producing — keeps thermal headroom and battery for playback.
             PlaybackActivityTracker.setPlaybackActive(isPlaying)
+            pushDiscordPresence(player)
 
             // Re-apply the last known RG volume immediately when resuming playback.
             // After a pause, ExoPlayer may reset the audio track volume internally,
@@ -1411,6 +1414,8 @@ class MusicService : MediaLibraryService() {
         ) {
             val sameAttempt = oldPosition.mediaItemIndex == newPosition.mediaItemIndex &&
                 reason != Player.DISCONTINUITY_REASON_AUTO_TRANSITION
+            // A seek moves the Discord progress bar.
+            if (reason == Player.DISCONTINUITY_REASON_SEEK) pushDiscordPresence(mediaSession?.player ?: engine.masterPlayer)
             listeningStatsTracker.onDiscontinuity(oldPosition.positionMs, newPosition.positionMs, sameAttempt)
             if (!sameAttempt) {
                 listeningStatsTracker.markEndReason(if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION)
@@ -1436,6 +1441,7 @@ class MusicService : MediaLibraryService() {
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            pushDiscordPresence(mediaSession?.player ?: engine.masterPlayer)
             smartResumePolicy.clear()
             replayGainProcessor.cancelResumeFade()
             updateEqualizerGenre(mediaItem)
@@ -1542,7 +1548,31 @@ class MusicService : MediaLibraryService() {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = mediaSession
 
+    /** Sends what's playing to Discord (no-op unless the user turned Discord status on). */
+    private fun pushDiscordPresence(player: Player) {
+        if (!::discordPresence.isInitialized) return
+        val item = player.currentMediaItem
+        if (item == null) {
+            discordPresence.onPlayback(null)
+            return
+        }
+        val meta = player.mediaMetadata
+        discordPresence.onPlayback(
+            com.theveloper.pixelplay.data.presence.NowPlayingPresence(
+                mediaId = item.mediaId,
+                title = meta.title?.toString().orEmpty(),
+                artist = (meta.artist ?: meta.albumArtist)?.toString().orEmpty(),
+                album = meta.albumTitle?.toString(),
+                artworkUrl = meta.artworkUri?.toString(),
+                positionMs = player.currentPosition.coerceAtLeast(0L),
+                durationMs = player.duration.takeIf { it > 0 } ?: 0L,
+                isPlaying = player.isPlaying
+            )
+        )
+    }
+
     override fun onDestroy() {
+        if (::discordPresence.isInitialized) discordPresence.clearNow()
         continuousMixRuntime.detach()
         PlaybackActivityTracker.setPlaybackActive(false)
         listeningStatsTracker.finalizeCurrentSession(forceSynchronousPersistence = true)

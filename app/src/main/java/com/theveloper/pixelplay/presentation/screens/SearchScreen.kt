@@ -94,6 +94,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.theveloper.pixelplay.data.model.Album
 import com.theveloper.pixelplay.data.model.Genre
@@ -318,7 +322,8 @@ fun SearchScreen(
                 title = "Search",
                 onSettingsClick = {
                     navController.navigateSafely(Screen.Settings.route)
-                }
+                },
+                titleContent = { SearchQueryTitle(query = searchQuery) }
             )
 
             val headerContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
@@ -381,7 +386,15 @@ fun SearchScreen(
                         playerViewModel.requestLibraryTab(tabKey)
                         navController.navigateToTopLevelSafely(Screen.Library.route)
                     }
+                    val recentlyHeardViewModel: com.theveloper.pixelplay.presentation.viewmodel.RecentlyHeardViewModel = hiltViewModel()
+                    val recentlyHeardEntries by recentlyHeardViewModel.entries.collectAsStateWithLifecycle()
+                    val latestHeard = recentlyHeardEntries.firstOrNull()
                     SearchHomeContent(
+                        recentlyHeard = latestHeard,
+                        recentlyHeardTime = latestHeard?.let {
+                            com.theveloper.pixelplay.presentation.screens.formatHeardWhen(context, it.heardAtEpochMs)
+                        }.orEmpty(),
+                        onRecentlyHeard = { navController.navigateSafely(Screen.RecentlyHeard.route) },
                         history = searchHistory,
                         suggestions = suggestions,
                         bottomPadding = bottomBarHeightDp + MiniPlayerHeight + 24.dp,
@@ -414,7 +427,7 @@ fun SearchScreen(
                                             multiSelectionState.selectAll(songsToSelect)
                                         }
                                         isPlaylistSelectionMode -> {
-                                            val playlistsToSelect = searchResults.filterIsInstance<SearchResultItem.PlaylistItem>().filter { it.browseId == null }.map { it.playlist }
+                                            val playlistsToSelect = searchResults.filterIsInstance<SearchResultItem.PlaylistItem>().filter { it.browseId == null && !playerViewModel.isConnectedSearchPlaylist(it.playlist.id) }.map { it.playlist }
                                             playlistSelectionState.selectAll(playlistsToSelect)
                                         }
                                         isAlbumSelectionMode -> {
@@ -640,7 +653,7 @@ fun SearchScreen(
                 },
                 onNavigateToArtistById = { artistId ->
                     navController.navigateSafelyReplacing(
-                        route = Screen.ArtistDetail.createRoute(artistId),
+                        route = Screen.ArtistDetail.createRouteForSongArtist(currentSong, artistId),
                         patternToPop = Screen.ArtistDetail.route
                     )
                     showSongInfoBottomSheet = false
@@ -1032,15 +1045,18 @@ fun SearchResultsList(
     }
 
     val groupedResults = remember(results) {
-        results.groupBy { item ->
+        results.filterNot { it is SearchResultItem.FriendItem }.groupBy { item ->
             when (item) {
                 is SearchResultItem.SongItem -> SearchFilterType.SONGS
                 is SearchResultItem.AlbumItem -> SearchFilterType.ALBUMS
                 is SearchResultItem.ArtistItem -> SearchFilterType.ARTISTS
                 is SearchResultItem.PlaylistItem -> SearchFilterType.PLAYLISTS
+                is SearchResultItem.FriendItem -> SearchFilterType.PLAYLISTS // filtered out above
             }
         }
     }
+    val friendResults = remember(results) { results.filterIsInstance<SearchResultItem.FriendItem>() }
+    var openedFriend by remember { mutableStateOf<SearchResultItem.FriendItem?>(null) }
     val songResultsQueue = remember(groupedResults) {
         buildList {
             groupedResults[SearchFilterType.SONGS]
@@ -1116,6 +1132,41 @@ fun SearchResultsList(
             onItemSelected()
         }
     }
+    /**
+     * Connected-service and friend playlists: a friend's public playlist is saved first (like
+     * opening it from Friends), then the playlist page opens, or its songs start playing.
+     */
+    suspend fun openSocialPlaylist(playlist: Playlist, play: Boolean) {
+        if (openingRemotePlaylistId != null) return
+        openingRemotePlaylistId = playlist.id
+        val resolved = try {
+            playerViewModel.resolveSearchPlaylist(playlist)
+        } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
+            openingRemotePlaylistId = null
+            throw cancelled
+        } catch (e: Exception) {
+            Timber.tag("SearchScreen").w(e, "Couldn't open playlist ${playlist.id}")
+            null
+        }
+        openingRemotePlaylistId = null
+        if (resolved == null) {
+            playerViewModel.sendToast("Couldn't open this playlist")
+            return
+        }
+        val (id, songs) = resolved
+        if (play) {
+            if (songs.isEmpty()) {
+                playerViewModel.sendToast("Empty playlist")
+                return
+            }
+            playerViewModel.playSongs(songs, songs.first(), playlist.name)
+        } else {
+            openedFriend = null
+            navController.navigateSafely(Screen.PlaylistDetail.createRoute(id))
+        }
+        onItemSelected()
+    }
+
     val artistResults = remember(results, currentFilter) {
         // Only the "All" tab mixes credited song artists into the shelf; the category tabs show
         // exactly the category that was asked for.
@@ -1177,10 +1228,16 @@ fun SearchResultsList(
                     items(artistResults, key = { it.browseId ?: "local:${it.artist.id}" }) { result ->
                         Column(horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier.width(104.dp).clip(RoundedCornerShape(16.dp)).clickable {
-                                val browseId = result.browseId
-                                if (browseId != null) remoteCollection = browseId to result.artist.name
-                                else navController.navigateSafelyReplacing(
-                                    route = Screen.ArtistDetail.createRoute(result.artist.id), patternToPop = Screen.ArtistDetail.route)
+                                // Every artist opens the artist page: library artists by id,
+                                // online ones (YouTube Music browse id) by name.
+                                navController.navigateSafelyReplacing(
+                                    route = Screen.ArtistDetail.createRouteForArtist(
+                                        artistId = result.artist.id,
+                                        artistName = result.artist.name,
+                                        isLibraryArtist = result.browseId == null
+                                    ),
+                                    patternToPop = Screen.ArtistDetail.route
+                                )
                                 onItemSelected()
                             }.padding(vertical = 8.dp)) {
                             SmartImage(model = result.artist.effectiveImageUrl, contentDescription = result.artist.name,
@@ -1218,6 +1275,7 @@ fun SearchResultsList(
                             is SearchResultItem.AlbumItem -> "album_${item.browseId ?: item.album.id}_${index}"
                             is SearchResultItem.ArtistItem -> "artist_${item.browseId ?: item.artist.id}_${index}"
                             is SearchResultItem.PlaylistItem -> "playlist_${item.playlist.id}_${index}"
+                            is SearchResultItem.FriendItem -> "friend_${item.friendId}"
                         }
                     },
                     contentType = { index ->
@@ -1226,6 +1284,7 @@ fun SearchResultsList(
                             is SearchResultItem.AlbumItem -> "search_album"
                             is SearchResultItem.ArtistItem -> "search_artist"
                             is SearchResultItem.PlaylistItem -> "search_playlist"
+                            is SearchResultItem.FriendItem -> "search_friend"
                         }
                     }
                 ) { index ->
@@ -1237,7 +1296,7 @@ fun SearchResultsList(
                             onCancel = { playerViewModel.onSongPressCancelled(item.song) }
                         )
                     } else Modifier
-                    Box(modifier = Modifier.padding(bottom = 12.dp).then(pressModifier)) {
+                    Box(modifier = Modifier.animateItem().padding(bottom = 12.dp).then(pressModifier)) {
                         when (item) {
                             is SearchResultItem.SongItem -> {
                                 val isSelected = selectedSongIds.contains(item.song.id)
@@ -1305,7 +1364,11 @@ fun SearchResultsList(
                                 ) {
                                     {
                                         navController.navigateSafelyReplacing(
-                                            route = Screen.ArtistDetail.createRoute(item.artist.id),
+                                            route = Screen.ArtistDetail.createRouteForArtist(
+                                                artistId = item.artist.id,
+                                                artistName = item.artist.name,
+                                                isLibraryArtist = item.browseId == null
+                                            ),
                                             patternToPop = Screen.ArtistDetail.route
                                         )
                                         onItemSelected()
@@ -1314,7 +1377,7 @@ fun SearchResultsList(
                                 SearchResultArtistItem(
                                     artist = item.artist,
                                     onPlayClick = { if (item.browseId != null) { remoteCollection = item.browseId to item.artist.name; onItemSelected() } else onPlayClick() },
-                                    onOpenClick = { if (item.browseId != null) { remoteCollection = item.browseId to item.artist.name; onItemSelected() } else onOpenClick() }
+                                    onOpenClick = onOpenClick
                                 )
                             }
 
@@ -1325,6 +1388,10 @@ fun SearchResultsList(
                                 val coroutineScope = rememberCoroutineScope()
                                 val onPlayClick: () -> Unit = {
                                     coroutineScope.launch {
+                                        if (playerViewModel.isConnectedSearchPlaylist(item.playlist.id)) {
+                                            openSocialPlaylist(item.playlist, play = true)
+                                            return@launch
+                                        }
                                         val songs = playerViewModel.getSongs(item.playlist.songIds)
                                         if (songs.isNotEmpty()) {
                                             playerViewModel.playSongs(
@@ -1344,8 +1411,12 @@ fun SearchResultsList(
                                     playerViewModel, onItemSelected
                                 ) {
                                     {
-                                        navController.navigateSafely(Screen.PlaylistDetail.createRoute(item.playlist.id))
-                                        onItemSelected()
+                                        if (playerViewModel.isConnectedSearchPlaylist(item.playlist.id)) {
+                                            coroutineScope.launch { openSocialPlaylist(item.playlist, play = false) }
+                                        } else {
+                                            navController.navigateSafely(Screen.PlaylistDetail.createRoute(item.playlist.id))
+                                            onItemSelected()
+                                        }
                                     }
                                 }
                                 val isSelected = selectedPlaylists.any { it.id == item.playlist.id }
@@ -1358,11 +1429,12 @@ fun SearchResultsList(
                                     isSelected = isSelected,
                                     selectionIndex = selectionIndex,
                                     isSelectionMode = isPlaylistSelectionMode,
-                                    onLongPress = { if (item.browseId == null) onPlaylistLongPress(item.playlist) },
-                                    onSelectionToggle = { if (item.browseId == null) onPlaylistSelectionToggle(item.playlist) }
+                                    onLongPress = { if (item.browseId == null && !playerViewModel.isConnectedSearchPlaylist(item.playlist.id)) onPlaylistLongPress(item.playlist) },
+                                    onSelectionToggle = { if (item.browseId == null && !playerViewModel.isConnectedSearchPlaylist(item.playlist.id)) onPlaylistSelectionToggle(item.playlist) }
                                 )
                                 // Fetching an online playlist's tracks before its page opens.
-                                if (item.browseId != null && openingRemotePlaylistId == item.browseId) {
+                                if ((item.browseId != null && openingRemotePlaylistId == item.browseId) ||
+                                    openingRemotePlaylistId == item.playlist.id) {
                                     androidx.compose.material3.LinearProgressIndicator(
                                         modifier = Modifier
                                             .align(Alignment.BottomCenter)
@@ -1371,11 +1443,44 @@ fun SearchResultsList(
                                     )
                                 }
                             }
+
+                            is SearchResultItem.FriendItem -> Unit // rendered in the Friends section
                         }
+                    }
+                }
+                if (filterType == SearchFilterType.SONGS) {
+                    item(key = "songs_show_more", contentType = "search_show_more") {
+                        SearchShowMoreSongsFooter(
+                            playerViewModel = playerViewModel,
+                            modifier = Modifier.animateItem()
+                        )
                     }
                 }
             }
         }
+        if (friendResults.isNotEmpty() &&
+            (currentFilter == SearchFilterType.ALL || currentFilter == SearchFilterType.PLAYLISTS)) {
+            item(key = "header_FRIENDS") {
+                Box(Modifier.animateItem()) { SearchResultSectionHeader(title = "Friends") }
+            }
+            items(friendResults, key = { "friend_${it.friendId}" }, contentType = { "search_friend" }) { friend ->
+                SearchResultFriendItem(
+                    friend = friend,
+                    onClick = { openedFriend = friend },
+                    modifier = Modifier.animateItem().padding(bottom = 12.dp)
+                )
+            }
+        }
+    }
+
+    openedFriend?.let { friend ->
+        SearchFriendPlaylistsSheet(
+            friend = friend,
+            openingPlaylistId = openingRemotePlaylistId,
+            onOpen = { playlist -> remotePlaylistScope.launch { openSocialPlaylist(playlist, play = false) } },
+            onPlay = { playlist -> remotePlaylistScope.launch { openSocialPlaylist(playlist, play = true) } },
+            onDismiss = { openedFriend = null }
+        )
     }
 }
 
@@ -1690,10 +1795,17 @@ fun SearchResultPlaylistItem(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                    val serviceLabel = searchServiceLabel(playlist.source)
                     Text(
-                        text = if (playlist.source == "YOUTUBE_MUSIC" && playlist.songIds.isEmpty()) "YouTube Music" else formatSongCount(playlist.songIds.size),
+                        text = listOfNotNull(
+                            formatSongCount(playlist.songIds.size).takeIf { playlist.songIds.isNotEmpty() || serviceLabel == null },
+                            playlist.ownerName.takeIf { playlist.friendId != null && it.isNotBlank() }?.let { "by $it" },
+                            serviceLabel
+                        ).joinToString(" \u00B7 "),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
                 FilledIconButton(
@@ -1780,4 +1892,315 @@ fun SearchFilterChip(
              null
          }
     )
+}
+
+
+/**
+ * Search header: "Search" while the bar is empty, otherwise the live query under a small
+ * "Results for" label. Only the empty <-> non-empty switch animates; keystrokes just update text.
+ */
+@Composable
+private fun SearchQueryTitle(query: String) {
+    val trimmed = query.trim()
+    val hasQuery = trimmed.isNotEmpty()
+    // Keep the last non-empty text so the outgoing title doesn't blank out while it fades.
+    var lastQuery by remember { mutableStateOf(trimmed) }
+    androidx.compose.runtime.SideEffect { if (hasQuery) lastQuery = trimmed }
+    val shownQuery = if (hasQuery) trimmed else lastQuery
+    val reducedMotion = com.theveloper.pixelplay.ui.theme.rememberSystemReducedMotion()
+    AnimatedContent(
+        targetState = hasQuery,
+        transitionSpec = {
+            if (reducedMotion) {
+                androidx.compose.animation.EnterTransition.None togetherWith
+                    androidx.compose.animation.ExitTransition.None
+            } else {
+                val enterMs = com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium2
+                val exitMs = com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort4
+                val enter = fadeIn(tween(enterMs, easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate)) +
+                    slideInVertically(tween(enterMs, easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate)) { it / 4 }
+                val exit = fadeOut(tween(exitMs, easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate)) +
+                    slideOutVertically(tween(exitMs, easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate)) { -it / 4 }
+                (enter togetherWith exit).using(SizeTransform(clip = false))
+            }
+        },
+        label = "search_query_title"
+    ) { showQuery ->
+        if (!showQuery) {
+            Text(
+                modifier = Modifier
+                    .padding(start = 8.dp)
+                    .semantics { heading() },
+                text = "Search",
+                fontFamily = com.theveloper.pixelplay.ui.theme.GoogleSansRounded,
+                fontWeight = FontWeight.ExtraBold,
+                color = MaterialTheme.colorScheme.primary,
+                fontSize = 40.sp,
+                letterSpacing = 1.sp,
+                maxLines = 1
+            )
+        } else {
+            Column(
+                modifier = Modifier
+                    .padding(start = 8.dp)
+                    .semantics(mergeDescendants = true) {
+                        heading()
+                        contentDescription = "Search results for $shownQuery"
+                    }
+            ) {
+                Text(
+                    text = "Results for",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
+                Text(
+                    text = shownQuery,
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontFamily = com.theveloper.pixelplay.ui.theme.GoogleSansRounded,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+
+/**
+ * "Show more" after the last song result: a tonal button that swaps to a spinner while the
+ * next page loads, a retry label if it failed, and disappears once there's nothing more.
+ */
+@Composable
+private fun SearchShowMoreSongsFooter(
+    playerViewModel: PlayerViewModel,
+    modifier: Modifier = Modifier
+) {
+    val paging by playerViewModel.searchSongPaging.collectAsStateWithLifecycle()
+    val reducedMotion = com.theveloper.pixelplay.ui.theme.rememberSystemReducedMotion()
+    val visible = paging.hasMore || paging.isLoading || paging.failed
+    val view = androidx.compose.ui.platform.LocalView.current
+    // Announce how many songs arrived once a load finishes.
+    LaunchedEffect(paging.pagesLoaded) {
+        if (paging.pagesLoaded > 0 && paging.lastLoadedCount > 0) {
+            view.announceForAccessibility("${paging.lastLoadedCount} more songs loaded")
+        }
+    }
+    androidx.compose.animation.AnimatedVisibility(
+        visible = visible,
+        modifier = modifier.fillMaxWidth(),
+        enter = if (reducedMotion) androidx.compose.animation.EnterTransition.None else
+            fadeIn(tween(com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium1,
+                easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate)),
+        exit = if (reducedMotion) androidx.compose.animation.ExitTransition.None else
+            fadeOut(tween(com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort3,
+                easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate))
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp, bottom = 16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            AnimatedContent(
+                targetState = when {
+                    paging.isLoading -> 1
+                    paging.failed -> 2
+                    else -> 0
+                },
+                transitionSpec = {
+                    if (reducedMotion) {
+                        androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
+                    } else {
+                        fadeIn(tween(com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort4,
+                            easing = com.theveloper.pixelplay.ui.theme.MotionTokens.Emphasized)) togetherWith
+                            fadeOut(tween(com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort3,
+                                easing = com.theveloper.pixelplay.ui.theme.MotionTokens.Emphasized))
+                    }
+                },
+                contentAlignment = Alignment.Center,
+                label = "search_show_more_state"
+            ) { state ->
+                when (state) {
+                    1 -> Box(
+                        modifier = Modifier
+                            .height(48.dp)
+                            .semantics { contentDescription = "Loading more songs" },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 3.dp
+                        )
+                    }
+                    2 -> androidx.compose.material3.FilledTonalButton(
+                        onClick = { playerViewModel.loadMoreSearchSongs() },
+                        colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer
+                        ),
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    ) {
+                        Text("Couldn't load more \u2013 Retry", style = MaterialTheme.typography.labelLarge)
+                    }
+                    else -> androidx.compose.material3.FilledTonalButton(
+                        onClick = { playerViewModel.loadMoreSearchSongs() },
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .semantics { contentDescription = "Show more songs" }
+                    ) {
+                        Text("Show more", style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+private fun searchServiceLabel(source: String): String? = when (source.uppercase()) {
+    "SPOTIFY" -> "Spotify"
+    "YOUTUBE_MUSIC", "YOUTUBE" -> "YouTube Music"
+    "APPLE_MUSIC" -> "Apple Music"
+    else -> null
+}
+
+/** A friend matched by name: avatar, name and how many playlists they have. */
+@Composable
+private fun SearchResultFriendItem(
+    friend: SearchResultItem.FriendItem,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val count = friend.playlists.size
+    val subtitle = listOfNotNull(
+        if (count == 1) "1 playlist" else "$count playlists",
+        searchServiceLabel(friend.source)
+    ).joinToString(" \u00B7 ")
+    Card(
+        shape = MaterialTheme.shapes.extraLarge,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clip(MaterialTheme.shapes.extraLarge)
+            .clickable(onClickLabel = "Show ${friend.name}'s playlists", onClick = onClick)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "Friend ${friend.name}, $subtitle"
+            }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.tertiaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                if (friend.avatarUrl.isNullOrBlank()) {
+                    Text(
+                        text = friend.name.take(1).uppercase(),
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                } else {
+                    SmartImage(
+                        model = friend.avatarUrl,
+                        contentDescription = null,
+                        targetSize = SmartImageListTargetSize,
+                        modifier = Modifier.fillMaxSize().clip(CircleShape)
+                    )
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = friend.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+/** A friend's playlists (saved and public), opened from a friend search result. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SearchFriendPlaylistsSheet(
+    friend: SearchResultItem.FriendItem,
+    openingPlaylistId: String?,
+    onOpen: (Playlist) -> Unit,
+    onPlay: (Playlist) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    val sheetScope = rememberCoroutineScope()
+    val hideThen: (() -> Unit) -> Unit = { after ->
+        sheetScope.launch { sheetState.hide() }.invokeOnCompletion {
+            if (!sheetState.isVisible) { onDismiss(); after() }
+        }
+    }
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+            Text(
+                text = "${friend.name}'s playlists",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier
+                    .padding(bottom = 12.dp)
+                    .semantics { heading() }
+            )
+            if (friend.playlists.isEmpty()) {
+                Text(
+                    text = "No public playlists yet",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 32.dp)
+                )
+            } else {
+                LazyColumn(
+                    contentPadding = PaddingValues(bottom = 32.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(friend.playlists, key = { it.id }) { playlist ->
+                        Box(Modifier.animateItem()) {
+                            SearchResultPlaylistItem(
+                                playlist = playlist,
+                                playlistSongs = emptyList(),
+                                onOpenClick = { hideThen { onOpen(playlist) } },
+                                onPlayClick = { onPlay(playlist) }
+                            )
+                            if (openingPlaylistId == playlist.id) {
+                                androidx.compose.material3.LinearProgressIndicator(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 24.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

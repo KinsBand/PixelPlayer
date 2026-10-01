@@ -14,6 +14,7 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.media3.common.Player
 import com.theveloper.pixelplay.data.equalizer.EqualizerPreset
+import com.theveloper.pixelplay.data.lyrics.autosync.LyricsAutoOffsets
 import com.theveloper.pixelplay.data.diagnostics.AdvancedPerformanceDiagnostics
 import com.theveloper.pixelplay.data.model.FolderSource
 import com.theveloper.pixelplay.data.model.LyricsSourcePreference
@@ -25,6 +26,7 @@ import com.theveloper.pixelplay.data.model.TransitionSettings
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -39,6 +41,17 @@ object ThemePreference {
     const val DYNAMIC = "dynamic"
     const val ALBUM_ART = "album_art"
     const val GLOBAL = "global"
+}
+
+/** A song's lyrics offset and where it comes from. */
+data class LyricsSyncOffsetState(
+    /** Set by the user in the lyrics sheet; null when never set (or reset to automatic). */
+    val manualMs: Int? = null,
+    /** Measured automatically from the audio; null when none applies. */
+    val autoMs: Int? = null
+) {
+    val effectiveMs: Int get() = manualMs ?: autoMs ?: 0
+    val isAutomatic: Boolean get() = manualMs == null && autoMs != null
 }
 
 object AppThemeMode {
@@ -272,6 +285,7 @@ class UserPreferencesRepository @Inject constructor(
         // ─── Lyrics ───
         object Lyrics {
             val LYRICS_SYNC_OFFSETS = stringPreferencesKey("lyrics_sync_offsets_json")
+            val LYRICS_AUTO_SYNC_ENABLED = booleanPreferencesKey("lyrics_auto_sync_enabled")
             val LYRICS_SOURCE_PREFERENCE = stringPreferencesKey("lyrics_source_preference")
             val AUTO_SCAN_LRC_FILES = booleanPreferencesKey("auto_scan_lrc_files")
             val IMMERSIVE_LYRICS_ENABLED = booleanPreferencesKey("immersive_lyrics_enabled")
@@ -1278,23 +1292,55 @@ class UserPreferencesRepository @Inject constructor(
     // ─── Lyrics ───────────────────────────────────────────────────────────────
 
     /**
-     * Per-song lyrics sync offsets in milliseconds, stored as a JSON map.
-     * Positive = lyrics appear later; negative = lyrics appear earlier.
+     * Per-song lyrics sync offsets set by the user, in milliseconds, stored as a JSON map.
+     * Positive = lyrics appear later; negative = lyrics appear earlier. An explicit 0 is kept
+     * when the song also has an automatic offset, so "no offset" can override it.
      */
     private val lyricsSyncOffsetsFlow: Flow<Map<String, Int>> =
         pref { decodeJsonPref(it, PreferencesKeys.Lyrics.LYRICS_SYNC_OFFSETS, emptyMap()) }
 
+    /** Whether automatically measured offsets ([LyricsAutoOffsets]) are used. On by default. */
+    val lyricsAutoSyncEnabledFlow: Flow<Boolean> =
+        pref { it[PreferencesKeys.Lyrics.LYRICS_AUTO_SYNC_ENABLED] ?: true }
+
+    suspend fun setLyricsAutoSyncEnabled(enabled: Boolean) {
+        dataStore.edit { it[PreferencesKeys.Lyrics.LYRICS_AUTO_SYNC_ENABLED] = enabled }
+    }
+
+    /**
+     * Offset state for one song: the user's manual offset wins; otherwise the automatic one
+     * (when auto-sync is on); otherwise 0.
+     */
+    fun getLyricsSyncOffsetStateFlow(songId: String): Flow<LyricsSyncOffsetState> =
+        combine(
+            lyricsSyncOffsetsFlow.map { it[songId] }.distinctUntilChanged(),
+            LyricsAutoOffsets.offsets.map { it[songId]?.offsetMs }.distinctUntilChanged(),
+            lyricsAutoSyncEnabledFlow.distinctUntilChanged()
+        ) { manual, auto, autoEnabled ->
+            LyricsSyncOffsetState(manualMs = manual, autoMs = if (autoEnabled) auto else null)
+        }.distinctUntilChanged()
+
     fun getLyricsSyncOffsetFlow(songId: String): Flow<Int> =
-        lyricsSyncOffsetsFlow.map { it[songId] ?: 0 }
+        getLyricsSyncOffsetStateFlow(songId).map { it.effectiveMs }.distinctUntilChanged()
 
     suspend fun getLyricsSyncOffset(songId: String): Int =
         getLyricsSyncOffsetFlow(songId).first()
 
     suspend fun setLyricsSyncOffset(songId: String, offsetMs: Int) {
+        val hasAuto = LyricsAutoOffsets.get(songId) != null
         editJsonMap<Int>(PreferencesKeys.Lyrics.LYRICS_SYNC_OFFSETS) {
-            if (offsetMs == 0) remove(songId) else put(songId, offsetMs)
+            if (offsetMs == 0 && !hasAuto) remove(songId) else put(songId, offsetMs)
         }
     }
+
+    /** Drops the user's offset for [songId], handing timing back to the automatic offset (if any). */
+    suspend fun clearLyricsSyncOffset(songId: String) {
+        editJsonMap<Int>(PreferencesKeys.Lyrics.LYRICS_SYNC_OFFSETS) { remove(songId) }
+    }
+
+    /** True when the user has set an offset for [songId] by hand. */
+    suspend fun hasManualLyricsSyncOffset(songId: String): Boolean =
+        lyricsSyncOffsetsFlow.first().containsKey(songId)
 
     val lyricsSourcePreferenceFlow: Flow<LyricsSourcePreference> =
         pref { LyricsSourcePreference.fromName(it[PreferencesKeys.Lyrics.LYRICS_SOURCE_PREFERENCE]) }

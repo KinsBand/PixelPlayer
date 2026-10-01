@@ -11,6 +11,8 @@ import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.IOException
 import javax.inject.Inject
@@ -119,8 +121,11 @@ class AppleMusicWebSession @Inject constructor(
         }
     }
 
-    private fun rawGet(url: String, devToken: String, userToken: String): String {
+    private fun rawGet(url: String, devToken: String, userToken: String, postBody: String? = null): String {
         val request = Request.Builder().url(url)
+            .apply {
+                if (postBody != null) post(postBody.toRequestBody("application/json".toMediaType()))
+            }
             .header("Authorization", "Bearer $devToken")
             .header("media-user-token", userToken)
             .header("Origin", WEB)
@@ -137,6 +142,30 @@ class AppleMusicWebSession @Inject constructor(
             }, it.code)
             return it.body.string()
         }
+    }
+
+    /**
+     * Authenticated POST on amp-api (e.g. adding songs to a library playlist). Same token
+     * refresh / back-off rules as [get]. Returns the parsed body, or an empty object for 201/204.
+     */
+    suspend fun post(path: String, body: JSONObject): JSONObject = withContext(Dispatchers.IO) {
+        val url = if (path.startsWith("http")) path else API + path
+        val user = userToken.ifBlank { throw AppleMusicException("Apple Music isn't connected.", 401) }
+        var forced = false
+        var waited = false
+        while (true) {
+            try {
+                val text = rawGet(url, developerToken(force = forced), user, postBody = body.toString())
+                return@withContext if (text.isBlank()) JSONObject() else JSONObject(text)
+            } catch (e: AppleMusicException) {
+                when {
+                    e.status == 401 && !forced -> { forced = true }
+                    e.status == 429 && !waited -> { waited = true; delay(3_000) }
+                    else -> throw e
+                }
+            }
+        }
+        JSONObject() // not reached
     }
 
     /**

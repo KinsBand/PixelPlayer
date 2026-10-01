@@ -48,7 +48,8 @@ class DownloadedLibraryIndexer @Inject constructor(
     private val musicDao: MusicDao,
     private val cloudSongDao: CloudSongDao,
     private val userPreferencesRepository: UserPreferencesRepository,
-    private val syncManager: SyncManager
+    private val syncManager: SyncManager,
+    private val duplicateRepair: LibraryDuplicateRepair
 ) {
     data class Input(
         val cloudSongId: String,
@@ -106,6 +107,9 @@ class DownloadedLibraryIndexer @Inject constructor(
     private suspend fun runCatchingReconcile(reason: String) {
         try {
             reconcile()
+            // After downloads are in place (and after every library sync): fold duplicate
+            // artists / albums left by older versions into one.
+            duplicateRepair.run()
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -157,10 +161,15 @@ class DownloadedLibraryIndexer @Inject constructor(
             } else if (!SourceType.isAppDownload(existing.filePath) && !SourceType.isAppDownload(existing.contentUriString)) {
                 // The id is taken by a different (MediaStore) song: never touch that row.
                 Timber.tag(TAG).w("Library id %d of download %s is used by another song", songId, row.id)
-            } else if (needsRegrouping(existing)) {
+            } else if (needsRegrouping(existing, row.album)) {
                 // Indexed by an older version (album id = title hash, e.g. one shared
                 // "YouTube Music" album for every download): group it properly now.
-                indexLocked(existing.toInput(row.id, file!!), settings)
+                val regrouped = existing.toInput(row.id, file!!).let { input ->
+                    // The library row may carry an album named after the song; the cloud row
+                    // knows whether there really was an album.
+                    if (CollectionKeys.isPlaceholderAlbum(row.album)) input.copy(album = null) else input
+                }
+                indexLocked(regrouped, settings)
                 removedAny = true // old album / artist rows may now be empty
                 added++
             } else {
@@ -202,9 +211,12 @@ class DownloadedLibraryIndexer @Inject constructor(
         val artistIds = artistNames.map { name -> ensureArtist(name) }
         val primaryArtistId = artistIds.first()
 
-        val albumArtistName = input.albumArtist?.trim()?.takeIf { it.isNotBlank() } ?: artistNames.first()
+        val albumArtistName = input.albumArtist?.let(CollectionKeys::cleanArtistName)?.trim()?.takeIf { it.isNotBlank() }
+            ?: artistNames.first()
+        // No album information (a video, or the "YouTube Music" placeholder): the song goes into
+        // the artist's "Singles" album instead of a one-song album named after the song.
         val albumTitle = input.album?.trim()?.takeUnless { CollectionKeys.isPlaceholderAlbum(it) }
-            ?: input.title.trim().ifBlank { "Unknown album" }
+            ?: CollectionKeys.SINGLES_ALBUM_TITLE
         val albumId = ensureAlbum(
             title = albumTitle,
             albumArtist = albumArtistName,
@@ -219,9 +231,9 @@ class DownloadedLibraryIndexer @Inject constructor(
         val entity = SongEntity(
             id = songId,
             title = input.title,
-            artistName = input.artist,
+            artistName = CollectionKeys.cleanArtistName(input.artist).ifBlank { input.artist },
             artistId = primaryArtistId,
-            albumArtist = input.albumArtist?.takeIf { it.isNotBlank() },
+            albumArtist = input.albumArtist?.let(CollectionKeys::cleanArtistName)?.takeIf { it.isNotBlank() },
             albumName = albumTitle,
             albumId = albumId,
             contentUriString = android.net.Uri.fromFile(input.file).toString(),
@@ -254,11 +266,11 @@ class DownloadedLibraryIndexer @Inject constructor(
     }
 
     private fun artistNames(artist: String, title: String, settings: Settings): List<String> {
-        val raw = artist.trim().ifBlank { "Unknown artist" }
+        val raw = CollectionKeys.cleanArtistName(artist).ifBlank { "Unknown artist" }
         return runCatching {
             collectArtistNames(raw, title, settings.artistDelimiters, settings.wordDelimiters, extractFromTitle = false)
         }.getOrDefault(emptyList())
-            .map { it.trim() }
+            .map { CollectionKeys.cleanArtistName(it).trim() }
             .filter { it.isNotBlank() }
             .distinctBy { CollectionKeys.normalizeArtist(it) }
             .ifEmpty { listOf(raw) }
@@ -314,8 +326,15 @@ class DownloadedLibraryIndexer @Inject constructor(
         id >= CollectionKeys.DOWNLOAD_ALBUM_BASE && id < CollectionKeys.DOWNLOAD_ALBUM_BASE + (1L shl 39)
 
     /** Old download rows: album id outside the download range, in an album with no other songs. */
-    private suspend fun needsRegrouping(existing: SongEntity): Boolean {
+    private suspend fun needsRegrouping(existing: SongEntity, cloudAlbum: String?): Boolean {
         val id = existing.albumId
+        // Indexed before "Singles": a one-song album named after the song.
+        if (CollectionKeys.isPlaceholderAlbum(cloudAlbum) &&
+            existing.albumName != CollectionKeys.SINGLES_ALBUM_TITLE &&
+            CollectionKeys.normalizeAlbum(existing.albumName) == CollectionKeys.normalizeAlbum(existing.title)
+        ) return true
+        // Indexed with a channel-style artist ("X - Topic", "XVEVO").
+        if (CollectionKeys.cleanArtistName(existing.artistName) != existing.artistName.trim()) return true
         if (isDownloadAlbumId(id)) return false
         if (CollectionKeys.isPlaceholderAlbum(existing.albumName)) return true
         // A library (MediaStore) album the download joined: keep it.

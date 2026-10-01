@@ -56,6 +56,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -78,19 +80,21 @@ import com.theveloper.pixelplay.data.recognition.shizuku.ShizukuStatus
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import com.theveloper.pixelplay.presentation.components.SmartImage
 
+/**
+ * The voice sheet, kept minimal: two buttons and, once something is recognised, its match.
+ *
+ * - **Hum & sing** opens Google's "Search a song".
+ * - **Listen** uses Android's Now Playing (its notification is captured into Recently heard).
+ *
+ * Spoken words never show here: dictation types straight into the search bar above the sheet.
+ */
 @Composable
 fun VoiceSearchSheet(
-    currentMode: VoiceSearchMode,
-    isListening: Boolean,
+    activeAction: VoiceSearchMode?,
     recognizedSong: Song?,
     syncedLyrics: Lyrics?,
-    shizukuStatus: ShizukuStatus,
-    nowPlayingHistory: List<HeardSongItem>,
-    onSwitchMode: (VoiceSearchMode) -> Unit,
-    onTriggerHumOrSing: () -> Unit,
-    onTriggerSoundSearch: () -> Unit,
-    onRequestShizuku: () -> Unit,
-    onSelectSong: (Song) -> Unit,
+    onHumOrSing: () -> Unit,
+    onListen: () -> Unit,
     onToggleFavorite: () -> Unit,
     onPlaySong: (Song) -> Unit,
     onQueueSong: (Song) -> Unit,
@@ -126,29 +130,9 @@ fun VoiceSearchSheet(
                     .background(colors.outlineVariant)
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Two-Mode Segmented Control
-            VoiceSearchSegmentedBar(
-                currentMode = currentMode,
-                onModeSelected = { mode ->
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onSwitchMode(mode)
-                }
-            )
-
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Shizuku Privilege Banner / Badge
-            ShizukuStatusBadge(
-                status = shizukuStatus,
-                onRequestShizuku = onRequestShizuku
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
             if (recognizedSong != null) {
-                // The Recognized Song Card layout
                 RecognizedSongCard(
                     song = recognizedSong,
                     lyrics = syncedLyrics,
@@ -162,333 +146,31 @@ fun VoiceSearchSheet(
                     onSearchAgain = onSearchAgain
                 )
             } else {
-                // Listening or Ready State depending on active mode
-                when (currentMode) {
-                    VoiceSearchMode.HUM_AND_SING -> {
-                        HumAndSingContent(
-                            isListening = isListening,
-                            onTriggerSearch = {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onTriggerHumOrSing()
-                            }
-                        )
-                    }
-                    VoiceSearchMode.LISTEN_AND_NOW_PLAYING -> {
-                        ListenAndNowPlayingContent(
-                            isListening = isListening,
-                            nowPlayingHistory = nowPlayingHistory,
-                            onTriggerListen = {
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onTriggerSoundSearch()
-                            },
-                            onSelectSong = { song ->
-                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onSelectSong(song)
-                            }
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun VoiceSearchSegmentedBar(
-    currentMode: VoiceSearchMode,
-    onModeSelected: (VoiceSearchMode) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val colors = MaterialTheme.colorScheme
-
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(44.dp),
-        shape = RoundedCornerShape(22.dp),
-        color = colors.surfaceContainerHigh
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(3.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val modes = listOf(
-                VoiceSearchMode.HUM_AND_SING to "🎤 Hum & Sing",
-                VoiceSearchMode.LISTEN_AND_NOW_PLAYING to "🎶 Listen & Now Playing"
-            )
-
-            for ((mode, label) in modes) {
-                val isSelected = currentMode == mode
-                val bgColor by animateColorAsState(
-                    targetValue = if (isSelected) colors.primary else Color.Transparent,
-                    animationSpec = tween(220),
-                    label = "segmentBg"
-                )
-                val textColor by animateColorAsState(
-                    targetValue = if (isSelected) colors.onPrimary else colors.onSurfaceVariant,
-                    animationSpec = tween(220),
-                    label = "segmentText"
-                )
-
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(38.dp)
-                        .clip(RoundedCornerShape(19.dp))
-                        .background(bgColor)
-                        .clickable { onModeSelected(mode) },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = label,
-                        fontSize = 13.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        color = textColor,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ShizukuStatusBadge(
-    status: ShizukuStatus,
-    onRequestShizuku: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val colors = MaterialTheme.colorScheme
-
-    when (status) {
-        ShizukuStatus.READY -> {
-            Row(
-                modifier = modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(colors.primaryContainer.copy(alpha = 0.5f))
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Bolt,
-                    contentDescription = null,
-                    tint = colors.primary,
-                    modifier = Modifier.size(14.dp)
-                )
-                Text(
-                    text = "Shizuku Privileged Mode",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.primary,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
-        ShizukuStatus.NEEDS_PERMISSION -> {
-            Surface(
-                modifier = modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                color = colors.tertiaryContainer.copy(alpha = 0.6f)
-            ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .padding(bottom = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Authorize Shizuku",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = colors.onTertiaryContainer
-                        )
-                        Text(
-                            text = "Unlocks Google Sound Search & Pixel Now Playing",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = colors.onTertiaryContainer.copy(alpha = 0.8f)
-                        )
-                    }
-                    FilledTonalButton(
-                        onClick = onRequestShizuku,
-                        colors = ButtonDefaults.filledTonalButtonColors(
-                            containerColor = colors.tertiary,
-                            contentColor = colors.onTertiary
-                        )
-                    ) {
-                        Text("Grant", fontSize = 12.sp)
-                    }
-                }
-            }
-        }
-        ShizukuStatus.UNAVAILABLE -> Unit
-    }
-}
-
-@Composable
-private fun HumAndSingContent(
-    isListening: Boolean,
-    onTriggerSearch: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val colors = MaterialTheme.colorScheme
-    val transition = rememberInfiniteTransition(label = "pulse")
-    val pulseScale by if (isListening) {
-        transition.animateFloat(
-            initialValue = 1f,
-            targetValue = 1.15f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(600, easing = LinearEasing),
-                repeatMode = RepeatMode.Reverse
-            ),
-            label = "scale"
-        )
-    } else {
-        remember { mutableStateOf(1f) }
-    }
-
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(vertical = 16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .size(92.dp)
-                .scale(pulseScale)
-                .clip(CircleShape)
-                .background(colors.primaryContainer)
-                .clickable { onTriggerSearch() },
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.Mic,
-                contentDescription = "Hum or Sing",
-                tint = colors.primary,
-                modifier = Modifier.size(44.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        Text(
-            text = if (isListening) "Listening with Google..." else "Tap to Hum or Sing",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            color = colors.onSurface
-        )
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        Text(
-            text = "Hum a melody or sing lyrics to find any song with Google",
-            style = MaterialTheme.typography.bodySmall,
-            color = colors.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 24.dp)
-        )
-    }
-}
-
-@Composable
-private fun ListenAndNowPlayingContent(
-    isListening: Boolean,
-    nowPlayingHistory: List<HeardSongItem>,
-    onTriggerListen: () -> Unit,
-    onSelectSong: (Song) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val colors = MaterialTheme.colorScheme
-
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(top = 8.dp)
-    ) {
-        // Quick Listen Button Row
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(colors.primaryContainer.copy(alpha = 0.4f))
-                .clickable { onTriggerListen() }
-                .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(colors.primary),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.GraphicEq,
-                    contentDescription = null,
-                    tint = colors.onPrimary,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(14.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = if (isListening) "Identifying Room Music..." else "Search Music Playing Nearby",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = colors.onSurface
-                )
-                Text(
-                    text = "Launch Google Sound Search to listen",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.onSurfaceVariant
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Pixel Now Playing History Section
-        Text(
-            text = "Already heard",
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold,
-            color = colors.primary,
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
-        )
-
-        if (nowPlayingHistory.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(90.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "Nothing heard yet.\nSongs you've already heard will show up here.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(180.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                items(nowPlayingHistory, key = { it.id }) { item ->
-                    NowPlayingHistoryRow(
-                        item = item,
-                        onClick = { onSelectSong(item.song) }
+                    VoiceActionButton(
+                        label = if (activeAction == VoiceSearchMode.HUM_AND_SING) "Opening Google\u2026" else "Hum & sing",
+                        icon = Icons.Rounded.Mic,
+                        active = activeAction == VoiceSearchMode.HUM_AND_SING,
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onHumOrSing()
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                    VoiceActionButton(
+                        label = if (activeAction == VoiceSearchMode.LISTEN_AND_NOW_PLAYING) "Listening\u2026" else "Listen",
+                        icon = Icons.Rounded.GraphicEq,
+                        active = activeAction == VoiceSearchMode.LISTEN_AND_NOW_PLAYING,
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onListen()
+                        },
+                        modifier = Modifier.weight(1f)
                     )
                 }
             }
@@ -497,66 +179,65 @@ private fun ListenAndNowPlayingContent(
 }
 
 @Composable
-private fun NowPlayingHistoryRow(
-    item: HeardSongItem,
+private fun VoiceActionButton(
+    label: String,
+    icon: ImageVector,
+    active: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = MaterialTheme.colorScheme
+    val container by animateColorAsState(
+        targetValue = if (active) colors.primaryContainer else colors.surfaceContainerHigh,
+        animationSpec = tween(220),
+        label = "voice_action_bg"
+    )
+    val content by animateColorAsState(
+        targetValue = if (active) colors.onPrimaryContainer else colors.onSurface,
+        animationSpec = tween(220),
+        label = "voice_action_fg"
+    )
+    // No live level comes back from Google / Now Playing, so the waves pulse on their own.
+    val pulse = if (active) {
+        rememberInfiniteTransition(label = "voice_action_pulse").animateFloat(
+            initialValue = 0.25f,
+            targetValue = 0.85f,
+            animationSpec = infiniteRepeatable(tween(700, easing = LinearEasing), RepeatMode.Reverse),
+            label = "voice_action_level"
+        )
+    } else {
+        remember { mutableFloatStateOf(0f) }
+    }
 
     Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .clickable { onClick() },
-        color = colors.surfaceContainerHigh.copy(alpha = 0.7f)
+        onClick = onClick,
+        modifier = modifier.height(112.dp),
+        shape = RoundedCornerShape(28.dp),
+        color = container,
+        contentColor = content
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(colors.secondaryContainer),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.MusicNote,
-                    contentDescription = null,
-                    tint = colors.onSecondaryContainer,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = item.song.title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colors.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = item.song.artist,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            Icon(
-                imageVector = Icons.Rounded.Hearing,
-                contentDescription = null,
-                tint = colors.primary.copy(alpha = 0.7f),
-                modifier = Modifier.size(16.dp)
+            VoiceMicButton(
+                onClick = onClick,
+                listening = active,
+                level = { pulse.value },
+                size = 48.dp,
+                iconSize = 26.dp,
+                icon = icon,
+                contentDescription = null
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = content,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }

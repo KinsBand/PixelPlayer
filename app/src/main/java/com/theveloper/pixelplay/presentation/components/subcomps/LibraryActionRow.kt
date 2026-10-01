@@ -85,6 +85,8 @@ import com.theveloper.pixelplay.data.model.MusicFolder
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 import java.io.File
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 
 val defaultShape = RoundedCornerShape(26.dp) // Fallback shape
 val genHeight = 42.dp
@@ -115,7 +117,10 @@ fun LibraryActionRow(
     // Storage Filter (optional / deprecated from action row)
     showStorageFilterButton: Boolean = false,
     currentStorageFilter: com.theveloper.pixelplay.data.model.StorageFilter = com.theveloper.pixelplay.data.model.StorageFilter.ALL,
-    onStorageFilterClick: () -> Unit = {}
+    onStorageFilterClick: () -> Unit = {},
+    // Playlists tab: "Your Music" button between New playlist and Sort
+    onYourMusicClick: () -> Unit = {},
+    yourMusicDescription: String = "Your Music"
 ) {
     val shouldShowImport = isPlaylistTab && showImportButton
 
@@ -195,7 +200,37 @@ fun LibraryActionRow(
 
                     Spacer(modifier = Modifier.width(8.dp))
 
-                    // 2. In-Row Search Bar (searches in this screen/tab). Not on Playlists.
+                    // 2. Playlists: "Your Music" fills the gap between New playlist and Sort.
+                    if (isPlaylistTab) {
+                        FilledTonalButton(
+                            onClick = onYourMusicClick,
+                            shape = CircleShape,
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            ),
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(genHeight)
+                                .semantics { contentDescription = yourMusicDescription }
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.round_favorite_24),
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Your Music",
+                                style = MaterialTheme.typography.labelLarge,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    // 3. In-Row Search Bar (searches in this screen/tab). Not on Playlists.
                     if (!isPlaylistTab) Row(
                         modifier = Modifier
                             .weight(1f)

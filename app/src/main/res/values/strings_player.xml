@@ -138,6 +138,7 @@
     <string name="lyrics_offset_plus_half">+.5</string>
     <string name="lyrics_offset_zero">0s</string>
     <string name="lyrics_offset_seconds_fmt">%1$+.1fs</string>
+    <string name="lyrics_offset_auto_fmt">Auto %1$+.1fs</string>
     
     <!-- LyricsRepository -->
     <string name="lyrics_failed_to_search">Failed to search for lyrics</string>

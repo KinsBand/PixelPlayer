@@ -872,6 +872,7 @@ class PlaybackDispatchStateHolder @Inject constructor(
         }
         if (continuousMixRuntime.flavor.value != null) continuousMixRuntime.stop()
         queueRevision++
+        com.theveloper.pixelplay.data.playback.NowPlayingPlaylist.onQueueStarted(playlistId, queueName)
         val effectiveStartSong = songsToPlay.firstOrNull { it.id == startSong.id } ?: songsToPlay.first()
         // Lets the player match queued catalog songs on demand.
         catalogPlaybackResolver.register(songsToPlay)
@@ -1054,11 +1055,13 @@ class PlaybackDispatchStateHolder @Inject constructor(
         }
     }
 
-    fun addSongNextToQueue(song: Song) {
+    fun addSongNextToQueue(song: Song, markFilterPick: Boolean = false) {
         cb.getController()?.let { controller ->
-            val mediaItem = com.theveloper.pixelplay.data.model.QueueEntryMetadata(
+            val built = com.theveloper.pixelplay.data.model.QueueEntryMetadata(
                 tier = com.theveloper.pixelplay.data.model.QueueTier.PRIORITY, pinned = true
             ).attach(buildPlaybackMediaItem(song))
+            // Friends-in-the-room songs: not a hand pick, and never swapped out by a mix re-plan.
+            val mediaItem = if (markFilterPick) com.theveloper.pixelplay.data.MixQueueMetadata.markFilterPick(built) else built
 
             val insertionIndex = if (controller.currentMediaItemIndex != C.INDEX_UNSET) {
                 (controller.currentMediaItemIndex + 1).coerceAtMost(controller.mediaItemCount)

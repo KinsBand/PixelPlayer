@@ -153,6 +153,8 @@ fun SongInfoBottomSheet(
         coverArtUpdate: CoverArtUpdate?
     ) -> Unit,
     removeFromListTrigger: () -> Unit,
+    /** Show Delete even for songs with no file on the device (Your Music deletes every copy). */
+    alwaysShowDelete: Boolean = false,
     songInfoViewModel: SongInfoBottomSheetViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -730,7 +732,7 @@ fun SongInfoBottomSheet(
                     // Middle Delete Button — only for songs that exist on the device
                     // (local files or downloaded songs, i.e. the ones showing the tick).
                     // Online / not-downloaded songs have nothing to delete.
-                    if (song.isLocalOrDownloaded) IconButton(
+                    if (alwaysShowDelete || song.isLocalOrDownloaded) IconButton(
                         onClick = {
                             (context as? Activity)?.let { activity ->
                                 onDeleteFromDevice(activity, song) { result ->

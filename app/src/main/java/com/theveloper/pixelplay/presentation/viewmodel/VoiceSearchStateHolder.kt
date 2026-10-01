@@ -5,6 +5,7 @@ import com.theveloper.pixelplay.data.database.FavoritesEntity
 import com.theveloper.pixelplay.data.model.HeardSongItem
 import com.theveloper.pixelplay.data.model.Lyrics
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.data.recognition.RecentlyHeardRepository
 import com.theveloper.pixelplay.data.recognition.VoiceSearchMode
 import com.theveloper.pixelplay.data.recognition.VoiceSearchResolver
 import com.theveloper.pixelplay.data.recognition.shizuku.GoogleSearchBridge
@@ -19,6 +20,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -32,7 +36,8 @@ class VoiceSearchStateHolder @Inject constructor(
     private val pixelNowPlayingBridge: PixelNowPlayingBridge,
     private val heardSongsRepository: HeardSongsRepository,
     private val voiceSearchResolver: VoiceSearchResolver,
-    private val favoritesDao: FavoritesDao
+    private val favoritesDao: FavoritesDao,
+    private val recentlyHeardRepository: RecentlyHeardRepository
 ) {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var resolutionJob: kotlinx.coroutines.Job? = null
@@ -61,14 +66,20 @@ class VoiceSearchStateHolder @Inject constructor(
 
     val shizukuStatus: StateFlow<ShizukuStatus> = shizukuManager.status
 
-    val nowPlayingHistory: StateFlow<List<HeardSongItem>> = heardSongsRepository.heardSongs
+    /** Which of the two sheet buttons is working right now (null = idle). */
+    private val _activeAction = MutableStateFlow<VoiceSearchMode?>(null)
+    val activeAction: StateFlow<VoiceSearchMode?> = _activeAction.asStateFlow()
+
+    private var listeningJob: kotlinx.coroutines.Job? = null
+    /** Elapsed-realtime when another app (Google song search) was opened for us. */
+    private var externalLaunchAt = 0L
 
     init {
-        // Collect latest heard events from Now Playing
+        // A song Now Playing just recognised (its notification) shows as the match card.
         scope.launch {
-            heardSongsRepository.latestHeardEvent.collect { item ->
+            recentlyHeardRepository.newlyHeard.collect { entry ->
                 if (_isSheetOpen.value && _recognizedSong.value == null) {
-                    resolveAndShowSong(item.song.title, item.song.artist)
+                    resolveAndShowSong(entry.title, entry.artist)
                 }
             }
         }
@@ -76,23 +87,19 @@ class VoiceSearchStateHolder @Inject constructor(
 
     fun openSheet(initialMode: VoiceSearchMode = VoiceSearchMode.LISTEN_AND_NOW_PLAYING) {
         cancelResolution()
+        stopListening()
         _isSheetOpen.value = true
         _currentMode.value = initialMode
         _recognizedSong.value = null
         _syncedLyrics.value = null
-
-        // If opening in Listen & Now Playing mode, refresh Now Playing history from Shizuku
-        if (initialMode == VoiceSearchMode.LISTEN_AND_NOW_PLAYING) {
-            scope.launch {
-                pixelNowPlayingBridge.fetchNowPlayingHistory()
-            }
-        }
+        // Import Now Playing's own history into Recently heard (Shizuku only; no-op otherwise).
+        scope.launch { pixelNowPlayingBridge.fetchNowPlayingHistory() }
     }
 
     fun closeSheet() {
         cancelResolution()
+        stopListening()
         _isSheetOpen.value = false
-        _isListening.value = false
         _recognizedSong.value = null
         _syncedLyrics.value = null
     }
@@ -102,25 +109,73 @@ class VoiceSearchStateHolder @Inject constructor(
         _currentMode.value = mode
         _recognizedSong.value = null
         _syncedLyrics.value = null
+    }
 
-        if (mode == VoiceSearchMode.LISTEN_AND_NOW_PLAYING) {
-            scope.launch {
-                pixelNowPlayingBridge.fetchNowPlayingHistory()
+    private fun stopListening() {
+        listeningJob?.cancel()
+        listeningJob = null
+        externalLaunchAt = 0L
+        _isListening.value = false
+        _activeAction.value = null
+    }
+
+    private fun beginListening(mode: VoiceSearchMode, block: suspend () -> Unit) {
+        cancelResolution()
+        listeningJob?.cancel()
+        _currentMode.value = mode
+        _recognizedSong.value = null
+        _syncedLyrics.value = null
+        _isListening.value = true
+        _activeAction.value = mode
+        listeningJob = scope.launch {
+            try {
+                block()
+                // Never stay stuck on "listening": give a result up to 30 s to arrive.
+                delay(LISTEN_TIMEOUT_MS)
+            } finally {
+                if (_activeAction.value == mode) {
+                    _isListening.value = false
+                    _activeAction.value = null
+                }
             }
         }
     }
 
-    fun triggerGoogleHumOrSing() {
-        scope.launch {
-            _isListening.value = true
-            googleSearchBridge.launchHumOrSingSearch()
+    /** Hum & sing: Google's "Search a song" (hum, whistle or sing). */
+    fun triggerGoogleHumOrSing() = beginListening(VoiceSearchMode.HUM_AND_SING) {
+        externalLaunchAt = android.os.SystemClock.elapsedRealtime()
+        googleSearchBridge.launchHumOrSingSearch()
+    }
+
+    /**
+     * Listen: Android's Now Playing. With Shizuku it asks Now Playing to listen on demand and
+     * waits for its notification; otherwise (or if nothing arrives) Google's song search — the
+     * same engine Now Playing's own "Search" uses — is opened. Results from Now Playing are
+     * captured from its notification either way, so notification access is checked first.
+     */
+    fun triggerNowPlayingListen() = beginListening(VoiceSearchMode.LISTEN_AND_NOW_PLAYING) {
+        if (!googleSearchBridge.ensureNotificationListenerAccess()) {
+            // Android's notification-access screen was opened; coming back resets the button.
+            externalLaunchAt = android.os.SystemClock.elapsedRealtime()
+            return@beginListening
+        }
+        val heardOnDevice = if (pixelNowPlayingBridge.triggerAmbientDetection()) {
+            withTimeoutOrNull(ON_DEVICE_WAIT_MS) { recentlyHeardRepository.newlyHeard.first() }
+        } else null
+        if (heardOnDevice == null) {
+            externalLaunchAt = android.os.SystemClock.elapsedRealtime()
+            googleSearchBridge.launchSoundSearch()
         }
     }
 
-    fun triggerGoogleSoundSearch() {
-        scope.launch {
-            _isListening.value = true
-            googleSearchBridge.launchSoundSearch()
+    /** Kept for older callers. */
+    fun triggerGoogleSoundSearch() = triggerNowPlayingListen()
+
+    /** Back from Google's song search: stop showing "listening" (its result can't come back to us). */
+    fun onHostResumed() {
+        val launchedAt = externalLaunchAt
+        if (launchedAt != 0L && android.os.SystemClock.elapsedRealtime() - launchedAt > 1_000L) {
+            stopListening()
         }
     }
 
@@ -136,7 +191,9 @@ class VoiceSearchStateHolder @Inject constructor(
         cancelResolution()
         val generation = resolutionGeneration
         resolutionJob = scope.launch {
+            listeningJob?.cancel()
             _isListening.value = false
+            _activeAction.value = null
             val (resolved, lyrics) = voiceSearchResolver.resolve(title, artist)
             if (generation != resolutionGeneration) return@launch
             _recognizedSong.value = resolved
@@ -194,5 +251,10 @@ class VoiceSearchStateHolder @Inject constructor(
     fun clearRecognizedSong() {
         _recognizedSong.value = null
         _syncedLyrics.value = null
+    }
+
+    private companion object {
+        const val LISTEN_TIMEOUT_MS = 30_000L
+        const val ON_DEVICE_WAIT_MS = 8_000L
     }
 }

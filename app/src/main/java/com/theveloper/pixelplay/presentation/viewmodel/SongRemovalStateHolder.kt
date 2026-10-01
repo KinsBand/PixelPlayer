@@ -43,6 +43,8 @@ class SongRemovalStateHolder @Inject constructor(
     private val libraryStateHolder: LibraryStateHolder,
     private val playbackStateHolder: PlaybackStateHolder,
     private val multiSelectionStateHolder: MultiSelectionStateHolder,
+    private val cloudSongDao: com.theveloper.pixelplay.data.database.CloudSongDao,
+    private val yourMusicRemovals: com.theveloper.pixelplay.data.library.YourMusicRemovals,
     @param:ApplicationContext private val context: android.content.Context
 ) {
 
@@ -58,6 +60,7 @@ class SongRemovalStateHolder @Inject constructor(
     private var pendingBatchDeleteSongs: List<Song>? = null
     private var pendingBatchDeleteSkippedCount: Int = 0
     private var pendingBatchDeleteOnComplete: (() -> Unit)? = null
+    private var pendingBatchDeleteOnFinished: ((Boolean) -> Unit)? = null
     private var pendingDeleteSong: Song? = null
     private var pendingDeleteCallback: ((Boolean) -> Unit)? = null
 
@@ -120,6 +123,8 @@ class SongRemovalStateHolder @Inject constructor(
         songs: List<Song>,
         onComplete: () -> Unit,
         cb: SongRemovalCallbacks,
+        /** Told whether any file was deleted (false when the user cancelled or nothing could go). */
+        onFinished: ((deletedAny: Boolean) -> Unit)? = null,
     ) {
         cb.scope.launch {
             // The playing song can be deleted too: it is dropped from the queue (playback
@@ -127,6 +132,7 @@ class SongRemovalStateHolder @Inject constructor(
             val deletableSongs = songs
             if (deletableSongs.isEmpty()) {
                 onComplete()
+                onFinished?.invoke(false)
                 return@launch
             }
 
@@ -163,6 +169,7 @@ class SongRemovalStateHolder @Inject constructor(
                         pendingBatchDeleteSongs = acceptedSongs
                         pendingBatchDeleteSkippedCount = skippedCount + invalidRequestCount
                         pendingBatchDeleteOnComplete = onComplete
+                        pendingBatchDeleteOnFinished = onFinished
                         _deletePermissionRequest.emit(deleteRequest.intentSender)
                         return@launch
                     }
@@ -173,6 +180,7 @@ class SongRemovalStateHolder @Inject constructor(
             val confirmed = showMultiDeleteConfirmation(activity, deletableSongs.size)
             if (!confirmed) {
                 onComplete()
+                onFinished?.invoke(false)
                 return@launch
             }
 
@@ -215,6 +223,7 @@ class SongRemovalStateHolder @Inject constructor(
 
             multiSelectionStateHolder.clearSelection()
             onComplete()
+            onFinished?.invoke(successCount > 0)
         }
     }
 
@@ -321,9 +330,11 @@ class SongRemovalStateHolder @Inject constructor(
         if (batchSongs != null) {
             val skippedCount = pendingBatchDeleteSkippedCount
             val onComplete = pendingBatchDeleteOnComplete
+            val onFinished = pendingBatchDeleteOnFinished
             pendingBatchDeleteSongs = null
             pendingBatchDeleteSkippedCount = 0
             pendingBatchDeleteOnComplete = null
+            pendingBatchDeleteOnFinished = null
             cb.scope.launch {
                 if (granted) {
                     // System already deleted the files — clean up library
@@ -350,6 +361,7 @@ class SongRemovalStateHolder @Inject constructor(
                 }
                 multiSelectionStateHolder.clearSelection()
                 onComplete?.invoke()
+                onFinished?.invoke(granted && batchSongs.isNotEmpty())
             }
             return
         }
@@ -371,6 +383,112 @@ class SongRemovalStateHolder @Inject constructor(
             }
         }
     }
+
+    // endregion
+
+    // region Your Music: delete every copy of a song
+
+    /**
+     * Deletes a Your Music row completely: every copy it stands for ([copies]: the local file,
+     * the app's download, the streamed / liked copy) is removed, so the song is really gone.
+     *
+     *  1. Files on the device go through the normal delete (the system's delete dialog on
+     *     Android 11+, which is also the confirmation). With no file on the device, a plain
+     *     confirmation dialog asks first. Cancelling stops everything.
+     *  2. The app's downloads of the song are deleted (file and download record).
+     *  3. Every copy is unliked, taken out of the queue, out of the library and out of all
+     *     playlists ([SongRemovalCallbacks.removeSong]).
+     *  4. The song is hidden from Your Music, so a service that keeps reporting it as liked
+     *     (Spotify, a mirrored "Favourites" playlist) can't bring it back. Liking it again does.
+     */
+    fun deleteFromYourMusic(
+        activity: Activity,
+        song: Song,
+        copies: List<Song>,
+        onResult: (Boolean) -> Unit,
+        cb: SongRemovalCallbacks,
+    ) {
+        cb.scope.launch {
+            val all = (listOf(song) + copies).distinctBy { it.id }
+            val deviceFiles = all.filter { it.isLocal && !isAppDownloadCopy(it) && it.path.isNotBlank() }
+            // File deletion reports through its own toasts; this flow shows one at the end.
+            val quiet = SongRemovalCallbacks(cb.scope, sendToast = {}, cb.removeFromMediaControllerQueue, cb.removeSong)
+
+            val confirmed = if (deviceFiles.isNotEmpty()) {
+                val done = CompletableDeferred<Boolean>()
+                deleteSelectedFromDevice(activity, deviceFiles, onComplete = {}, cb = quiet) { deleted -> done.complete(deleted) }
+                done.await()
+            } else {
+                showYourMusicDeleteConfirmation(activity, song)
+            }
+            if (!confirmed) {
+                onResult(false)
+                return@launch
+            }
+
+            deleteDownloadsOf(all)
+            all.forEach { copy ->
+                cb.removeFromMediaControllerQueue(copy.id)
+                cb.removeSong(copy)
+            }
+            yourMusicRemovals.remove(all)
+            cb.sendToast(context.getString(R.string.song_removal_deleted_from_your_music))
+            onResult(true)
+        }
+    }
+
+    /** The song was liked (or downloaded) again after being deleted: show it in Your Music again. */
+    fun restoreToYourMusic(song: Song) = yourMusicRemovals.restore(song)
+
+    private fun isAppDownloadCopy(song: Song): Boolean =
+        com.theveloper.pixelplay.data.database.SourceType.isAppDownload(song.path) ||
+            com.theveloper.pixelplay.data.database.SourceType.isAppDownload(song.contentUriString)
+
+    /** Deletes the app's downloads of any of [songs]: the audio file and the download record. */
+    private suspend fun deleteDownloadsOf(songs: List<Song>) = withContext(Dispatchers.IO) {
+        val ids = songs.mapTo(HashSet()) { it.id }
+        val videoIds = songs.mapNotNullTo(HashSet()) { s ->
+            (s.youtubeId ?: s.id.takeIf { it.startsWith("yt_") })?.removePrefix("yt_")?.takeIf { it.isNotBlank() }
+        }
+        val paths = songs.mapNotNullTo(HashSet()) { it.path.takeIf { p -> p.isNotBlank() } }
+        val downloads = try {
+            cloudSongDao.getAllOnce().filter { it.isDownloaded }
+        } catch (_: Exception) {
+            emptyList()
+        }
+        downloads.filter { row ->
+            row.id in ids ||
+                row.youtubeId?.removePrefix("yt_") in videoIds ||
+                row.localFilePath in paths ||
+                com.theveloper.pixelplay.data.library.DownloadedLibraryIndexer.libraryId(row.id).toString() in ids
+        }.forEach { row ->
+            (row.localFilePath ?: row.localSongId)?.takeIf { it.isNotBlank() }?.let { path ->
+                runCatching { java.io.File(path).takeIf { it.isFile }?.delete() }
+            }
+            // The library indexer sees the download is gone and removes its library row.
+            runCatching { cloudSongDao.updateDownloadStatus(row.id, false, null, null) }
+        }
+    }
+
+    private suspend fun showYourMusicDeleteConfirmation(activity: Activity, song: Song): Boolean =
+        withContext(Dispatchers.Main) {
+            try {
+                if (activity.isFinishing || activity.isDestroyed) return@withContext false
+                val userChoice = CompletableDeferred<Boolean>()
+                MaterialAlertDialogBuilder(activity)
+                    .setTitle(activity.getString(R.string.song_removal_your_music_title))
+                    .setMessage(activity.getString(R.string.song_removal_your_music_message, song.title, song.displayArtist))
+                    .setPositiveButton(activity.getString(R.string.common_delete)) { _, _ -> userChoice.complete(true) }
+                    .setNegativeButton(activity.getString(R.string.common_cancel)) { _, _ -> userChoice.complete(false) }
+                    .setOnCancelListener { userChoice.complete(false) }
+                    .setCancelable(true)
+                    .create()
+                    .show()
+                userChoice.await()
+            } catch (_: Exception) {
+                false
+            }
+        }
 
     // endregion
 }

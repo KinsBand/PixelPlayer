@@ -80,6 +80,16 @@
 -keep class com.theveloper.pixelplay.data.database.SearchHistoryEntity { *; }
 -keep class com.theveloper.pixelplay.data.database.TransitionRuleEntity { *; }
 
+# Caches saved with Gson by reflection: friend activity + 7-day history, friends in the room,
+# queue attribution (data.social), connected libraries / friend playlists (data.accounts) and
+# Daily Mix engagement stats. R8 full mode otherwise renames their fields and drops the generic
+# types of their List/Map fields, so they load back as LinkedTreeMap and the first flow that
+# reads them crashes with "ClassCastException: X cannot be cast to Y" (release builds only).
+-keep class com.theveloper.pixelplay.data.social.** { <fields>; <init>(...); }
+-keep class com.theveloper.pixelplay.data.accounts.** { <fields>; <init>(...); }
+-keep class com.theveloper.pixelplay.data.DailyMixManager$SongEngagementStats { <fields>; <init>(...); }
+-keepclassmembers,allowobfuscation class * { @com.google.gson.annotations.SerializedName <fields>; }
+
 # Netty channel classes are instantiated reflectively and require public no-arg constructors.
 # Without these, release builds can fail with:
 # "IllegalArgumentException: Class NioServerSocketChannel does not have a public non-arg constructor"

@@ -191,7 +191,8 @@ data class IslandMetrics(
 
     fun contentHeight(level: CutoutExpansionLevel): Dp = when (level) {
         CutoutExpansionLevel.COLLAPSED -> 0.dp
-        CutoutExpansionLevel.LEVEL_1_SINGLE -> 40.dp
+        // + handleHeight = the bottom pill outline, so the line sits exactly in its middle.
+        CutoutExpansionLevel.LEVEL_1_SINGLE -> 42.dp
         CutoutExpansionLevel.LEVEL_2_THREE -> 104.dp
         CutoutExpansionLevel.LEVEL_3_SIX -> 176.dp + CONTROLS_HEIGHT
         CutoutExpansionLevel.LEVEL_4_FULL ->
@@ -206,6 +207,29 @@ data class IslandMetrics(
     }
 
     private val fullHeight: Dp get() = screenHeight - surfaceTop - 16.dp
+
+    /**
+     * The pill outline along the bottom edge of the open island: tall enough to hold the
+     * controls row (states 3 and 4) and the single lyric line (state 1).
+     */
+    val outlineHeight: Dp get() = maxOf(bottomCornerRadius * 2, CONTROLS_HEIGHT)
+
+    /**
+     * How visible the bottom pill outline is at [height]: shown in state 1 (around the lyric)
+     * and states 3–4 (around the controls), hidden in state 2. Follows a drag smoothly.
+     */
+    fun outlineAlpha(height: Dp): Float {
+        val h1 = height(CutoutExpansionLevel.LEVEL_1_SINGLE).value
+        val h2 = height(CutoutExpansionLevel.LEVEL_2_THREE).value
+        val h3 = height(CutoutExpansionLevel.LEVEL_3_SIX).value
+        val h = height.value
+        return when {
+            h <= h1 -> morphFraction(height)
+            h <= h2 -> 1f - (h - h1) / (h2 - h1)
+            h <= h3 -> (h - h2) / (h3 - h2)
+            else -> 1f
+        }.coerceIn(0f, 1f)
+    }
 
     val maxHeight: Dp get() = fullHeight
 

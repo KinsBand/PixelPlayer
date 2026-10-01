@@ -11,7 +11,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.DirectionsRun
-import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material3.Icon
@@ -19,8 +19,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -38,28 +41,71 @@ import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.presentation.navigation.Screen
 import com.theveloper.pixelplay.presentation.navigation.navigateSafely
 
+/** A friend shown as a filter next to the Playlists title: tapping them shows only their playlists. */
+@androidx.compose.runtime.Immutable
+data class PlaylistFriendFilter(
+    val id: String,
+    val name: String,
+    val avatarUrl: String?,
+    val playlistIds: Set<String>,
+)
+
 @Composable
 fun PlaylistsCarousel(
     likedSongs: List<Song>,
     likedPlaylistId: String?,
     navController: NavController,
     playlists: List<Playlist> = emptyList(),
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    friendFilters: List<PlaylistFriendFilter> = emptyList(),
 ) {
     val listState = rememberLazyListState()
+    // Only friends who actually have a playlist in this row get a filter.
+    val shownIds = remember(playlists) { playlists.mapTo(HashSet()) { it.id } }
+    val filters = remember(friendFilters, shownIds) { friendFilters.filter { f -> f.playlistIds.any { it in shownIds } } }
+    var selectedFriendId by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    val selected = filters.firstOrNull { it.id == selectedFriendId }
+    val visiblePlaylists = remember(playlists, selected) {
+        if (selected == null) playlists else playlists.filter { it.id in selected.playlistIds }
+    }
+    // Back to the start of the row whenever the filter changes.
+    androidx.compose.runtime.LaunchedEffect(selected?.id) { listState.animateScrollToItem(0) }
 
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Section Header
-        Text(
-            text = "Playlists",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            color = OliveCream,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
+        // Section header: title, then the friends' pictures as filters.
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Playlists",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = OliveCream,
+            )
+            if (filters.isNotEmpty()) {
+                Spacer(Modifier.width(12.dp))
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(end = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    items(filters, key = { "friend_filter_" + it.id }) { friend ->
+                        FriendFilterAvatar(
+                            friend = friend,
+                            selected = friend.id == selectedFriendId,
+                            dimmed = selectedFriendId != null && friend.id != selectedFriendId,
+                            onClick = { selectedFriendId = if (selectedFriendId == friend.id) null else friend.id },
+                            modifier = Modifier.animateItem()
+                        )
+                    }
+                }
+            }
+        }
 
         // LazyRow Carousel
         LazyRow(
@@ -68,30 +114,82 @@ fun PlaylistsCarousel(
             contentPadding = PaddingValues(horizontal = 16.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            // Card 1: Your Likes
-            item(key = "card_your_likes") {
-                GridCollageCard(
-                    likedSongs = likedSongs,
-                    likedPlaylistId = likedPlaylistId,
-                    onYourLikesClick = { id ->
-                        if (id != null) {
-                            navController.navigateSafely(Screen.PlaylistDetail.createRoute(id))
-                        }
+            // Card 1: Your Music (every song and every like); hidden while a friend filter is on.
+            if (selected == null) {
+                item(key = "card_your_music") {
+                    Box(Modifier.animateItem()) {
+                        GridCollageCard(
+                            likedSongs = likedSongs,
+                            onClick = { navController.navigateSafely(Screen.YourMusic.route) }
+                        )
                     }
-                )
+                }
             }
 
-            // Real user playlists
+            // Real user playlists (only the picked friend's while filtered)
             items(
-                items = playlists,
+                items = visiblePlaylists,
                 key = { "carousel_${it.id}" }
             ) { playlist ->
-                PlaylistCarouselCard(
-                    playlist = playlist,
-                    onClick = {
-                        navController.navigateSafely(Screen.PlaylistDetail.createRoute(playlist.id))
-                    }
-                )
+                Box(Modifier.animateItem()) {
+                    PlaylistCarouselCard(
+                        playlist = playlist,
+                        onClick = {
+                            navController.navigateSafely(Screen.PlaylistDetail.createRoute(playlist.id))
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FriendFilterAvatar(
+    friend: PlaylistFriendFilter,
+    selected: Boolean,
+    dimmed: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val ring by androidx.compose.animation.animateColorAsState(
+        targetValue = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+        animationSpec = androidx.compose.animation.core.tween(
+            com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort4,
+            easing = com.theveloper.pixelplay.ui.theme.MotionTokens.Emphasized
+        ),
+        label = "friendFilterRing"
+    )
+    val alpha by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (dimmed) 0.45f else 1f,
+        animationSpec = androidx.compose.animation.core.tween(
+            com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort4,
+            easing = com.theveloper.pixelplay.ui.theme.MotionTokens.Emphasized
+        ),
+        label = "friendFilterAlpha"
+    )
+    Box(
+        modifier = modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .clickable(
+                onClickLabel = if (selected) "Show all playlists" else "Show ${friend.name}'s playlists",
+                onClick = onClick
+            )
+            .border(2.dp, ring, CircleShape)
+            .padding(3.dp)
+            .alpha(alpha),
+        contentAlignment = Alignment.Center
+    ) {
+        if (friend.avatarUrl != null) {
+            SmartImage(model = friend.avatarUrl, contentDescription = friend.name, modifier = Modifier.fillMaxSize(), shape = CircleShape)
+        } else {
+            Box(
+                Modifier.fillMaxSize().clip(CircleShape).background(MaterialTheme.colorScheme.secondaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(friend.name.take(1).uppercase(), style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer)
             }
         }
     }
@@ -100,15 +198,14 @@ fun PlaylistsCarousel(
 @Composable
 private fun GridCollageCard(
     likedSongs: List<Song>,
-    likedPlaylistId: String?,
-    onYourLikesClick: (String?) -> Unit
+    onClick: () -> Unit
 ) {
     Box(
         modifier = Modifier
             .size(200.dp, 240.dp)
             .clip(RoundedCornerShape(24.dp))
             .background(OliveDarker)
-            .clickable { onYourLikesClick(likedPlaylistId) }
+            .clickable(onClickLabel = "Open Your Music", onClick = onClick)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             // 3x3 Grid
@@ -162,8 +259,8 @@ private fun GridCollageCard(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Rounded.Favorite,
-                        contentDescription = "Your Likes",
+                        imageVector = Icons.Rounded.LibraryMusic,
+                        contentDescription = "Your Music",
                         tint = OliveCream,
                         modifier = Modifier.size(24.dp)
                     )
@@ -180,13 +277,13 @@ private fun GridCollageCard(
                 verticalArrangement = Arrangement.Center
             ) {
                 Text(
-                    text = "Your Likes",
+                    text = "Your Music",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = OliveCream
                 )
                 Text(
-                    text = "${likedSongs.size} songs",
+                    text = if (likedSongs.size == 1) "1 liked song" else "${likedSongs.size} liked songs",
                     style = MaterialTheme.typography.bodySmall,
                     color = OliveCream.copy(alpha = 0.6f)
                 )

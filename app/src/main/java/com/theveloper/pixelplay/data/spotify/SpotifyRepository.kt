@@ -6,6 +6,8 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -70,6 +72,62 @@ class SpotifyRepository @Inject constructor(private val spotifyAuthManager: Spot
         return items.mapIndexed { index, item -> parseTrack(item, "$playlistId:$index") }
     }
     suspend fun getLikedSongs(): List<SpotifyTrack> = if (useWeb) webLibrary.likedSongs() else pages("me/tracks?limit=50").mapIndexed { index, item -> parseTrack(item, "liked:$index") }
+    /**
+     * Spotify track id for a song from another source: exact ISRC first (official API only),
+     * then title + artist checked with [TrackMatching]. Null = no confident match.
+     */
+    suspend fun findTrackId(title: String, artist: String, isrc: String?): String? {
+        val sourceMods = TrackMatching.modifiers(title)
+        fun pick(candidates: List<SpotifyTrack>) = candidates.firstOrNull { t ->
+            TrackMatching.titlesMatch(title, t.title) && TrackMatching.artistsOverlap(artist, t.artistName) &&
+                TrackMatching.modifiers(t.title) == sourceMods
+        }?.id
+        if (useWeb) return pick(webLibrary.searchTracks("$title $artist".trim()))
+        if (!isrc.isNullOrBlank() && isrc.matches(Regex("[A-Za-z0-9]{8,15}"))) {
+            runCatching { searchApi("isrc:${isrc.uppercase()}") }.getOrNull()?.firstOrNull()?.let { return it.id }
+        }
+        return pick(searchApi("track:$title artist:$artist").ifEmpty { searchApi("$title $artist") })
+    }
+
+    private suspend fun searchApi(query: String): List<SpotifyTrack> {
+        val url = "https://api.spotify.com/v1/search".toHttpUrl().newBuilder()
+            .addQueryParameter("type", "track").addQueryParameter("limit", "10").addQueryParameter("q", query)
+            .build().toString()
+        val items = get(url).optJSONObject("tracks")?.optJSONArray("items") ?: return emptyList()
+        return (0 until items.length()).mapNotNull { i ->
+            val obj = items.optJSONObject(i) ?: return@mapNotNull null
+            parseTrack(JSONObject().put("track", obj), "search:$i").takeUnless { it.id.startsWith("unavailable:") }
+        }
+    }
+
+    /**
+     * Appends tracks to one of your playlists. Web session: the web player's mutation. Official
+     * API: needs the playlist-modify scopes (reconnect Spotify once after updating).
+     */
+    suspend fun addTracksToPlaylist(playlistId: String, trackIds: List<String>) {
+        require(playlistId.matches(Regex("[a-zA-Z0-9]+")))
+        val ids = trackIds.filter { it.matches(Regex("[a-zA-Z0-9]+")) }.distinct()
+        if (ids.isEmpty()) return
+        if (useWeb) return webLibrary.addToPlaylist(playlistId, ids)
+        ids.chunked(100).forEach { chunk ->
+            val body = JSONObject().put("uris", org.json.JSONArray().apply { chunk.forEach { put("spotify:track:$it") } }).toString()
+            try { post("https://api.spotify.com/v1/playlists/$playlistId/items", body) }
+            catch (e: SpotifyAccessException) {
+                if (e.status != 404) throw e
+                post("https://api.spotify.com/v1/playlists/$playlistId/tracks", body)
+            }
+        }
+    }
+
+    private suspend fun post(url: String, jsonBody: String): Unit = withContext(Dispatchers.IO) {
+        val parsed = url.toHttpUrl()
+        require(parsed.scheme == "https" && parsed.host == "api.spotify.com")
+        val token = spotifyAuthManager.refreshAccessTokenIfNeeded() ?: throw SpotifyAccessException(401)
+        val request = Request.Builder().url(parsed).header("Authorization", "Bearer $token")
+            .post(jsonBody.toRequestBody("application/json".toMediaType())).build()
+        okHttpClient.newCall(request).execute().use { if (!it.isSuccessful) throw SpotifyAccessException(it.code) }
+    }
+
     internal fun parsePlaylist(obj: JSONObject): SpotifyPlaylist = SpotifyPlaylist(obj.getString("id"), obj.getString("name"),
         obj.optJSONArray("images")?.optJSONObject(0)?.optString("url"),
         (obj.optJSONObject("items") ?: obj.optJSONObject("tracks"))?.optInt("total") ?: 0,

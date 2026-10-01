@@ -31,7 +31,13 @@ fun LyricsSyncControls(
     backgroundColor: Color,
     accentColor: Color,
     onAccentColor: Color,
-    onBackgroundColor: Color
+    onBackgroundColor: Color,
+    /** The offset was measured automatically (no manual offset for this song). */
+    isAutomatic: Boolean = false,
+    /** The user has set an offset for this song by hand (possibly 0). */
+    hasManualOffset: Boolean = false,
+    /** Drops the manual offset so the automatic one (if any) applies again. */
+    onResetToAutomatic: (() -> Unit)? = null
 ) {
     Row(
         modifier = modifier
@@ -61,18 +67,27 @@ fun LyricsSyncControls(
             containerColor = accentColor,
             contentColor = onAccentColor
         )
-        // Center Display / Reset
+        // Center Display / Reset.
+        // Automatic offset: shows "Auto +0.3s"; tapping sets 0 for this song (turns it off).
+        // Manual offset: tapping goes back to the automatic offset, or to 0 when there is none.
+        val highlighted = offsetMillis != 0 || hasManualOffset
         SyncButton(
-            text = if (offsetMillis == 0) {
-                stringResource(R.string.lyrics_offset_zero)
-            } else {
-                stringResource(R.string.lyrics_offset_seconds_fmt, offsetMillis / 1000f)
+            text = when {
+                isAutomatic -> stringResource(R.string.lyrics_offset_auto_fmt, offsetMillis / 1000f)
+                offsetMillis == 0 -> stringResource(R.string.lyrics_offset_zero)
+                else -> stringResource(R.string.lyrics_offset_seconds_fmt, offsetMillis / 1000f)
             },
-            onClick = { onOffsetChange(0) },
-            weight = 1.3f, // Slightly wider
-            containerColor = if (offsetMillis != 0) accentColor else backgroundColor,
-            contentColor = if (offsetMillis != 0) onAccentColor else onBackgroundColor,
-            enabled = offsetMillis != 0,
+            onClick = {
+                when {
+                    isAutomatic -> onOffsetChange(0)
+                    hasManualOffset && onResetToAutomatic != null -> onResetToAutomatic()
+                    else -> onOffsetChange(0)
+                }
+            },
+            weight = if (isAutomatic) 1.6f else 1.3f, // Slightly wider
+            containerColor = if (highlighted) accentColor else backgroundColor,
+            contentColor = if (highlighted) onAccentColor else onBackgroundColor,
+            enabled = highlighted,
             fontSize = 12.sp
         )
         // +0.1s

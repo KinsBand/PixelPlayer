@@ -90,6 +90,52 @@ class YouTubeMusicApiService @Inject constructor(
         }
     }
 
+    /** Next NewPipe page per normalized query, for "Show more" in search. */
+    private val moreSongPages = object : LinkedHashMap<String, org.schabi.newpipe.extractor.Page?>(16, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, org.schabi.newpipe.extractor.Page?>): Boolean = size > 16
+    }
+
+    /**
+     * Loads the next page of song results for [query]. The first call for a query walks past
+     * page one (already on screen) and returns page two. Returns the songs plus whether
+     * another page exists.
+     */
+    suspend fun moreSongs(query: String): Result<Pair<List<Song>, Boolean>> = withContext(Dispatchers.IO) {
+        if (query.isBlank()) return@withContext Result.success(emptyList<Song>() to false)
+        try {
+            val key = query.trim().lowercase(java.util.Locale.ROOT)
+            val handler = ServiceList.YouTube.searchQHFactory.fromQuery(query, listOf("music_songs"), "")
+            val known = synchronized(moreSongPages) { moreSongPages.containsKey(key) }
+            val page: org.schabi.newpipe.extractor.Page? = if (known) {
+                synchronized(moreSongPages) { moreSongPages[key] }
+            } else {
+                val first = NewPipeExecution.run { SearchInfo.getInfo(ServiceList.YouTube, handler) }
+                first.nextPage
+            }
+            ensureActive()
+            if (!org.schabi.newpipe.extractor.Page.isValid(page)) {
+                synchronized(moreSongPages) { moreSongPages[key] = null }
+                return@withContext Result.success(emptyList<Song>() to false)
+            }
+            val more = NewPipeExecution.run { SearchInfo.getMoreItems(ServiceList.YouTube, handler, page) }
+            ensureActive()
+            val next = more.nextPage
+            synchronized(moreSongPages) { moreSongPages[key] = next }
+            val songs = hydrate(more.items.filterIsInstance<StreamInfoItem>().mapNotNull { mapToSong(it) })
+            Result.success(songs to org.schabi.newpipe.extractor.Page.isValid(next))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Timber.tag(TAG).e(e, "Loading more songs failed for query: $query")
+            Result.failure(e)
+        }
+    }
+
+    /** Forget paging for [query] so the next "Show more" starts from page two again. */
+    fun resetMoreSongs(query: String) {
+        synchronized(moreSongPages) { moreSongPages.remove(query.trim().lowercase(java.util.Locale.ROOT)) }
+    }
+
     suspend fun hydrate(songs: List<Song>): List<Song> {
         if (songs.isEmpty()) return songs
         val ids = songs.map { it.id }

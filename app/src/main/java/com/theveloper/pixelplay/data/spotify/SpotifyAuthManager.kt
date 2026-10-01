@@ -40,7 +40,7 @@ class SpotifyAuthManager @Inject constructor(
         fun redirectUri(port: Int): String = "http://127.0.0.1:$port$REDIRECT_PATH"
 
         val REGISTERED_REDIRECT_URIS: List<String> get() = REDIRECT_PORTS.map { redirectUri(it) }
-        const val SCOPES = "user-library-read playlist-read-private playlist-read-collaborative"
+        const val SCOPES = "user-library-read playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private"
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()

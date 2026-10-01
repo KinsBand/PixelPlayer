@@ -49,6 +49,38 @@ class SpotifyWebLibrary @Inject constructor(private val pathfinder: SpotifyPathf
         return out.distinctBy { it.id }
     }
 
+    /**
+     * Track search as the web player does it. Returns parsed tracks (best first). The persisted
+     * query hash is discovered from the web player on first use (see [SpotifyPathfinder]).
+     */
+    suspend fun searchTracks(term: String, limit: Int = 10): List<SpotifyTrack> {
+        val data = pathfinder.query(SpotifyQueries.SEARCH_TRACKS, JSONObject()
+            .put("searchTerm", term)
+            .put("offset", 0)
+            .put("limit", limit)
+            .put("numberOfTopResults", 5)
+            .put("includeAudiobooks", false)
+            .put("includePreReleases", false)
+            .put("includeAuthors", false))
+        val items = data.optJSONObject("searchV2")?.optJSONObject("tracksV2")?.optJSONArray("items") ?: JSONArray()
+        return (0 until items.length()).mapNotNull { i ->
+            val entry = items.optJSONObject(i) ?: return@mapNotNull null
+            val track = entry.optJSONObject("item")?.optJSONObject("data") ?: entry.optJSONObject("data") ?: entry
+            SpotifyWebParsers.track(track, "search:$i").takeUnless { it.id.startsWith("unavailable:") }
+        }
+    }
+
+    /** Appends tracks to the end of one of your playlists (web player "addToPlaylist"). */
+    suspend fun addToPlaylist(playlistId: String, trackIds: List<String>) {
+        if (trackIds.isEmpty()) return
+        val uris = JSONArray()
+        trackIds.distinct().forEach { uris.put("spotify:track:$it") }
+        pathfinder.query(SpotifyQueries.ADD_TO_PLAYLIST, JSONObject()
+            .put("uris", uris)
+            .put("playlistUri", "spotify:playlist:$playlistId")
+            .put("newPosition", JSONObject().put("moveType", "BOTTOM_OF_PLAYLIST").put("fromUid", JSONObject.NULL)))
+    }
+
     suspend fun playlist(id: String): SpotifyPlaylist {
         val data = pathfinder.query(SpotifyQueries.PLAYLIST, playlistVars(id, 0, 1)).optJSONObject("playlistV2")
             ?: throw SpotifyWebException("Spotify couldn't find that playlist.", 404)

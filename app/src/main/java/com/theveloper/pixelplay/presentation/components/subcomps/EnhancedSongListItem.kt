@@ -100,6 +100,8 @@ fun EnhancedSongListItem(
     isSelectionMode: Boolean = false,
     showMoreOptionsButton: Boolean = true,
     onLongPress: () -> Unit = {},
+    /** Optional action shown just left of the options button (e.g. Versions). */
+    extraTrailing: (@Composable () -> Unit)? = null,
     onMoreOptionsClick: (Song) -> Unit,
     onClick: () -> Unit
 ) {
@@ -385,6 +387,11 @@ fun EnhancedSongListItem(
 
                 if (showPlayingIndicator || showTrailingAction) {
                     Spacer(modifier = Modifier.width(12.dp))
+                }
+
+                if (showTrailingAction && extraTrailing != null) {
+                    extraTrailing()
+                    Spacer(modifier = Modifier.width(8.dp))
                 }
 
                 if (showTrailingAction) {

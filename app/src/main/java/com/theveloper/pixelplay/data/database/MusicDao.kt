@@ -1699,6 +1699,50 @@ interface MusicDao {
     @Query("DELETE FROM albums WHERE NOT EXISTS (SELECT 1 FROM songs WHERE songs.album_id = albums.id)")
     suspend fun deleteOrphanedAlbums()
 
+    // --- Duplicate repair (LibraryDuplicateRepair) ---
+    @Query("UPDATE OR IGNORE song_artist_cross_ref SET artist_id = :to WHERE artist_id = :from")
+    suspend fun repointCrossRefsToArtist(from: Long, to: Long)
+
+    @Query("UPDATE songs SET artist_id = :to WHERE artist_id = :from")
+    suspend fun repointSongsToArtist(from: Long, to: Long)
+
+    @Query("UPDATE albums SET artist_id = :to WHERE artist_id = :from")
+    suspend fun repointAlbumsToArtist(from: Long, to: Long)
+
+    @Query("UPDATE songs SET artists_json = REPLACE(artists_json, :fromToken, :toToken) WHERE artists_json LIKE '%' || :fromToken || '%'")
+    suspend fun repointArtistsJson(fromToken: String, toToken: String)
+
+    @Query("UPDATE artists SET image_url = COALESCE(image_url, :imageUrl), custom_image_uri = COALESCE(custom_image_uri, :customImageUri) WHERE id = :artistId")
+    suspend fun fillArtistImageBlanks(artistId: Long, imageUrl: String?, customImageUri: String?)
+
+    @Query("UPDATE artists SET name = :name WHERE id = :artistId")
+    suspend fun renameArtist(artistId: Long, name: String)
+
+    @Query("UPDATE artists SET track_count = (SELECT COUNT(*) FROM song_artist_cross_ref WHERE song_artist_cross_ref.artist_id = artists.id)")
+    suspend fun refreshArtistTrackCounts()
+
+    @Query("UPDATE songs SET album_id = :to WHERE album_id = :from")
+    suspend fun repointSongsToAlbum(from: Long, to: Long)
+
+    @Query("UPDATE albums SET song_count = (SELECT COUNT(*) FROM songs WHERE songs.album_id = albums.id)")
+    suspend fun refreshAlbumSongCounts()
+
+    /** Moves everything of artist [from] onto [to] (songs, cross-refs, albums, artists_json). */
+    @Transaction
+    suspend fun mergeArtistInto(from: Long, to: Long) {
+        repointCrossRefsToArtist(from, to)
+        deleteCrossRefsForArtist(from) // refs that already existed on [to]
+        repointSongsToArtist(from, to)
+        repointAlbumsToArtist(from, to)
+        repointArtistsJson("{\"id\":$from,", "{\"id\":$to,")
+    }
+
+    /** Moves every song of album [from] into album [to]. */
+    @Transaction
+    suspend fun mergeAlbumInto(from: Long, to: Long) {
+        repointSongsToAlbum(from, to)
+    }
+
     @Query("DELETE FROM artists WHERE NOT EXISTS (SELECT 1 FROM song_artist_cross_ref WHERE song_artist_cross_ref.artist_id = artists.id)")
     suspend fun deleteOrphanedArtists()
 

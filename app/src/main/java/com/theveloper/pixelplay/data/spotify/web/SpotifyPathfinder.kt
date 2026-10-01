@@ -23,6 +23,9 @@ object SpotifyQueries {
     const val PLAYLIST = "fetchPlaylist"
     const val PROFILE = "profileAttributes"
     const val TRACK = "getTrack"
+    /** No default hash: read from the web player on first use. */
+    const val SEARCH_TRACKS = "searchTracks"
+    const val ADD_TO_PLAYLIST = "addToPlaylist"
 
     val defaults = mapOf(
         LIBRARY to "390c78e5b951029bad359785e69b07b536a509c581cbcd0aded5e5067f187455",
@@ -52,6 +55,13 @@ class SpotifyPathfinder @Inject constructor(
     suspend fun query(operation: String, variables: JSONObject): JSONObject = withContext(Dispatchers.IO) {
         var hash = vault.get("spotify.web.hash.$operation").ifBlank { SpotifyQueries.defaults[operation].orEmpty() }
         var healed = false
+        if (hash.isBlank()) {
+            // Operations without a built-in hash: look it up in the web player right away.
+            healed = true
+            hash = bundle.queryHash(operation)
+                ?: throw SpotifyWebException("Spotify changed its web API ($operation). An app update may be needed.")
+            vault.put("spotify.web.hash.$operation" to hash)
+        }
         while (true) {
             val body = JSONObject()
                 .put("variables", variables)

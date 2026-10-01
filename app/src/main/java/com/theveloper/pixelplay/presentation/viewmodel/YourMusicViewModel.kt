@@ -31,8 +31,20 @@ import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
 
+/** How Your Music is ordered (a vibe mix keeps its own order). */
+enum class YourMusicSort(val label: String) {
+    /** Liked filter: newest like first. Otherwise: newest downloaded / added first. */
+    LATEST("Latest"),
+    A_Z("A to Z"),
+    Z_A("Z to A"),
+    MOST_PLAYED("Most played"),
+    LEAST_PLAYED("Least played"),
+    LAST_PLAYED("Last played"),
+}
+
 data class YourMusicControls(
     val query: String = "",
+    val sort: YourMusicSort = YourMusicSort.LATEST,
     val likedOnly: Boolean = false,
     /** Only one vibe filter can be on at a time; it turns the list into a generated mix. */
     val selectedFilterId: String? = null,
@@ -43,6 +55,13 @@ data class YourMusicControls(
 
 data class YourMusicUiState(
     val songs: List<Song> = emptyList(),
+    /**
+     * [songs] grouped into versions (live, remaster, cover… under their original). Empty while a
+     * vibe mix is on: a mix is a flat, ordered list.
+     */
+    val families: List<com.theveloper.pixelplay.data.library.SongUnifier.Family> = emptyList(),
+    /** Every copy (local, downloaded, streamed, liked) behind each shown song id. */
+    val copies: Map<String, List<Song>> = emptyMap(),
     val totalCount: Int = 0,
     val likedCount: Int = 0,
     val isLoading: Boolean = true,
@@ -62,6 +81,7 @@ data class YourMusicUiState(
 class YourMusicViewModel @Inject constructor(
     musicRepository: MusicRepository,
     likedSongsRepository: LikedSongsRepository,
+    private val removals: com.theveloper.pixelplay.data.library.YourMusicRemovals,
     private val dailyMixManager: DailyMixManager,
     private val mixFeedback: com.theveloper.pixelplay.data.MixFeedback,
     private val adaptiveMix: com.theveloper.pixelplay.data.AdaptiveMix,
@@ -71,24 +91,46 @@ class YourMusicViewModel @Inject constructor(
     private val prefs = context.getSharedPreferences("your_music_filters", Context.MODE_PRIVATE)
     private val controls = MutableStateFlow(loadControls())
 
-    private data class Library(val all: List<Song>, val likedIds: Set<String>)
+    private data class Library(
+        val all: List<Song>,
+        val likedIds: Set<String>,
+        val copies: Map<String, List<Song>>,
+        val unified: Map<String, com.theveloper.pixelplay.data.library.SongUnifier.UnifiedSong>,
+        /** Position in the liked list (0 = newest like), best over every copy. */
+        val likedRank: Map<String, Int> = emptyMap(),
+        /** Newest add / download time over every copy. */
+        val addedAt: Map<String, Long> = emptyMap(),
+    )
     private data class MixKey(val filter: VibeFilter, val seed: Long, val query: String, val likedOnly: Boolean, val poolSize: Int)
 
     @Volatile private var cachedMix: Pair<MixKey, List<String>>? = null
 
     private val library = combine(
         musicRepository.getAudioFiles().catch { emit(emptyList()) },
-        likedSongsRepository.likedSongs.onStart { emit(emptyList()) }.catch { emit(emptyList()) }
-    ) { local, liked ->
-        // The shared liked list already merges local favourites, platform likes and
-        // favourites-named playlists, so the liked count matches the Playlists tab and Home.
+        likedSongsRepository.likedSongs.onStart { emit(emptyList()) }.catch { emit(emptyList()) },
+        removals.keys
+    ) { local, liked, removed ->
+        // One row per recording: a local file, its download, the streamed copy and the like
+        // (Spotify / YouTube Music) are merged, and the row is liked / downloaded if any copy is.
         val likedIds = liked.mapTo(HashSet(liked.size * 2)) { it.id }
-        val all = (local + liked)
+        val playable = (local + liked)
             .filter { it.contentUriString.isNotBlank() || it.youtubeId != null }
+            // Deleted from Your Music: gone even while a copy lingers (e.g. a Spotify like).
+            .filterNot { removals.isRemoved(it, removed) }
             .distinctBy { it.id }
-            .sortedBy { it.title.lowercase(Locale.ROOT) }
-        Library(all, likedIds)
-    }
+        val unified = com.theveloper.pixelplay.data.library.SongUnifier.unify(playable, likedIds)
+            .sortedBy { it.song.title.lowercase(Locale.ROOT) }
+        // The liked list arrives newest like first.
+        val likeIndex = HashMap<String, Int>(liked.size * 2).apply { liked.forEachIndexed { i, song -> putIfAbsent(song.id, i) } }
+        Library(
+            likedRank = unified.associate { u -> u.id to (u.copies.mapNotNull { likeIndex[it.id] }.minOrNull() ?: Int.MAX_VALUE) },
+            addedAt = unified.associate { u -> u.id to maxOf(u.song.dateAdded, u.copies.maxOfOrNull { it.dateAdded } ?: 0L) },
+            all = unified.map { it.song },
+            likedIds = unified.filter { it.isLiked }.mapTo(HashSet(unified.size)) { it.id },
+            copies = unified.associate { it.id to it.copies },
+            unified = unified.associateBy { it.id }
+        )
+    }.flowOn(Dispatchers.Default)
 
     val uiState: StateFlow<YourMusicUiState> = combine(library, controls) { lib, c -> lib to c }
         .mapLatest { (lib, c) ->
@@ -100,7 +142,7 @@ class YourMusicViewModel @Inject constructor(
                     song.album.lowercase(Locale.ROOT).contains(query)
             }
             val filter = (MusicVibeFilters.presets + c.customFilters).firstOrNull { it.id == c.selectedFilterId }
-            val songs = if (filter == null) searched else {
+            val songs = if (filter == null) sortSongs(searched, lib, c) else {
                 // Keep the same mix while it's on screen (liking a song must not reshuffle it);
                 // only a new filter / "New mix" / search / scope change rebuilds it.
                 val key = MixKey(filter, c.mixSeed, query, c.likedOnly, searched.size)
@@ -129,8 +171,12 @@ class YourMusicViewModel @Inject constructor(
                     ).also { mix -> cachedMix = key to mix.map { it.id } }
                 }
             }
+            val families = if (filter != null) emptyList() else
+                com.theveloper.pixelplay.data.library.SongUnifier.families(songs.mapNotNull { lib.unified[it.id] })
             YourMusicUiState(
                 songs = songs,
+                families = families,
+                copies = lib.copies,
                 totalCount = lib.all.size,
                 likedCount = lib.all.count { it.id in lib.likedIds },
                 isLoading = false,
@@ -140,6 +186,34 @@ class YourMusicViewModel @Inject constructor(
         }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), YourMusicUiState(controls = controls.value))
+
+    private suspend fun sortSongs(songs: List<Song>, lib: Library, c: YourMusicControls): List<Song> {
+        val title = compareBy<Song> { it.title.lowercase(Locale.ROOT) }
+        return when (c.sort) {
+            YourMusicSort.LATEST -> if (c.likedOnly) {
+                songs.sortedWith(compareBy<Song> { lib.likedRank[it.id] ?: Int.MAX_VALUE }.then(title))
+            } else {
+                songs.sortedWith(compareByDescending<Song> { lib.addedAt[it.id] ?: 0L }.then(title))
+            }
+            YourMusicSort.A_Z -> songs.sortedWith(title)
+            YourMusicSort.Z_A -> songs.sortedWith(title.reversed())
+            YourMusicSort.MOST_PLAYED, YourMusicSort.LEAST_PLAYED, YourMusicSort.LAST_PLAYED -> {
+                val stats = try { dailyMixManager.getAllEngagementStats() }
+                    catch (e: CancellationException) { throw e } catch (_: Exception) { emptyMap() }
+                // A song's plays = its plays across every copy (local, downloaded, streamed).
+                fun copiesOf(song: Song) = lib.copies[song.id].orEmpty().ifEmpty { listOf(song) }
+                fun plays(song: Song) = copiesOf(song).sumOf { stats[it.id]?.playCount ?: 0 }
+                fun lastPlayed(song: Song) = copiesOf(song).maxOfOrNull { stats[it.id]?.lastPlayedTimestamp ?: 0L } ?: 0L
+                when (c.sort) {
+                    YourMusicSort.MOST_PLAYED -> songs.sortedWith(compareByDescending<Song> { plays(it) }.then(title))
+                    YourMusicSort.LEAST_PLAYED -> songs.sortedWith(compareBy<Song> { plays(it) }.then(title))
+                    else -> songs.sortedWith(compareByDescending<Song> { lastPlayed(it) }.then(title))
+                }
+            }
+        }
+    }
+
+    fun setSort(sort: YourMusicSort) = update { it.copy(sort = sort) }
 
     private suspend fun listening(): Map<String, MusicVibeFilters.Listening> = try {
         dailyMixManager.getAllEngagementStats().mapValues { (_, stats) ->
@@ -203,6 +277,7 @@ class YourMusicViewModel @Inject constructor(
         val validIds = (MusicVibeFilters.presets + customs).mapTo(hashSetOf()) { it.id }
         YourMusicControls(
             likedOnly = prefs.getBoolean(KEY_LIKED, false),
+            sort = prefs.getString(KEY_SORT, null)?.let { name -> YourMusicSort.entries.firstOrNull { it.name == name } } ?: YourMusicSort.LATEST,
             selectedFilterId = prefs.getString(KEY_SELECTED_ONE, null)?.takeIf { it in validIds },
             customFilters = customs
         )
@@ -218,6 +293,7 @@ class YourMusicViewModel @Inject constructor(
             .putString(KEY_SELECTED_ONE, c.selectedFilterId)
             .remove(KEY_SELECTED_LEGACY)
             .putBoolean(KEY_LIKED, c.likedOnly)
+            .putString(KEY_SORT, c.sort.name)
             .apply()
     }
 
@@ -226,5 +302,6 @@ class YourMusicViewModel @Inject constructor(
         const val KEY_SELECTED_LEGACY = "selected_filters"
         const val KEY_SELECTED_ONE = "selected_filter"
         const val KEY_LIKED = "liked_only"
+        const val KEY_SORT = "sort"
     }
 }

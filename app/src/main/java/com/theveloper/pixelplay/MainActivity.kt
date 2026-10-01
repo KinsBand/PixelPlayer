@@ -168,6 +168,7 @@ import com.theveloper.pixelplay.utils.CrashLogData
 import javax.annotation.concurrent.Immutable
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.collectLatest
 
 
 @Immutable
@@ -204,6 +205,10 @@ class MainActivity : ComponentActivity() {
     lateinit var voiceSearchStateHolder: VoiceSearchStateHolder
     @Inject
     lateinit var friendFollowController: com.theveloper.pixelplay.data.social.FriendFollowController
+    @Inject
+    lateinit var friendsMixController: com.theveloper.pixelplay.data.social.FriendsMixController
+    @Inject
+    lateinit var friendsInRoomController: com.theveloper.pixelplay.data.social.FriendsInRoomController
     // For handling shortcut navigation - using StateFlow so composables can observe changes
     private val _pendingPlaylistNavigation = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
     private val _pendingShuffleAll = kotlinx.coroutines.flow.MutableStateFlow(false)
@@ -220,6 +225,7 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalPermissionsApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         LogUtils.d(this, "onCreate")
+        com.theveloper.pixelplay.data.social.FriendQueueAttribution.attach(applicationContext)
         val splashScreen = installSplashScreen()
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.auto(
@@ -267,9 +273,61 @@ class MainActivity : ComponentActivity() {
                 if (playerViewModel.stablePlayerState.value.currentSong == null) {
                     playerViewModel.playSongs(listOf(song), song, "Following $name")
                 } else {
-                    playerViewModel.addSongNextToQueue(song)
+                    playerViewModel.addSongNextToQueue(song, userPick = false)
                 }
             }
+        }
+
+        // Friends Mix keeps growing: while it's the playing queue, friends' new plays are added
+        // to the end of it. Stops as soon as another queue starts.
+        lifecycleScope.launch {
+            playerViewModel.playerUiState
+                .map { it.currentQueueSourceName == com.theveloper.pixelplay.data.social.FRIENDS_MIX_QUEUE_NAME }
+                .distinctUntilChanged()
+                .collectLatest { active ->
+                    if (!active) return@collectLatest
+                    friendsMixController.liveAdditions().collect { song -> playerViewModel.addSongToQueue(song, userPick = false) }
+                }
+        }
+
+        // Friends in the room (queue options › Friends): after one or two of your songs, one
+        // song from *each* checked friend (their playlists + last 7 days), in a random order,
+        // each the one that best fits what's playing, then back to you. Tagged with the friend
+        // so its queue row shows their picture and name. Watches the
+        // queue too, so Similar, vibe filters, Local / Smart Mix or a new album can't knock the
+        // friend songs out: a removed one is put straight back.
+        lifecycleScope.launch {
+            kotlinx.coroutines.flow.combine(
+                playerViewModel.stablePlayerState
+                    .map { it.currentSong }
+                    .distinctUntilChanged { old, new -> old?.id == new?.id },
+                playerViewModel.queueFlow,
+                friendsInRoomController.selected,
+                friendsInRoomController.poolChanges
+            ) { song, queue, _, _ -> song to queue }
+                .collectLatest { (song, queue) -> try {
+                    // Let a rebuild (remove + add) finish before looking at up next.
+                    kotlinx.coroutines.delay(200)
+                    val at = song?.let { current -> queue.indexOfFirst { it.id == current.id } } ?: -1
+                    val upcoming = if (at >= 0) queue.subList(at + 1, queue.size).toList() else queue.toList()
+                    // Friends in the room keep the music going: when up next runs low and no mix
+                    // is running, your mix carries on over the current queue (friend songs keep
+                    // being woven in), so the queue always has at least 10 songs ahead.
+                    if (song != null && friendsInRoomController.selected.value.isNotEmpty() &&
+                        upcoming.size < 10 && playerViewModel.activeMixFlavor.value == null
+                    ) {
+                        playerViewModel.startContinuousMix(com.theveloper.pixelplay.data.MixFlavor.NORMAL)
+                    }
+                    val pick = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                        friendsInRoomController.sync(song, upcoming)
+                    } ?: return@collectLatest
+                    playerViewModel.addFriendSongNext(pick)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // Never let the background friend mixing take the app down.
+                    android.util.Log.w("FriendsInRoom", "sync failed", e)
+                } }
         }
 
         setContent {
@@ -724,6 +782,7 @@ class MainActivity : ComponentActivity() {
                 Screen.PlaylistDetail.route,
                 Screen.DailyMixScreen.route,
                 Screen.RecentlyPlayed.route,
+                Screen.RecentlyHeard.route,
                 Screen.GenreDetail.route,
                 Screen.AlbumDetail.route,
                 Screen.ArtistDetail.route,
@@ -739,6 +798,7 @@ class MainActivity : ComponentActivity() {
                 Screen.SettingsCategory.route,
                 Screen.DelimiterConfig.route,
                 Screen.PaletteStyle.route,
+                Screen.LyricsAnimationStyle.route,
                 Screen.RecentlyPlayed.route,
                 Screen.DeviceCapabilities.route,
                 Screen.EasterEgg.route,
@@ -747,6 +807,7 @@ class MainActivity : ComponentActivity() {
         }
         val shouldHideNavigationBar by remember(currentRoute) {
             derivedStateOf {
+                com.theveloper.pixelplay.presentation.navigation.NavBarVisibility.hiddenByScreen ||
                 currentRoute?.let { route ->
                     routesWithHiddenNavigationBar.any { hiddenRoute ->
                         if (hiddenRoute.contains("{")) {
@@ -858,8 +919,19 @@ class MainActivity : ComponentActivity() {
         val voiceSearchIsListening by voiceSearchStateHolder.isListening.collectAsStateWithLifecycle()
         val voiceSearchRecognizedSong by voiceSearchStateHolder.recognizedSong.collectAsStateWithLifecycle()
         val voiceSearchSyncedLyrics by voiceSearchStateHolder.syncedLyrics.collectAsStateWithLifecycle()
-        val voiceSearchShizukuStatus by voiceSearchStateHolder.shizukuStatus.collectAsStateWithLifecycle()
-        val voiceSearchNowPlayingHistory by voiceSearchStateHolder.nowPlayingHistory.collectAsStateWithLifecycle()
+        val voiceSearchActiveAction by voiceSearchStateHolder.activeAction.collectAsStateWithLifecycle()
+        // Back from Google's song search (or the notification-access screen): the button stops
+        // showing "listening", and dictation into the search bar resumes.
+        val voiceLifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+        androidx.compose.runtime.DisposableEffect(voiceLifecycleOwner) {
+            val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                    voiceSearchStateHolder.onHostResumed()
+                }
+            }
+            voiceLifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { voiceLifecycleOwner.lifecycle.removeObserver(observer) }
+        }
 
         val voiceSearchDeckCoordinator = rememberVoiceSearchDeckCoordinator(voiceSearchIsOpen)
         // The sheet is measured, and the whole bottom deck (Home / Search / Library bar and the
@@ -1244,17 +1316,11 @@ class MainActivity : ComponentActivity() {
                                     .graphicsLayer {
                                         translationY = size.height * (1f - voiceSearchDeckCoordinator.progress)
                                     },
-                                currentMode = voiceSearchCurrentMode,
-                                isListening = voiceSearchIsListening,
+                                activeAction = voiceSearchActiveAction,
                                 recognizedSong = voiceSearchRecognizedSong,
                                 syncedLyrics = voiceSearchSyncedLyrics,
-                                shizukuStatus = voiceSearchShizukuStatus,
-                                nowPlayingHistory = voiceSearchNowPlayingHistory,
-                                onSwitchMode = { voiceSearchStateHolder.switchMode(it) },
-                                onTriggerHumOrSing = { voiceSearchStateHolder.triggerGoogleHumOrSing() },
-                                onTriggerSoundSearch = { voiceSearchStateHolder.triggerGoogleSoundSearch() },
-                                onRequestShizuku = { voiceSearchStateHolder.requestShizukuPermission() },
-                                onSelectSong = { voiceSearchStateHolder.selectSong(it) },
+                                onHumOrSing = { voiceSearchStateHolder.triggerGoogleHumOrSing() },
+                                onListen = { voiceSearchStateHolder.triggerNowPlayingListen() },
                                 onToggleFavorite = { voiceSearchStateHolder.toggleFavorite() },
                                 onPlaySong = { song -> playerViewModel.playSong(song) },
                                 onQueueSong = { song -> playerViewModel.addSelectedToQueue(listOf(song)) },

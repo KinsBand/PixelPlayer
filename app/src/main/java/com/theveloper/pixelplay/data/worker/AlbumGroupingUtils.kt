@@ -47,17 +47,13 @@ internal fun buildAlbumGroupingKeys(album: AlbumEntity): List<AlbumGroupingKey> 
     )
 
     albumKeys += AlbumGroupingKey(
-        normalizedTitle = album.title.normalizeMetadataTextOrEmpty()
-            .ifBlank { "Unknown Album" }
-            .lowercase(),
+        normalizedTitle = albumTitleKey(album.title),
         identity = "media:${album.id}"
     )
 
     if (!album.albumArtUriString.isNullOrBlank()) {
         albumKeys += AlbumGroupingKey(
-            normalizedTitle = album.title.normalizeMetadataTextOrEmpty()
-                .ifBlank { "Unknown Album" }
-                .lowercase(),
+            normalizedTitle = albumTitleKey(album.title),
             identity = "art:${album.albumArtUriString.trim()}"
         )
     }
@@ -90,12 +86,13 @@ internal fun chooseAlbumDisplayArtist(
         }
     )
 
-    return when {
+    val chosen = when {
         preferAlbumArtist && albumArtist != null -> albumArtist
         trackArtist != null -> trackArtist
         albumArtist != null -> albumArtist
         else -> "Unknown Artist"
     }
+    return com.theveloper.pixelplay.data.library.CollectionKeys.cleanArtistName(chosen).ifBlank { chosen }
 }
 
 internal fun resolveAlbumDisplayArtistId(
@@ -136,9 +133,7 @@ private fun buildAlbumGroupingKey(
     fallbackAlbumId: Long,
     preferStableLocalIdentity: Boolean = false
 ): AlbumGroupingKey {
-    val normalizedTitle = albumName.normalizeMetadataTextOrEmpty()
-        .ifBlank { "Unknown Album" }
-        .lowercase()
+    val normalizedTitle = albumTitleKey(albumName)
     val stableLocalIdentity = when {
         !parentDirectoryPath.isNullOrBlank() -> {
             "dir:${parentDirectoryPath.trim().lowercase()}"
@@ -149,7 +144,9 @@ private fun buildAlbumGroupingKey(
     }
     val identity = when {
         !albumArtist.isNullOrBlank() -> {
-            "artist:${albumArtist.normalizeMetadataTextOrEmpty().lowercase()}"
+            // Case, accents, "The", "X - Topic" / "XVEVO" don't split an album.
+            "artist:" + com.theveloper.pixelplay.data.library.CollectionKeys.normalizeArtist(albumArtist)
+                .ifBlank { albumArtist.normalizeMetadataTextOrEmpty().lowercase() }
         }
         preferStableLocalIdentity -> {
             stableLocalIdentity
@@ -170,3 +167,11 @@ private fun buildAlbumGroupingKey(
         identity = identity
     )
 }
+
+/**
+ * Album title for grouping: edition qualifiers ("(Deluxe)", "- Single", "Remastered 2011") are
+ * ignored, so one album doesn't split into editions.
+ */
+internal fun albumTitleKey(title: String?): String =
+    com.theveloper.pixelplay.data.library.CollectionKeys.normalizeAlbum(title.normalizeMetadataTextOrEmpty())
+        .ifBlank { "unknown album" }

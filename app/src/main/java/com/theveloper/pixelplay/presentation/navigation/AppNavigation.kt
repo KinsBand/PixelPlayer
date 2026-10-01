@@ -64,6 +64,7 @@ import com.theveloper.pixelplay.presentation.screens.PlatformPlaylistsScreen
 import com.theveloper.pixelplay.presentation.screens.PlaylistPlatform
 import com.theveloper.pixelplay.presentation.screens.PracticeScreen
 import com.theveloper.pixelplay.presentation.screens.RecentlyPlayedScreen
+import com.theveloper.pixelplay.presentation.screens.RecentlyHeardScreen
 import com.theveloper.pixelplay.presentation.screens.radio.RadioScreen
 
 import com.theveloper.pixelplay.presentation.screens.AboutScreen
@@ -314,6 +315,16 @@ fun AppNavigation(
                     }
                 }
                 composable(
+                    Screen.LyricsAnimationStyle.route,
+                ) {
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        com.theveloper.pixelplay.presentation.screens.LyricsAnimationStyleScreen(
+                            playerViewModel = playerViewModel,
+                            onBackClick = { navController.popBackStack() }
+                        )
+                    }
+                }
+                composable(
                     Screen.Experimental.route,
                 ) {
                     // The Experimental screen was folded into Player & Lyrics; old links land there.
@@ -339,6 +350,16 @@ fun AppNavigation(
                 ) {
                     ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
                         RecentlyPlayedScreen(
+                            playerViewModel = playerViewModel,
+                            navController = navController
+                        )
+                    }
+                }
+                composable(
+                    Screen.RecentlyHeard.route,
+                ) {
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        RecentlyHeardScreen(
                             playerViewModel = playerViewModel,
                             navController = navController
                         )
@@ -401,6 +422,16 @@ fun AppNavigation(
                         RadioScreen(
                             playerViewModel = playerViewModel,
                             onBackClick = { navController.popBackStack() }
+                        )
+                    }
+                }
+
+                composable(Screen.Friends.route) {
+                    ScreenWrapper(navController = navController, playerViewModel = playerViewModel, animatedVisibilityScope = this) {
+                        com.theveloper.pixelplay.presentation.screens.FriendsScreen(
+                            navController = navController,
+                            playerViewModel = playerViewModel,
+                            onBack = { navController.popBackStack() }
                         )
                     }
                 }

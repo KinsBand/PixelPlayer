@@ -170,7 +170,7 @@ fun MixFeedbackBottomSheet(
                     ) {
                         Text("Familiar", style = MaterialTheme.typography.labelLarge)
                         Text(
-                            "${(discovery * 100).toInt()}% discovery",
+                            "${(discovery * 100).roundToInt()}% discovery",
                             style = MaterialTheme.typography.labelMedium,
                             color = colors.primary
                         )
@@ -178,12 +178,14 @@ fun MixFeedbackBottomSheet(
                     }
                     Slider(
                         value = discovery,
-                        onValueChange = { discovery = it },
+                        // Moves in steps of 10% (0, 10, 20 … 100).
+                        onValueChange = { discovery = (kotlin.math.round(it * 10f) / 10f).coerceIn(0f, 1f) },
+                        steps = 9,
                         onValueChangeFinished = {
                             player.mixDiscoveryBalance = discovery.toDouble()
                             player.sendToast(
-                                if (isLive) "Discovery ${(discovery * 100).toInt()}% · upcoming songs refreshed"
-                                else "Discovery ${(discovery * 100).toInt()}% · applies when a mix starts"
+                                if (isLive) "Discovery ${(discovery * 100).roundToInt()}% · upcoming songs refreshed"
+                                else "Discovery ${(discovery * 100).roundToInt()}% · applies when a mix starts"
                             )
                         }
                     )

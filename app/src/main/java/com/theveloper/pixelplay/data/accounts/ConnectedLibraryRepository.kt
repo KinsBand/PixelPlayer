@@ -51,7 +51,11 @@ data class ConnectedSnapshot(val playlists: List<ConnectedPlaylist> = emptyList(
     /** Playlists removed in the app (playlist id -> info). Sync never brings these back. */
     val deletedPlaylists: Map<String, DeletedPlaylist>? = null,
     /** Removed playlists that still have to be deleted / unsaved on YouTube Music (playlist ids). */
-    val pendingRemoteDeletes: List<String>? = null)
+    val pendingRemoteDeletes: List<String>? = null,
+    /** Friends removed in the app (friend ids). The friends feed never brings these back. */
+    val hiddenFriends: List<String>? = null,
+    /** Friends' playlists pinned into Your playlists (playlist ids). */
+    val pinnedFriendPlaylists: List<String>? = null)
 
 /** Tombstone for a playlist the user removed. [remote] = the user also asked to delete it on the service. */
 data class DeletedPlaylist(val id: String, val remoteId: String, val source: String, val title: String,
@@ -475,6 +479,69 @@ class ConnectedLibraryRepository @Inject constructor(@ApplicationContext context
             order = e.order?.let { it + fresh.map { s -> s.id } })
     }
 
+    /** Result of adding songs to a playlist on a streaming service. */
+    data class ServiceAddResult(val added: Int, val alreadyThere: Int, val notFound: List<Song>)
+
+    /**
+     * Your own playlists on Spotify, YouTube Music and Apple Music that songs can be added to
+     * (friends' playlists and editorial "Spotify" playlists are left out).
+     */
+    fun addablePlaylists(snapshot: ConnectedSnapshot = mutable.value): List<ConnectedPlaylist> =
+        snapshot.playlists.filter { p ->
+            p.friendId == null && when (p.source) {
+                "YOUTUBE_MUSIC" -> true
+                "SPOTIFY" -> !p.ownerName.equals("Spotify", ignoreCase = true)
+                MusicSources.APPLE_MUSIC -> p.remoteId.startsWith("p.")
+                else -> false
+            }
+        }
+
+    /**
+     * Adds [songs] to a playlist on its service. YouTube Music goes through the edit overlay (so it
+     * works offline and syncs later). Spotify and Apple Music match each song on that service
+     * (ISRC, then title + artist), add the matches, then refresh the playlist.
+     */
+    suspend fun addSongsToService(playlistId: String, songs: List<Song>): ServiceAddResult = withContext(Dispatchers.IO) {
+        loaded.await()
+        val playlist = mutable.value.playlists.find { it.id == playlistId } ?: error("Playlist not found.")
+        val present = playlist.songs.mapTo(hashSetOf()) { it.id }
+        val fresh = songs.distinctBy { it.id }.filter { it.id !in present }
+        val already = songs.distinctBy { it.id }.size - fresh.size
+        when (playlist.source) {
+            "YOUTUBE_MUSIC" -> {
+                if (fresh.isNotEmpty()) addSongs(playlistId, fresh)
+                ServiceAddResult(fresh.size, already, emptyList())
+            }
+            "SPOTIFY" -> {
+                val notFound = mutableListOf<Song>()
+                val ids = fresh.mapNotNull { song ->
+                    val direct = song.id.removePrefix("spotify_").takeIf { song.id.startsWith("spotify_") && !it.startsWith("unavailable") }
+                    (direct ?: runCatching { spotify.findTrackId(song.title, song.displayArtist, song.creditsAndRelease.isrc) }.getOrNull())
+                        .also { if (it == null) notFound += song }
+                }
+                val remoteIds = playlist.songs.mapTo(hashSetOf()) { it.id.removePrefix("spotify_") }
+                val toAdd = ids.filter { it !in remoteIds }.distinct()
+                spotify.addTracksToPlaylist(playlist.remoteId, toAdd)
+                if (toAdd.isNotEmpty()) syncPlaylist(playlistId)
+                ServiceAddResult(toAdd.size, already + (ids.size - toAdd.size), notFound)
+            }
+            MusicSources.APPLE_MUSIC -> {
+                val notFound = mutableListOf<Song>()
+                val ids = fresh.mapNotNull { song ->
+                    val direct = song.id.removePrefix("applemusic_").takeIf { song.id.startsWith("applemusic_") && !it.startsWith("unavailable") }
+                    (direct ?: runCatching { appleMusic.findCatalogSongId(song.title, song.displayArtist, song.creditsAndRelease.isrc) }.getOrNull())
+                        .also { if (it == null) notFound += song }
+                }
+                val remoteIds = playlist.songs.mapTo(hashSetOf()) { it.id.removePrefix("applemusic_") }
+                val toAdd = ids.filter { it !in remoteIds }.distinct()
+                appleMusic.addSongsToLibraryPlaylist(playlist.remoteId, toAdd)
+                if (toAdd.isNotEmpty()) syncPlaylist(playlistId)
+                ServiceAddResult(toAdd.size, already + (ids.size - toAdd.size), notFound)
+            }
+            else -> error("This playlist can't be edited.")
+        }
+    }
+
     suspend fun removeSong(playlistId: String, songId: String) = editPlaylist(playlistId) { playlist, e ->
         val inRemote = playlist.remote.any { it.id == songId }
         e.copy(added = e.added.orEmpty().filterNot { it.id == songId },
@@ -643,6 +710,43 @@ class ConnectedLibraryRepository @Inject constructor(@ApplicationContext context
         return current.copy(pendingRemoteDeletes = remaining.ifEmpty { null })
     }
 
+    /**
+     * Removes friends from PixelPlayer: their saved playlists are removed (and remembered, so a
+     * sync doesn't import them again) and the friend ids are hidden from the friends feed.
+     * Nothing changes on the platform.
+     */
+    suspend fun removeFriends(ids: Collection<String>) = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext
+        loaded.await()
+        lock.withLock {
+            val current = mutable.value
+            val now = System.currentTimeMillis()
+            val removed = current.playlists.filter { it.friendId != null && it.friendId in ids }
+            val tombstones = removed.associate { p ->
+                p.id to DeletedPlaylist(p.id, p.remoteId, p.source, p.title, p.coverUrl, now, remote = false)
+            }
+            val removedIds = removed.mapTo(hashSetOf()) { it.id }
+            save(current.copy(
+                playlists = current.playlists.filterNot { it.id in removedIds },
+                deletedPlaylists = current.deletedPlaylists.orEmpty() + tombstones,
+                aliases = current.aliases - ids.toSet(),
+                hiddenFriends = (current.hiddenFriends.orEmpty() + ids).distinct(),
+                pinnedFriendPlaylists = current.pinnedFriendPlaylists?.filterNot { it in removedIds }?.ifEmpty { null }
+            ))
+        }
+    }
+
+    /** Pins (or unpins) a friend's saved playlist into Your playlists. */
+    suspend fun setFriendPlaylistPinned(playlistId: String, pinned: Boolean) = withContext(Dispatchers.IO) {
+        loaded.await()
+        lock.withLock {
+            val current = mutable.value
+            val list = current.pinnedFriendPlaylists.orEmpty()
+            val next = if (pinned) (list + playlistId).distinct() else list - playlistId
+            save(current.copy(pinnedFriendPlaylists = next.ifEmpty { null }))
+        }
+    }
+
     suspend fun renameFriend(id: String, name: String) = withContext(Dispatchers.IO) {
         require(name.trim().isNotBlank()) { "Enter a friend's name." }
         loaded.await(); lock.withLock { save(mutable.value.copy(aliases = mutable.value.aliases + (id to name.trim()))) }
@@ -690,6 +794,7 @@ class ConnectedLibraryRepository @Inject constructor(@ApplicationContext context
             }
             save(mutable.value.copy(playlists = mutable.value.playlists.filterNot { it.id == playlist.id } + playlist,
                 aliases = if (knownFriendId != null) mutable.value.aliases else mutable.value.aliases + (friendId to name.trim()),
+                hiddenFriends = mutable.value.hiddenFriends?.minus(friendId)?.ifEmpty { null },
                 deletedPlaylists = (mutable.value.deletedPlaylists.orEmpty() - playlist.id).ifEmpty { null }))
             playlist.id
         }

@@ -397,12 +397,6 @@ fun SettingsScreen(
                     }
                 }
             } else {
-                // Always-visible way into search. The top-bar icon stays for when the
-                // header is collapsed; this is what people see first.
-                item(key = "search_pill") {
-                    SettingsSearchPill(onClick = { isSearchActive = true })
-                }
-
                 // Ten rows in four groups. Every setting has exactly one home under
                 // one of them; see SettingsRegistry for where each one lives.
                 item(key = "group_your_app") {
@@ -946,44 +940,6 @@ private fun RootRowDivider() {
         modifier = Modifier.padding(horizontal = 16.dp),
         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
     )
-}
-
-/**
- * A tappable search field at the top of the settings root. It opens the same search
- * mode as the top-bar icon; it exists because an icon alone is easy to miss.
- */
-@Composable
-private fun SettingsSearchPill(onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 4.dp)
-            .height(52.dp),
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 18.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Default.Search,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Text(
-                text = stringResource(R.string.settings_search_pill_hint),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
 }
 
 @Composable

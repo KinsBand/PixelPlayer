@@ -77,6 +77,8 @@
     <string name="settings_lyrics_display_section">Display</string>
     <string name="settings_lyrics_lrclib_title">Enable Lyrics Fetching</string>
     <string name="settings_lyrics_lrclib_subtitle">Allow PixelPlayer to query LRCLIB for lyrics when missing.</string>
+    <string name="settings_lyrics_auto_sync_title">Auto-sync lyrics timing</string>
+    <string name="settings_lyrics_auto_sync_subtitle">Listens to each song once, on your phone, and shifts synced lyrics that start early or late. Your own offset in the lyrics sheet always wins.</string>
 
     <!-- Excluded Directories flow -->
     <string name="file_explorer_cd_refresh">Refresh</string>
@@ -878,4 +880,7 @@
 
     <!-- AI -->
     <string name="settings_ai_sample_size_value">%1$d songs</string>
+    <!-- Lyrics animation style -->
+    <string name="settings_lyrics_animation_style_title">Animation style</string>
+    <string name="settings_lyrics_animation_style_subtitle">Choose how synced lyrics move and highlight</string>
 </resources>

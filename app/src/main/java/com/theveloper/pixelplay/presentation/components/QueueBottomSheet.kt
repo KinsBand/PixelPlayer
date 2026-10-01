@@ -109,6 +109,8 @@ import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.runtime.collectAsState
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
@@ -238,6 +240,7 @@ fun QueueBottomSheet(
     viewModel: PlayerViewModel = hiltViewModel(),
     playlistViewModel: PlaylistViewModel = hiltViewModel(),
     settingsViewModel: SettingsViewModel = hiltViewModel(),
+    friendsViewModel: com.theveloper.pixelplay.presentation.viewmodel.FriendsViewModel = hiltViewModel(),
     queue: List<Song>,
     currentQueueSourceName: String,
     currentSongId: String?,
@@ -282,6 +285,7 @@ fun QueueBottomSheet(
     val colors = MaterialTheme.colorScheme
     var showTimerOptions by rememberSaveable { mutableStateOf(false) }
     var showClearQueueDialog by remember { mutableStateOf(false) }
+    var showFriendsInRoomSheet by rememberSaveable { mutableStateOf(false) }
     var isFabExpanded by rememberSaveable { mutableStateOf(false) }
     // History above the playing song stays folded behind a full-width button until opened.
     var isHistoryExpanded by rememberSaveable { mutableStateOf(false) }
@@ -294,6 +298,7 @@ fun QueueBottomSheet(
         if (!isVisible) {
             showTimerOptions = false
             showClearQueueDialog = false
+            showFriendsInRoomSheet = false
             isFabExpanded = false
             isHistoryExpanded = false
         }
@@ -1463,7 +1468,15 @@ fun QueueBottomSheet(
                             navigationBarHeight + fabSpacing + 7.dp
                         }
                         val activeMixPrompt by viewModel.mixPrompt.collectAsStateWithLifecycle()
+                        val roomFriends by friendsViewModel.friends.collectAsStateWithLifecycle()
+                        val roomIds by friendsViewModel.inRoomIds.collectAsStateWithLifecycle()
+                        val inRoomFriends = remember(roomFriends, roomIds) { roomFriends.filter { it.id in roomIds } }
                         QueueOptionsBar(
+                            inRoomFriends = inRoomFriends,
+                            onFriendsClick = {
+                                isFabExpanded = false
+                                showFriendsInRoomSheet = true
+                            },
                             canLocate = currentSongDisplayIndex >= 0 && currentSongDisplayIndex < displaySongCount,
                             activePrompt = activeMixPrompt,
                             onLocate = {
@@ -1601,6 +1614,17 @@ fun QueueBottomSheet(
             )
         }
 
+        if (showFriendsInRoomSheet) {
+            val sheetFriends by friendsViewModel.friends.collectAsStateWithLifecycle()
+            val sheetSelected by friendsViewModel.inRoomIds.collectAsStateWithLifecycle()
+            FriendsInRoomSheet(
+                friends = sheetFriends,
+                selected = sheetSelected,
+                onSave = { ids -> friendsViewModel.setInRoom(ids) },
+                onDismiss = { showFriendsInRoomSheet = false }
+            )
+        }
+
         if (showClearQueueDialog) {
             AlertDialog(
                 onDismissRequest = { showClearQueueDialog = false },
@@ -1645,6 +1669,8 @@ private fun QueueOptionsBar(
     onClose: () -> Unit,
     onSaveAsPlaylist: () -> Unit,
     modifier: Modifier = Modifier,
+    inRoomFriends: List<com.theveloper.pixelplay.presentation.viewmodel.FriendUi> = emptyList(),
+    onFriendsClick: () -> Unit = {},
 ) {
     val colors = MaterialTheme.colorScheme
     val haptic = LocalHapticFeedback.current
@@ -1724,6 +1750,15 @@ private fun QueueOptionsBar(
                 )
             }
         }
+
+        // Friends in the room: who's here in person (their playlists feed the mix).
+        FriendsInRoomRow(
+            friends = inRoomFriends,
+            onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onFriendsClick()
+            }
+        )
 
         Surface(
             modifier = Modifier.fillMaxWidth(),
@@ -2658,9 +2693,13 @@ fun QueuePlaylistSongItem(
     /** Why the mix picked this song ("Fits Workout", "New for you · Sounds like what's playing"). */
     mixReason: String? = null,
     /** A mix discovery the listener hasn't liked yet: shows a sparkle. */
-    isDiscovery: Boolean = false
+    isDiscovery: Boolean = false,
+    /** Show the friend's picture + name when this song was queued because of a friend. */
+    showFriendAttribution: Boolean = true
 ) {
     val colors = MaterialTheme.colorScheme
+    val friendTags by com.theveloper.pixelplay.data.social.FriendQueueAttribution.entries.collectAsState()
+    val friendTag = if (showFriendAttribution) friendTags[song.id] else null
 
     val cornerRadius by animateDpAsState(
         targetValue = if (isCurrentSong) 60.dp else 22.dp,
@@ -2902,6 +2941,9 @@ fun QueuePlaylistSongItem(
                                     tint = colors.secondary,
                                     modifier = Modifier.size(12.dp)
                                 )
+                            }
+                            if (friendTag != null) {
+                                QueueFriendTag(friendTag, isCurrentSong)
                             }
                             Text(
                                 song.displayArtist, maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -3430,4 +3472,58 @@ private fun Modifier.trimVertical(top: Dp, bottom: Dp): Modifier = layout { meas
     val bottomPx = bottom.roundToPx()
     val height = (placeable.height - topPx - bottomPx).coerceAtLeast(0)
     layout(placeable.width, height) { placeable.place(0, -topPx) }
+}
+
+/**
+ * "Added because of a friend" chip for a queue row: the friend's picture, then their name when
+ * the row has room (the name gives way to the artist first; the picture always stays).
+ */
+@Composable
+private fun RowScope.QueueFriendTag(tag: com.theveloper.pixelplay.data.social.FriendAttribution, isCurrentSong: Boolean) {
+    val colors = MaterialTheme.colorScheme
+    val avatarSize = with(LocalDensity.current) { MaterialTheme.typography.labelMedium.lineHeight.toDp() }
+    Row(
+        modifier = Modifier
+            .weight(1f, fill = false)
+            .semantics(mergeDescendants = true) { contentDescription = "Added from ${tag.friendName}'s listening" },
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (tag.avatarUrl != null) {
+            SmartImage(
+                model = tag.avatarUrl,
+                contentDescription = null,
+                modifier = Modifier.size(avatarSize),
+                shape = CircleShape
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(avatarSize)
+                    .clip(CircleShape)
+                    .background(colors.secondaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    tag.friendName.take(1).uppercase(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.onSecondaryContainer
+                )
+            }
+        }
+        Spacer(Modifier.width(4.dp))
+        Text(
+            tag.friendName,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = if (isCurrentSong) colors.primary else colors.onSurfaceVariant
+        )
+        Text(
+            " ·",
+            maxLines = 1,
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.onSurfaceVariant
+        )
+    }
 }

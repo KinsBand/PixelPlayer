@@ -145,6 +145,14 @@ object SettingsRegistry {
             keywords = listOf("file info", "codec", "bitrate", "sample rate", "audio details")
         ),
         SettingEntry(
+            key = "lyrics_animation_style",
+            categoryId = "lyrics",
+            titleRes = R.string.settings_lyrics_animation_style_title,
+            descriptionRes = R.string.settings_lyrics_animation_style_subtitle,
+            route = Screen.LyricsAnimationStyle.route,
+            keywords = listOf("lyrics", "animation", "karaoke", "highlight", "style", "glow", "neon")
+        ),
+        SettingEntry(
             key = "palette_style",
             categoryId = "lyrics",
             titleRes = R.string.settings_album_art_palette_title,
@@ -329,6 +337,13 @@ object SettingsRegistry {
             titleRes = R.string.settings_lyrics_lrclib_title,
             descriptionRes = R.string.settings_lyrics_lrclib_subtitle,
             keywords = listOf("lrclib", "online lyrics", "lyrics search", "missing lyrics")
+        ),
+        SettingEntry(
+            key = "lyrics_auto_sync",
+            categoryId = "lyrics",
+            titleRes = R.string.settings_lyrics_auto_sync_title,
+            descriptionRes = R.string.settings_lyrics_auto_sync_subtitle,
+            keywords = listOf("lyrics offset", "lyrics timing", "sync lyrics", "lyrics delay", "out of sync", "automatic offset")
         ),
         SettingEntry(
             key = "immersive_lyrics",

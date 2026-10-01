@@ -109,6 +109,7 @@ class MusicRepositoryImpl @Inject constructor(
     companion object {
         /** Maximum number of search results to load at once to avoid memory issues with large libraries. */
         private const val SEARCH_RESULTS_LIMIT = 100
+        private const val SEARCH_MORE_PAGE_SIZE = 30
         private const val UNKNOWN_GENRE_NAME = "Unknown"
         private const val UNKNOWN_GENRE_ID = "unknown"
     }
@@ -812,6 +813,35 @@ class MusicRepositoryImpl @Inject constructor(
             }.collect { emit(it) }
         }.flowOn(Dispatchers.IO)
     }
+    override suspend fun loadMoreSearchSongs(
+        query: String,
+        shownSongIds: Set<String>,
+        reset: Boolean
+    ): SearchSongsPage = withContext(Dispatchers.IO) {
+        val intent = MusicSearchQuery.parse(query)
+        val terms = intent.terms
+        if (terms.isBlank()) return@withContext SearchSongsPage(emptyList(), hasMore = false)
+        // Local library: widen the window past what's shown and keep only unseen songs.
+        val dirs = searchDirectories().first()
+        val window = shownSongIds.size + SEARCH_MORE_PAGE_SIZE + 1
+        val localWindow = musicDao.searchSongsLimited(
+            query = terms,
+            allowedParentDirs = dirs.allowedParentDirs,
+            applyDirectoryFilter = dirs.applyFilter,
+            limit = window,
+            titleOnly = false
+        ).first().map { it.toSong() }
+        val localNew = localWindow.filter { it.id !in shownSongIds }
+        if (localNew.size > SEARCH_MORE_PAGE_SIZE) {
+            return@withContext SearchSongsPage(localNew.take(SEARCH_MORE_PAGE_SIZE), hasMore = true)
+        }
+        // Then the next online page.
+        val (online, onlineHasMore) = youTubeRepository.moreSongs(intent.onlineQuery, reset)
+        val seen = HashSet(shownSongIds).apply { localNew.forEach { add(it.id) } }
+        val onlineNew = online.filter { seen.add(it.id) }
+        SearchSongsPage(localNew + onlineNew, hasMore = onlineHasMore)
+    }
+
     override suspend fun addSearchHistoryItem(query: String) {
         withContext(Dispatchers.IO) {
             searchHistoryDao.deleteByQuery(query)
@@ -1084,7 +1114,8 @@ class MusicRepositoryImpl @Inject constructor(
     }
 
     override suspend fun saveCloudSong(song: Song) = withContext(Dispatchers.IO) {
-        if (song.youtubeId != null || song.id.startsWith("yt_") || song.contentUriString.startsWith("youtube://") || song.contentUriString.startsWith("spotify://")) {
+        if (song.youtubeId != null || song.id.startsWith("yt_") || song.contentUriString.startsWith("youtube://") ||
+            com.theveloper.pixelplay.data.accounts.CatalogTracks.isCatalogUri(song.contentUriString)) {
             val videoId = song.youtubeId ?: song.id.takeIf { it.startsWith("yt_") }?.removePrefix("yt_")
             val existing = cloudSongDao.getById(song.id)
             cloudSongDao.upsert(
@@ -1096,7 +1127,14 @@ class MusicRepositoryImpl @Inject constructor(
                     duration = song.duration,
                     thumbnailUrl = song.albumArtUriString,
                     youtubeId = videoId,
-                    sourceType = if (song.id.startsWith("spotify_")) "spotify" else "youtube",
+                    sourceType = when {
+                        song.id.startsWith("spotify_") -> "spotify"
+                        song.id.startsWith("applemusic_") -> "applemusic"
+                        song.id.startsWith("deezer_") -> "deezer"
+                        else -> "youtube"
+                    },
+                    // Keep the catalog URI even once matched: it's what the id points at, and the
+                    // player re-matches it (or uses the stored youtubeId) when it's played.
                     contentUriString = song.contentUriString.ifBlank { "youtube://$videoId" },
                     isDownloaded = existing?.isDownloaded ?: (song.downloadState == com.theveloper.pixelplay.data.model.DownloadState.DOWNLOADED),
                     localSongId = existing?.localSongId,

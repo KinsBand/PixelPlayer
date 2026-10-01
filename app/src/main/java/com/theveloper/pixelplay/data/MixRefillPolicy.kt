@@ -3,8 +3,8 @@ package com.theveloper.pixelplay.data
 internal object MixRefillPolicy {
     /** A mix never holds more than this many songs at once (recent history + current + upcoming). */
     const val MAX_QUEUE = 50
-    /** Once fewer than this many songs are left, the mix is topped back up to [MAX_QUEUE]. */
-    const val REMAINING_THRESHOLD = 10
+    /** Once fewer than this many songs are left (kept above 10 so up next never drops below 10), the mix is topped back up to [MAX_QUEUE]. */
+    const val REMAINING_THRESHOLD = 12
     /** Played songs kept behind the current one (for "previous") when the queue is over the cap. */
     const val KEEP_HISTORY = 5
     /** Songs planned per refill pass; passes repeat until the queue is full. */

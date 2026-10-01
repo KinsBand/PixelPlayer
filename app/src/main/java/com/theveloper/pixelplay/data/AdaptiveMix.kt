@@ -72,6 +72,33 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
         }
     }
 
+    // ── Cached listening history ─────────────────────────────────────────────────────
+    // Every plan read up to 2 000 attempts (and the micro-skip cooldowns) from the database.
+    // They only change when a play finishes, so they are kept until then (or [HISTORY_TTL_MS]).
+    private class Timed<T>(val at: Long, val value: T)
+    @Volatile private var historyCache: Timed<List<MixAttempt>>? = null
+    @Volatile private var cooldownCache: Timed<List<MicroSkipCooldown>>? = null
+
+    private suspend fun history(): List<MixAttempt> {
+        val now = android.os.SystemClock.elapsedRealtime()
+        historyCache?.takeIf { now - it.at < HISTORY_TTL_MS }?.let { return it.value }
+        val fresh = try { learning.recent() }
+        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) { return historyCache?.value ?: emptyList() }
+        historyCache = Timed(now, fresh)
+        return fresh
+    }
+
+    private suspend fun cooldowns(): List<MicroSkipCooldown> {
+        val now = android.os.SystemClock.elapsedRealtime()
+        cooldownCache?.takeIf { now - it.at < HISTORY_TTL_MS }?.let { return it.value }
+        val fresh = try { learning.microSkipCooldowns() }
+        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) { return cooldownCache?.value ?: emptyList() }
+        cooldownCache = Timed(now, fresh)
+        return fresh
+    }
+
     /** Plays that ended, as recorded (skips, full listens); the runtime reacts to them live. */
     val finishedAttempts get() = learning.finished
 
@@ -84,6 +111,11 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
 
     /** Background work that must outlive one plan: library rebuilds and online discovery. */
     private val background = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+
+    init {
+        // A finished play changes the history every plan reads: drop the cached copy.
+        background.launch { learning.finished.collect { historyCache = null; cooldownCache = null } }
+    }
 
     /**
      * Library, playlists, likes, favourites and downloads, merged. Rebuilding it reads several
@@ -360,7 +392,8 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
             "explicitFavorite" to "One of your likes",
             "longTermTaste" to "Matches your taste",
             "recentTaste" to "Matches what you've played lately",
-            "sessionFit" to "Fits what's playing"
+            "sessionFit" to "Fits what's playing",
+            "pickedVibe" to "Like the songs you queued"
         )
         val best = phrases.filter { (key, phrase) -> phrase != null && (c[key] ?: 0.0) > 0.5 }
             .maxByOrNull { (key, _) -> c[key] ?: 0.0 }?.second
@@ -468,7 +501,30 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
      */
     private val offVibe = ArrayDeque<Song>()
 
+    /** Removals and hand-queued songs by *feel* (energy, mood, tempo, sound…), mix or not. */
+    private val signals = MixVibeSignals()
+
+    /**
+     * The user queued [song] themselves: "more of this vibe". Similar-feeling songs rise in
+     * every plan for the next [MixVibeSignals.TTL_MS] (and a skip of it is forgotten).
+     */
+    fun markPicked(song: Song) {
+        signals.markPicked(song)
+        clearSkipped(song)
+        feedback.invalidate()
+    }
+
+    /**
+     * A song taken out of a queue that isn't a mix: still a hint about the vibe the listener
+     * wants (used by friends-in-the-room picks and by the next mix), but not stored for later.
+     */
+    fun noteRemovedOutsideMix(song: Song) {
+        signals.markRemoved(song)
+        feedback.invalidate()
+    }
+
     fun markOffVibe(song: Song) {
+        signals.markRemoved(song)
         synchronized(offVibe) {
             offVibe.removeAll { mixIdentity(it) == mixIdentity(song) }
             offVibe.addLast(song)
@@ -480,6 +536,7 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
 
     /** Undo of a queue removal: the song fits after all. */
     fun clearOffVibe(song: Song) {
+        signals.unmarkRemoved(song)
         synchronized(offVibe) { offVibe.removeAll { mixIdentity(it) == mixIdentity(song) } }
         feedback.forgetRemoval(song)
         feedback.invalidate()
@@ -500,9 +557,7 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
     suspend fun personalAdjustments(songs: List<Song>): Map<String, Double> = withContext(Dispatchers.Default) {
         if (songs.isEmpty()) return@withContext emptyMap()
         feedback.awaitReady()
-        val history = try { learning.recent() }
-        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-        catch (_: Exception) { emptyList() }
+        val history = history()
         val favorites = try { music.getFavoriteSongIdsFlow().first() }
         catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
         catch (_: Exception) { emptySet() }
@@ -556,8 +611,145 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
             overlap * 0.5 * (1.0 / (1 + age * 0.35))
         }.sum().coerceAtMost(8.0)
     }
+    /**
+     * Live vibe signals as two planner components per song id:
+     * - "removedVibe" (≤ 0): how much more a song feels like something removed from the queue
+     *   (or skipped early, at half strength) than like what's playing. Only the *excess* over
+     *   the context counts, so removing one song never drags down the whole current vibe.
+     * - "pickedVibe": how much a song feels like the songs queued by hand this session,
+     *   centred on an average pair, newest pick counting most.
+     */
+    private fun vibeSignalComponents(
+        candidates: List<Song>, seeds: List<Song>, embeddings: Map<String, FloatArray>
+    ): Map<String, Map<String, Double>> {
+        val removed = signals.removedSongs()
+        val skips = skippedSongs()
+        val picks = signals.pickedSongs()
+        if (removed.isEmpty() && skips.isEmpty() && picks.isEmpty()) return emptyMap()
+        val removedScores = HashMap<String, Double>(candidates.size * 2)
+        val pickedScores = HashMap<String, Double>(candidates.size * 2)
+        for (song in candidates) {
+            if (removed.isNotEmpty() || skips.isNotEmpty()) {
+                val context = MixVibeSimilarity.toContext(song, seeds, embeddings)
+                var penalty = 0.0
+                removed.asReversed().forEachIndexed { age, gone ->
+                    val excess = MixVibeSimilarity.similarity(song, gone, embeddings) - context
+                    if (excess > 0) penalty += excess * REMOVED_VIBE_WEIGHT / (1 + age * 0.3)
+                }
+                skips.asReversed().take(6).forEachIndexed { age, gone ->
+                    val excess = MixVibeSimilarity.similarity(song, gone, embeddings) - context
+                    if (excess > 0) penalty += excess * REMOVED_VIBE_WEIGHT * 0.5 / (1 + age * 0.3)
+                }
+                removedScores[song.id] = -penalty.coerceAtMost(8.0)
+            }
+            if (picks.isNotEmpty()) {
+                var total = 0.0
+                var weights = 0.0
+                picks.forEachIndexed { index, pick ->
+                    val w = (index + 1).toDouble()
+                    total += (MixVibeSimilarity.similarity(song, pick, embeddings) - MixVibeSimilarity.PRIOR) * w
+                    weights += w
+                }
+                pickedScores[song.id] = (total / weights) * PICKED_VIBE_WEIGHT
+            }
+        }
+        return buildMap {
+            if (removedScores.isNotEmpty()) put("removedVibe", removedScores)
+            if (pickedScores.isNotEmpty()) put("pickedVibe", pickedScores)
+        }
+    }
+
+    /**
+     * Cuts a large candidate list down to the few hundred worth planning, cheaply (one map
+     * lookup per song, one 128-float dot product where there's an embedding). The planner
+     * scores every candidate with every component, so planning over a whole library of
+     * thousands of songs was the slowest step of a refill. Kept: the best metadata matches to
+     * what's playing / queued / the locked vibe, the best sound-alikes, fresh online finds,
+     * and a random slice so discoveries and variety still get a chance.
+     */
+    private fun shortlist(
+        pool: List<Song>, seeds: List<Song>, boosts: Map<String, Double>, favorites: Set<String>,
+        embeddings: Map<String, FloatArray>, fresh: Set<String>, steer: Song?
+    ): List<Song> {
+        val size = SHORTLIST_TOP + SHORTLIST_SOUND + SHORTLIST_RANDOM
+        if (pool.size <= size) return pool
+        val anchors = seeds.takeLast(4) + signals.pickedSongs().takeLast(3) + listOfNotNull(steer)
+        val affinity = MixAffinityIndex(anchors)
+        val removed = MixAffinityIndex(signals.removedSongs())
+        val keep = LinkedHashMap<String, Song>(size * 2)
+        pool.asSequence().filter { it.id in fresh }.take(SHORTLIST_FRESH).forEach { keep[it.id] = it }
+        pool.sortedByDescending { song ->
+            affinity.affinity(song) + (boosts[song.id] ?: 0.0) +
+                (if (song.id in favorites || song.isFavorite) 2.0 else 0.0) - removed.affinity(song) * 0.5
+        }.take(SHORTLIST_TOP).forEach { keep.putIfAbsent(it.id, it) }
+        val seedVectors = anchors.mapNotNull { embeddings[it.id] }
+        if (seedVectors.isNotEmpty()) {
+            pool.mapNotNull { song ->
+                if (song.id in keep) return@mapNotNull null
+                val v = embeddings[song.id] ?: return@mapNotNull null
+                song to seedVectors.maxOf { seed -> var dot = 0f; for (i in v.indices) dot += v[i] * seed[i]; dot }
+            }.sortedByDescending { it.second }.take(SHORTLIST_SOUND).forEach { keep[it.first.id] = it.first }
+        }
+        pool.filter { it.id !in keep }.shuffled().take(SHORTLIST_RANDOM).forEach { keep[it.id] = it }
+        return keep.values.toList()
+    }
+
+    /**
+     * How well each candidate fits *right now*, for picks made outside the planner (friends in
+     * the room). Synchronous and cheap: uses the cached library snapshot and in-memory feedback.
+     * Higher is better; songs the listener excluded (not for this mix, exclude everywhere,
+     * heard too much) are left out. Honours every Tune this mix control that applies to a
+     * single pick: More like this / typed steer, a locked vibe, Energy, Focused ↔ Varied,
+     * queue removals, skips and hand-queued songs.
+     */
+    fun vibeFitNow(candidates: List<Song>, context: List<Song>): Map<String, Double> {
+        if (candidates.isEmpty()) return emptyMap()
+        val snap = snapshot
+        val embeddings = snap?.embeddings.orEmpty()
+        val features = snap?.features.orEmpty()
+        fun analysed(song: Song): Song = snap?.byId?.get(song.id)
+            ?: withAnalysis(gatherer.applyCached(song), features)
+        val ctx = context.map(::analysed)
+        val lockedVibe = vibe
+        val steer = direction ?: promptSeeds.firstOrNull()
+        val energy = energyTarget
+        val varietyValue = variety
+        val recentArtists = ctx.takeLast(2 + (varietyValue * 3).toInt()).mapTo(HashSet()) { it.artist.trim().lowercase() }
+        val removedList = offVibeSongs()
+        val songs = candidates.filterNot { feedback.isDisliked(it) }.map(::analysed)
+        val signalParts = vibeSignalComponents(songs, ctx, embeddings)
+        return songs.associate { song ->
+            var score = MixVibeSimilarity.toContext(song, ctx, embeddings) * 8.0
+            ctx.lastOrNull()?.let { previous -> score += MixVibe.components(previous, song).values.sum() * 0.4 }
+            for (part in signalParts.values) score += part[song.id] ?: 0.0
+            lockedVibe?.let { score += MusicVibeFilters.score(song, it).coerceIn(-3.0, 8.0) * 0.6 }
+            steer?.let { score += (MixVibeSimilarity.similarity(song, it, embeddings) - MixVibeSimilarity.PRIOR) * 4.0 }
+            energy?.let { target ->
+                val e = song.mixIntelligence.energy?.takeIf { it.isFinite() && it in 0f..1f }?.toDouble()
+                score -= (if (e == null) 0.3 else kotlin.math.abs(e - target)) * 3.0
+            }
+            if (song.artist.trim().lowercase() in recentArtists) score -= 1.5 + varietyValue * 4.0
+            score -= feedback.removalPenalty(song) * 0.5 + offVibePenalty(song, removedList) * 0.5
+            song.id to score
+        }
+    }
+
+    /**
+     * True when [song] feels almost the same as one of [removed] (energy, mood, tempo, genre,
+     * sound): an upcoming mix song that close to what was just taken out goes too.
+     */
+    fun feelsLike(song: Song, removed: List<Song>): Boolean {
+        if (removed.isEmpty()) return false
+        val snap = snapshot
+        val embeddings = snap?.embeddings.orEmpty()
+        val features = snap?.features.orEmpty()
+        fun analysed(s: Song): Song = snap?.byId?.get(s.id) ?: withAnalysis(gatherer.applyCached(s), features)
+        val candidate = analysed(song)
+        return removed.any { MixVibeSimilarity.similarity(candidate, analysed(it), embeddings) >= FEELS_LIKE_REMOVED }
+    }
+
     fun heardTooMuch(song: Song) = feedback.heardTooMuch(song)
-    suspend fun resetLearning() { direction = null; learning.reset() }
+    suspend fun resetLearning() { direction = null; learning.reset(); historyCache = null; cooldownCache = null; signals.clear() }
     fun resetFeedback() = feedback.reset()
     fun decisionSummary(): String = lastDecisions.take(5).joinToString("\n\n") {
         "${it.song.title}: ${it.source}\n" + it.components.entries.joinToString { (key, value) -> "$key=${"%.1f".format(value)}" }
@@ -620,6 +812,7 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
         val libraryState = librarySnapshot()
         val explicitFavorites = libraryState.explicitFavorites
         val library = libraryState.library
+        var freshIds: Set<String> = emptySet()
         val candidates = if (flavor == MixFlavor.NORMAL) library else {
             val libraryKeys = library.flatMapTo(HashSet(), ::recordingKeys)
             // A locked vibe searches for itself first ("workout songs", "edm songs"…).
@@ -645,6 +838,7 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
                 results.filterNotNull().flatten().map(gatherer::applyCached)
             }
             val fresh = discovered.filterNot { song -> recordingKeys(song).any { it in libraryKeys } }
+            freshIds = fresh.mapTo(HashSet()) { it.id }
             // Discoveries usually arrive with no genre / BPM / mood. Look up the most relevant
             // ones now (Deezer + iTunes, cached on disk) so the next plan can match on them.
             val affinity = MixAffinityIndex(acceptedSeeds)
@@ -660,11 +854,11 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
             .filter { song -> recordingKeys(song).none { it in excluded || it in removedKeys } }
             .filter { !feedback.isDisliked(it, mixId) }
             .distinctBy { "rec:" + gatherer.recordingKey(it) }.toList()
-        val (eligible, vibeBoosts) = applyVibe(lockedVibe, eligibleAll, limit)
-        val history = try { learning.recent() }
-        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-        catch (_: Exception) { emptyList() }
+        val (vibePool, vibeBoosts) = applyVibe(lockedVibe, eligibleAll, limit)
+        val history = history()
         val seedsAnalysed = acceptedSeeds.map { libraryState.byId[it.id] ?: withAnalysis(it, libraryState.features) }
+        // Only the few hundred songs worth planning go through the full planner.
+        val eligible = shortlist(vibePool, seedsAnalysed, vibeBoosts, explicitFavorites, libraryState.embeddings, freshIds, steer)
         val weights = MixWeights.DEFAULT.withVariety(variety)
         val decisions = MixSequencePlanner.plan(eligible, seedsAnalysed, explicitFavorites,
             libraryState.identities, history, mixId,
@@ -676,8 +870,9 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
             identity = { song -> "rec:" + gatherer.recordingKey(song) },
             weights = weights,
             sessionId = learning.sessionId,
-            extras = mapOf("soundAlike" to soundAlike(eligible, seedsAnalysed, libraryState.embeddings, weights.soundAlike)),
-            energyTarget = energyTarget, microSkipCooldowns = learning.microSkipCooldowns())
+            extras = mapOf("soundAlike" to soundAlike(eligible, seedsAnalysed, libraryState.embeddings, weights.soundAlike)) +
+                vibeSignalComponents(eligible, seedsAnalysed, libraryState.embeddings),
+            energyTarget = energyTarget, microSkipCooldowns = cooldowns())
         // Stale plans (feedback changed meanwhile) are discarded by the caller, not here: an
         // empty answer used to read as "no suitable songs".
         lastDecisions = decisions
@@ -694,9 +889,7 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
         if (songs.size < 2) return@withContext songs.map { it.id }
         feedback.awaitReady()
         val mixId = feedback.activeMixId
-        val history = try { learning.recent() }
-        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-        catch (_: Exception) { emptyList() }
+        val history = history()
         val library = librarySnapshot()
         val keep = songs.map { library.byId[it.id] ?: withAnalysis(gatherer.applyCached(it), library.features) }
             .filterNot { feedback.isDisliked(it, mixId) }
@@ -715,8 +908,9 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
             identity = { song -> "rec:" + gatherer.recordingKey(song) },
             weights = weights,
             sessionId = learning.sessionId,
-            extras = mapOf("soundAlike" to soundAlike(pool, seedsAnalysed, library.embeddings, weights.soundAlike)),
-            energyTarget = energyTarget, microSkipCooldowns = learning.microSkipCooldowns()
+            extras = mapOf("soundAlike" to soundAlike(pool, seedsAnalysed, library.embeddings, weights.soundAlike)) +
+                vibeSignalComponents(pool, seedsAnalysed, library.embeddings),
+            energyTarget = energyTarget, microSkipCooldowns = cooldowns()
         ).map { it.song.id }
     }
 
@@ -758,11 +952,23 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
         /** A skip counts half as much as removing the song from the queue. */
         const val SKIP_PENALTY_SHARE = 0.5
         const val MAX_PROMPT_SEEDS = 5
+        const val HISTORY_TTL_MS = 60_000L
+        /** Candidates the full planner scores (best cheap matches + a random slice for variety). */
+        const val SHORTLIST_TOP = 320
+        const val SHORTLIST_SOUND = 80
+        const val SHORTLIST_RANDOM = 100
+        const val SHORTLIST_FRESH = 150
+        /** Weight of "sounds like a song removed from the queue, more than like what's playing". */
+        const val REMOVED_VIBE_WEIGHT = 7.0
+        /** Weight of "feels like the songs queued by hand this session". */
+        const val PICKED_VIBE_WEIGHT = 5.0
+        /** Feel similarity at which an upcoming mix song counts as "the same as" a removed one. */
+        const val FEELS_LIKE_REMOVED = 0.78
         const val LIBRARY_TTL_MS = 90_000L
         /** A snapshot older than this is rebuilt before planning instead of in the background. */
         const val LIBRARY_MAX_STALE_MS = 30 * 60_000L
         /** How long a plan waits for an uncached online lookup (it keeps going in the background). */
-        const val DISCOVERY_WAIT_MS = 2_500L
+        const val DISCOVERY_WAIT_MS = 1_200L
         const val DISCOVERY_FETCH_TIMEOUT_MS = 12_000L
         const val DISCOVERY_REFRESH_MS = 10 * 60_000L
         const val DISCOVERY_MAX_AGE_MS = 60 * 60_000L

@@ -3,6 +3,19 @@
 package com.theveloper.pixelplay.presentation.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import com.theveloper.pixelplay.ui.theme.MotionTokens
+import kotlinx.coroutines.launch
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandVertically
@@ -76,6 +89,9 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
 private val SpotifyGreen = Color(0xFF1DB954)
+
+/** Live-listening green, for the Friends screen. */
+internal val FriendsLiveGreen: Color get() = SpotifyGreen
 private val YouTubeRed = Color(0xFFFF0000)
 
 // ---- Spotify | YouTube Music -------------------------------------------------------------
@@ -154,156 +170,177 @@ fun PracticeButton(summary: String, onClick: () -> Unit, modifier: Modifier = Mo
     }
 }
 
-// ---- Friends dropdown ------------------------------------------------------------------------
+// ---- Friends card (Library) ------------------------------------------------------------------
 
-/** Full-width Friends card; the whole card toggles the dropdown. */
+/**
+ * Full-width Friends card in the Playlists tab. Tapping it opens the Friends screen. Shows who's
+ * listening now and who you're following; says nothing when nobody's live.
+ */
 @Composable
-fun FriendsDropdownCard(
+fun FriendsCard(
     navController: NavController?,
-    playerViewModel: PlayerViewModel,
     modifier: Modifier = Modifier,
     viewModel: FriendsViewModel = hiltViewModel(),
 ) {
     val friends by viewModel.friends.collectAsStateWithLifecycle()
-    val notice by viewModel.notice.collectAsStateWithLifecycle()
     val following by viewModel.following.collectAsStateWithLifecycle()
-    val favoriteIds by playerViewModel.favoriteSongIds.collectAsStateWithLifecycle()
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    // The song whose action sheet is open, with the friend who played it.
-    var actionFor by remember { mutableStateOf<Pair<String, FriendTrack>?>(null) }
-    var historyFor by rememberSaveable { mutableStateOf<String?>(null) }
-    var adding by remember { mutableStateOf(false) }
-    // Poll friend activity only while the list or a history sheet is on screen (and the app is started).
-    if (expanded || historyFor != null) viewModel.polling.collectAsStateWithLifecycle(Unit)
-
-    val live = friends.count { it.presence == FriendPresence.LISTENING_NOW }
-    val arrow by animateFloatAsState(if (expanded) 180f else 0f, label = "friendsArrow")
-    val search: (FriendTrack) -> Unit = { track ->
-        playerViewModel.updateSearchQuery(listOf(track.title, track.artist).filter { it.isNotBlank() }.joinToString(" "))
-        navController?.navigateToTopLevelSafely(Screen.Search.route)
+    val live = friends.count { it.isOnline }
+    val subtitle = when {
+        friends.isEmpty() -> "Add a friend's playlist to start"
+        live == 1 -> "1 listening now"
+        live > 1 -> "$live listening now"
+        else -> null
     }
-    // Actions on a friend's song; search only when it can't be played.
-    val onTrackAction: (FriendTrack, FriendTrackAction) -> Unit = { track, action ->
-        val song = viewModel.songFor(track)
-        when {
-            action == FriendTrackAction.ARTIST -> {
-                track.artist.takeIf { it.isNotBlank() }?.let { navController?.navigateSafely(Screen.ArtistDetail.createRouteForName(it)) }
+    Card(
+        onClick = { navController?.navigateSafely(Screen.Friends.route) },
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.extraLarge,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+    ) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(44.dp).clip(CircleShape).background(MaterialTheme.colorScheme.tertiaryContainer), contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Group, null, tint = MaterialTheme.colorScheme.onTertiaryContainer)
             }
-            song == null || action == FriendTrackAction.SEARCH -> search(track)
-            action == FriendTrackAction.PLAY -> playerViewModel.playSongs(listOf(song), song, "Friends")
-            action == FriendTrackAction.NEXT -> playerViewModel.addSongNextToQueue(song)
-            action == FriendTrackAction.QUEUE -> playerViewModel.addSongToQueue(song)
-            action == FriendTrackAction.LIKE -> playerViewModel.toggleFavoriteSpecificSong(song, removing = song.id in favoriteIds)
-        }
-    }
-    val canPlay: (FriendTrack) -> Boolean = { viewModel.songFor(it) != null }
-    val openTrack: (FriendUi, FriendTrack) -> Unit = { friend, track ->
-        if (canPlay(track)) {
-            actionFor = friend.id to track
-        } else {
-            search(track)
-        }
-    }
-
-    Card(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
-        Column(Modifier.animateContentSize()) {
-            // The header is the whole card while collapsed, so the full card toggles it.
-            Row(Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(44.dp).clip(CircleShape).background(MaterialTheme.colorScheme.tertiaryContainer), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.Group, null, tint = MaterialTheme.colorScheme.onTertiaryContainer)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Friends", style = MaterialTheme.typography.titleMedium.copy(fontFamily = GoogleSansRounded), fontWeight = FontWeight.Bold)
+                subtitle?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Friends", style = MaterialTheme.typography.titleMedium.copy(fontFamily = GoogleSansRounded), fontWeight = FontWeight.Bold)
-                    Text(when {
-                        friends.isEmpty() -> "Add a friend's playlist to start"
-                        live == 1 -> "1 listening now"
-                        live > 1 -> "$live listening now"
-                        else -> "No one's listening right now"
-                    }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    following?.let { session ->
-                        Text("Following ${session.friendName}", style = MaterialTheme.typography.labelMedium,
-                            color = SpotifyGreen, fontWeight = FontWeight.SemiBold)
-                    }
-                }
-                ActiveFriendsPill(live, friends.size)
-                Spacer(Modifier.width(4.dp))
-                Icon(Icons.Rounded.KeyboardArrowDown, if (expanded) "Collapse friends" else "Expand friends", Modifier.rotate(arrow))
-            }
-            AnimatedVisibility(expanded, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
-                Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    if (!viewModel.hasLiveSource) {
-                        Text("Live listening and history appear once Spotify friend activity is connected.",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    friends.forEachIndexed { index, friend ->
-                        if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                        FriendSection(
-                            friend = friend,
-                            onRename = { viewModel.rename(friend.id, it) },
-                            onTrackClick = { track -> openTrack(friend, track) },
-                            onExpand = { viewModel.gatherPlaylists(friend) },
-                            onOpenPlaylist = { playlist ->
-                                val id = playlist.playlistId
-                                if (id != null) navController?.navigateSafely(Screen.PlaylistDetail.createRoute(id))
-                                else viewModel.savePublicPlaylist(friend, playlist) { saved -> navController?.navigateSafely(Screen.PlaylistDetail.createRoute(saved)) }
-                            },
-                            onHistory = { historyFor = friend.id },
-                        )
-                    }
-                    OutlinedButton(onClick = { adding = true }, modifier = Modifier.fillMaxWidth()) { Text("Add friend's playlist") }
+                following?.let { session ->
+                    Text("Following ${session.friendName}", style = MaterialTheme.typography.labelMedium,
+                        color = SpotifyGreen, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
+            ActiveFriendsPill(live, friends.size)
+            Spacer(Modifier.width(4.dp))
+            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = "Open friends",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+}
 
-    historyFor?.let { id ->
-        val friend = friends.find { it.id == id }
-        if (friend != null) {
-            val history by remember(id) { viewModel.history(id) }.collectAsStateWithLifecycle(emptyList())
-            FriendHistorySheet(
-                friend = friend,
-                history = history,
-                isFollowing = following?.friendId == friend.id,
-                canPlay = canPlay,
-                onPlay = { track -> onTrackAction(track, FriendTrackAction.PLAY) },
-                onMore = { track -> openTrack(friend, track) },
-                onFollow = { viewModel.toggleFollow(friend) },
-                onShuffle = {
-                    val songs = history.mapNotNull(viewModel::songFor).distinctBy { it.id }.shuffled()
-                    songs.firstOrNull()?.let { playerViewModel.playSongs(songs, it, "${friend.name}'s history") }
-                },
-                onDismiss = { historyFor = null },
-            )
-        }
-    }
-    actionFor?.let { (friendId, track) ->
-        val friend = friends.find { it.id == friendId }
-        val song = remember(track) { viewModel.songFor(track) }
-        FriendTrackSheet(
-            track = track,
-            friend = friend,
-            isLiked = song != null && song.id in favoriteIds,
-            onAction = { action ->
-                actionFor = null
-                if (action == FriendTrackAction.SEARCH || action == FriendTrackAction.ARTIST) historyFor = null
-                onTrackAction(track, action)
-            },
-            onDismiss = { actionFor = null },
+// ---- Friends | Practice tiles (Library) -------------------------------------------------------
+
+/**
+ * Friends and Practice side by side under Spotify | YT Music, in the same tile style.
+ * Both tiles stretch to the taller one so the row stays even.
+ */
+@Composable
+fun FriendsPracticeTiles(
+    navController: NavController?,
+    practiceSummary: String,
+    onOpenPractice: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    Row(
+        modifier.fillMaxWidth().height(IntrinsicSize.Min),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        FriendsTile(
+            onClick = { if (enabled) navController?.navigateSafely(Screen.Friends.route) },
+            modifier = Modifier.weight(1f).fillMaxHeight()
         )
-    }
-    if (adding) AddFriendPlaylistDialog(onAdd = { name, link, done -> viewModel.addPlaylist(name, link, done) }, onDismiss = { adding = false })
-    notice?.let {
-        AlertDialog(onDismissRequest = { viewModel.notice.value = null }, text = { Text(it) },
-            confirmButton = { TextButton(onClick = { viewModel.notice.value = null }) { Text("OK") } })
+        HubTile(
+            label = "Practice",
+            subtitle = practiceSummary,
+            icon = Icons.Rounded.School,
+            onClick = { if (enabled) onOpenPractice() },
+            modifier = Modifier.weight(1f).fillMaxHeight()
+        )
     }
 }
 
 @Composable
-private fun ActiveFriendsPill(live: Int, total: Int) {
+private fun FriendsTile(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    viewModel: FriendsViewModel = hiltViewModel(),
+) {
+    val friends by viewModel.friends.collectAsStateWithLifecycle()
+    val following by viewModel.following.collectAsStateWithLifecycle()
+    val live = friends.count { it.isOnline }
+    val session = following
+    val (subtitle, accent) = when {
+        session != null -> "Following ${session.friendName}" to true
+        friends.isEmpty() -> "Add a friend" to false
+        live == 1 -> "1 listening now" to true
+        live > 1 -> "$live listening now" to true
+        friends.size == 1 -> "1 friend" to false
+        else -> "${friends.size} friends" to false
+    }
+    HubTile(
+        label = "Friends",
+        subtitle = subtitle,
+        subtitleColor = if (accent) SpotifyGreen else null,
+        icon = Icons.Rounded.Group,
+        showLiveDot = live > 0,
+        onClick = onClick,
+        modifier = modifier.semantics(mergeDescendants = true) {
+            contentDescription = "Friends, $live of ${friends.size} online"
+        }
+    )
+}
+
+@Composable
+private fun HubTile(
+    label: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    subtitleColor: Color? = null,
+    showLiveDot: Boolean = false,
+) {
+    Card(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+    ) {
+        Column(
+            Modifier.fillMaxSize().padding(vertical = 16.dp, horizontal = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(Modifier.size(52.dp)) {
+                Box(
+                    Modifier.fillMaxSize().clip(CircleShape).background(MaterialTheme.colorScheme.tertiaryContainer),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onTertiaryContainer, modifier = Modifier.size(28.dp))
+                }
+                if (showLiveDot) {
+                    Box(
+                        Modifier.align(Alignment.TopEnd).size(14.dp).clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerLow).padding(2.dp)
+                            .clip(CircleShape).background(SpotifyGreen)
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(label, style = MaterialTheme.typography.titleSmall.copy(fontFamily = GoogleSansRounded), fontWeight = FontWeight.Bold)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.labelMedium,
+                color = subtitleColor ?: MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = if (subtitleColor != null) FontWeight.SemiBold else null,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+internal fun ActiveFriendsPill(live: Int, total: Int) {
     val active = live > 0
-    Surface(shape = CircleShape, color = if (active) SpotifyGreen.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surfaceContainerHighest) {
+    Surface(
+        shape = CircleShape,
+        color = if (active) SpotifyGreen.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surfaceContainerHighest,
+        modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = "$live of $total friends online" }
+    ) {
         Row(Modifier.padding(horizontal = 10.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(8.dp).clip(CircleShape).background(if (active) SpotifyGreen else MaterialTheme.colorScheme.outline))
             Spacer(Modifier.width(6.dp))
@@ -312,61 +349,191 @@ private fun ActiveFriendsPill(live: Int, total: Int) {
     }
 }
 
+// ---- Friends Mix -------------------------------------------------------------------------------
+
+/** Full-width button at the top of the Friends screen: plays everything friends played this week. */
 @Composable
-private fun FriendSection(
+internal fun FriendsMixButton(
+    songCount: Int,
+    friends: List<FriendUi>,
+    loading: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val enabled = !loading && songCount > 0
+    val label = when {
+        loading -> "Gathering this week…"
+        songCount == 0 -> "Nothing played this week yet"
+        songCount == 1 -> "1 song this week"
+        else -> "$songCount songs this week"
+    }
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 64.dp)
+            .semantics(mergeDescendants = true) {
+                contentDescription = if (enabled) "Play Friends Mix, $songCount songs from this week" else "Friends Mix, $label"
+            }
+    ) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Up to three friends' pictures, overlapping.
+            val shown = friends.take(3)
+            if (shown.isNotEmpty()) {
+                Box(Modifier.width(28.dp + 16.dp * (shown.size - 1)).height(28.dp)) {
+                    shown.forEachIndexed { index, friend ->
+                        Box(Modifier.padding(start = 16.dp * index).size(28.dp).clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.secondaryContainer).padding(2.dp)) {
+                            FriendAvatar(friend, size = 24.dp, showPresence = false)
+                        }
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+            }
+            Column(Modifier.weight(1f)) {
+                Text("Friends Mix", style = MaterialTheme.typography.titleSmall.copy(fontFamily = GoogleSansRounded), fontWeight = FontWeight.Bold)
+                AnimatedContent(
+                    targetState = label,
+                    transitionSpec = {
+                        (slideInVertically(tween(MotionTokens.DurationShort4, easing = MotionTokens.EmphasizedDecelerate)) { it / 2 } +
+                            fadeIn(tween(MotionTokens.DurationShort4, easing = MotionTokens.EmphasizedDecelerate))) togetherWith
+                            (slideOutVertically(tween(MotionTokens.DurationShort3, easing = MotionTokens.EmphasizedAccelerate)) { -it / 2 } +
+                                fadeOut(tween(MotionTokens.DurationShort3, easing = MotionTokens.EmphasizedAccelerate)))
+                    },
+                    label = "friendsMixCount"
+                ) { text ->
+                    Text(text, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = if (enabled) 0.8f else 0.6f))
+                }
+            }
+            Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(28.dp))
+        }
+    }
+}
+
+// ---- Friend row ----------------------------------------------------------------------------------
+
+/**
+ * One friend on the Friends screen. Tap the picture for their history, tap the name for their
+ * playlists. Long-press anywhere starts selecting (remove / rename); while selecting, taps toggle.
+ */
+@Composable
+internal fun FriendRow(
     friend: FriendUi,
-    onRename: (String) -> Unit,
+    selectionMode: Boolean,
+    selected: Boolean,
+    pinnedPlaylistIds: Set<String>,
+    onToggleSelect: () -> Unit,
+    onStartSelection: () -> Unit,
+    onAvatarClick: () -> Unit,
     onTrackClick: (FriendTrack) -> Unit,
     onExpand: () -> Unit,
     onOpenPlaylist: (FriendPlaylistUi) -> Unit,
+    onTogglePin: (FriendPlaylistUi, Boolean) -> Unit,
     onHistory: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    var editing by remember(friend.id) { mutableStateOf(false) }
-    // Playlists stay hidden until the name is tapped (long-press the name to rename).
+    // Playlists stay hidden until the name is tapped.
     var showPlaylists by rememberSaveable(friend.id) { mutableStateOf(false) }
-    val chevron by animateFloatAsState(if (showPlaylists) 180f else 0f, label = "friendPlaylistsArrow")
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val chevron by animateFloatAsState(
+        if (showPlaylists) 180f else 0f,
+        tween(MotionTokens.DurationMedium1, easing = MotionTokens.Emphasized), label = "friendPlaylistsArrow"
+    )
+    val rowColor by animateColorAsState(
+        if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+        tween(MotionTokens.DurationShort4, easing = MotionTokens.Emphasized), label = "friendRowSelected"
+    )
+    LaunchedEffect(selectionMode) { if (selectionMode) showPlaylists = false }
+    Column(
+        modifier
+            .clip(MaterialTheme.shapes.large)
+            .background(rowColor)
+            .semantics { this.selected = selected }
+            .combinedClickable(
+                onClick = { if (selectionMode) onToggleSelect() },
+                onLongClick = { if (selectionMode) onToggleSelect() else onStartSelection() },
+                onLongClickLabel = "Select",
+            )
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            FriendAvatar(friend)
-            Spacer(Modifier.width(10.dp))
-            if (editing) {
-                var draft by remember(friend.id) { mutableStateOf(friend.name) }
-                val save = { if (draft.isNotBlank() && draft.trim() != friend.name) onRename(draft.trim()); editing = false }
-                OutlinedTextField(draft, { draft = it }, Modifier.weight(1f), singleLine = true,
-                    textStyle = MaterialTheme.typography.titleSmall, placeholder = { Text(friend.platformName) },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { save() }))
-                IconButton(onClick = save) { Icon(Icons.Rounded.Check, "Save name") }
-                IconButton(onClick = { editing = false }) { Icon(Icons.Rounded.Close, "Cancel") }
-            } else {
-                Row(
-                    Modifier.widthIn(max = 160.dp).clip(RoundedCornerShape(6.dp))
-                        .combinedClickable(
-                            onClick = {
+            Box(
+                Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .combinedClickable(
+                        onClick = { if (selectionMode) onToggleSelect() else onAvatarClick() },
+                        onLongClick = { if (selectionMode) onToggleSelect() else onStartSelection() },
+                        onClickLabel = if (selectionMode) null else "Open ${friend.name}'s history",
+                    )
+                    .semantics { contentDescription = "Open ${friend.name}'s history" },
+                contentAlignment = Alignment.Center
+            ) {
+                FriendAvatar(friend, size = 40.dp)
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = selected,
+                    enter = scaleIn(tween(MotionTokens.DurationShort4, easing = MotionTokens.EmphasizedDecelerate)) +
+                        fadeIn(tween(MotionTokens.DurationShort4, easing = MotionTokens.EmphasizedDecelerate)),
+                    exit = scaleOut(tween(MotionTokens.DurationShort3, easing = MotionTokens.EmphasizedAccelerate)) +
+                        fadeOut(tween(MotionTokens.DurationShort3, easing = MotionTokens.EmphasizedAccelerate)),
+                ) {
+                    Box(Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.Check, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary)
+                    }
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            Row(
+                Modifier.widthIn(max = 160.dp).clip(MaterialTheme.shapes.small)
+                    .combinedClickable(
+                        onClick = {
+                            if (selectionMode) onToggleSelect()
+                            else {
                                 showPlaylists = !showPlaylists
                                 if (showPlaylists) onExpand()
-                            },
-                            onLongClick = { editing = true },
-                            onClickLabel = if (showPlaylists) "Hide playlists and history" else "Show playlists and history",
-                            onLongClickLabel = "Rename"
-                        ),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(friend.name, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleSmall.copy(fontFamily = GoogleSansRounded),
-                        fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Icon(Icons.Rounded.KeyboardArrowDown, null, Modifier.size(18.dp).rotate(chevron), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Spacer(Modifier.width(10.dp))
-                FriendTrackLabel(friend, onTrackClick, Modifier.weight(1f))
+                            }
+                        },
+                        onLongClick = { if (selectionMode) onToggleSelect() else onStartSelection() },
+                        onClickLabel = if (showPlaylists) "Hide playlists and history" else "Show playlists and history",
+                        onLongClickLabel = "Select"
+                    )
+                    .heightIn(min = 48.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(friend.name, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleSmall.copy(fontFamily = GoogleSansRounded),
+                    fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Icon(Icons.Rounded.KeyboardArrowDown, null, Modifier.size(18.dp).rotate(chevron), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            Spacer(Modifier.width(10.dp))
+            FriendTrackLabel(friend, onTrackClick = { if (selectionMode) onToggleSelect() else onTrackClick(it) }, Modifier.weight(1f))
         }
         // History only shows with the friend's playlists open, at the bottom of that section.
-        AnimatedVisibility(showPlaylists, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+        AnimatedVisibility(
+            showPlaylists,
+            enter = expandVertically(tween(MotionTokens.DurationMedium2, easing = MotionTokens.EmphasizedDecelerate)) +
+                fadeIn(tween(MotionTokens.DurationMedium2, easing = MotionTokens.EmphasizedDecelerate)),
+            exit = shrinkVertically(tween(MotionTokens.DurationShort4, easing = MotionTokens.EmphasizedAccelerate)) +
+                fadeOut(tween(MotionTokens.DurationShort4, easing = MotionTokens.EmphasizedAccelerate))
+        ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (friend.playlists.isEmpty()) {
                     Text("No public playlists yet", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        items(friend.playlists, key = { it.source + ":" + it.remoteId }) { playlist -> FriendPlaylistCard(playlist) { onOpenPlaylist(playlist) } }
+                        items(friend.playlists, key = { it.source + ":" + it.remoteId }) { playlist ->
+                            val pinned = playlist.playlistId != null && playlist.playlistId in pinnedPlaylistIds
+                            FriendPlaylistCard(
+                                playlist = playlist,
+                                pinned = pinned,
+                                onClick = { onOpenPlaylist(playlist) },
+                                onTogglePin = { onTogglePin(playlist, !pinned) },
+                            )
+                        }
                     }
                 }
                 FilledTonalButton(onClick = onHistory, modifier = Modifier.fillMaxWidth()) {
@@ -380,7 +547,7 @@ private fun FriendSection(
 }
 
 @Composable
-private fun FriendAvatar(friend: FriendUi, size: androidx.compose.ui.unit.Dp = 38.dp, showPresence: Boolean = true) {
+internal fun FriendAvatar(friend: FriendUi, size: androidx.compose.ui.unit.Dp = 38.dp, showPresence: Boolean = true) {
     Box(Modifier.size(size)) {
         if (friend.avatarUrl != null) {
             SmartImage(model = friend.avatarUrl, contentDescription = null, modifier = Modifier.fillMaxSize(), shape = CircleShape)
@@ -403,13 +570,20 @@ private fun FriendAvatar(friend: FriendUi, size: androidx.compose.ui.unit.Dp = 3
 private fun FriendTrackLabel(friend: FriendUi, onTrackClick: (FriendTrack) -> Unit, modifier: Modifier) {
     val track = friend.track
     if (track == null) {
-        Text(if (friend.presence == FriendPresence.HIDDEN) "Activity hidden" else "No recent activity", modifier,
-            style = MaterialTheme.typography.bodyMedium, fontStyle = FontStyle.Italic, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        // Hidden activity: show how many playlists they have instead (when they have any).
+        val count = friend.playlists.size
+        if (friend.presence == FriendPresence.HIDDEN && count > 0) {
+            Text(if (count == 1) "1 playlist" else "$count playlists", modifier,
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        } else {
+            Text(if (friend.presence == FriendPresence.HIDDEN) "Activity hidden" else "No recent activity", modifier,
+                style = MaterialTheme.typography.bodyMedium, fontStyle = FontStyle.Italic, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        }
         return
     }
     val live = friend.presence == FriendPresence.LISTENING_NOW
     val song = listOf(track.title, track.artist).filter { it.isNotBlank() }.joinToString(" · ")
-    Row(modifier.clip(RoundedCornerShape(6.dp))
+    Row(modifier.clip(MaterialTheme.shapes.small)
         .clickable { onTrackClick(track) }
         .padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         if (live) {
@@ -433,18 +607,24 @@ internal enum class FriendTrackAction { PLAY, NEXT, QUEUE, LIKE, ARTIST, SEARCH 
  * it on top, Play / Play next / Add to queue as big tiles, then like, artist and search.
  */
 @Composable
-private fun FriendTrackSheet(
+internal fun FriendTrackSheet(
     track: FriendTrack,
     friend: FriendUi?,
     isLiked: Boolean,
     onAction: (FriendTrackAction) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    // Close with the sheet's own hide animation, then run the action.
+    val act: (FriendTrackAction) -> Unit = { action ->
+        scope.launch { sheetState.hide() }.invokeOnCompletion { onAction(action) }
+    }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                SmartImage(model = track.coverUrl, contentDescription = null, modifier = Modifier.size(64.dp), shape = RoundedCornerShape(14.dp))
+                SmartImage(model = track.coverUrl, contentDescription = null, modifier = Modifier.size(64.dp), shape = MaterialTheme.shapes.medium)
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text(track.title, style = MaterialTheme.typography.titleLarge.copy(fontFamily = GoogleSansRounded),
@@ -465,6 +645,7 @@ private fun FriendTrackSheet(
                         }
                     }
                 }
+                // Like doesn't close the sheet, so the heart can be seen changing.
                 IconButton(onClick = { onAction(FriendTrackAction.LIKE) }) {
                     Icon(if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                         if (isLiked) "Unlike" else "Like",
@@ -473,18 +654,18 @@ private fun FriendTrackSheet(
             }
             Spacer(Modifier.height(20.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                ActionTile(Icons.Rounded.PlayArrow, "Play", Modifier.weight(1f), primary = true) { onAction(FriendTrackAction.PLAY) }
-                ActionTile(Icons.AutoMirrored.Rounded.PlaylistPlay, "Play next", Modifier.weight(1f)) { onAction(FriendTrackAction.NEXT) }
-                ActionTile(Icons.AutoMirrored.Rounded.QueueMusic, "Add to queue", Modifier.weight(1f)) { onAction(FriendTrackAction.QUEUE) }
+                ActionTile(Icons.Rounded.PlayArrow, "Play", Modifier.weight(1f), primary = true) { act(FriendTrackAction.PLAY) }
+                ActionTile(Icons.AutoMirrored.Rounded.PlaylistPlay, "Play next", Modifier.weight(1f)) { act(FriendTrackAction.NEXT) }
+                ActionTile(Icons.AutoMirrored.Rounded.QueueMusic, "Add to queue", Modifier.weight(1f)) { act(FriendTrackAction.QUEUE) }
             }
             Spacer(Modifier.height(12.dp))
-            Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
+            Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainer) {
                 Column {
                     if (track.artist.isNotBlank()) {
-                        FriendActionRow(Icons.Rounded.Person, "Go to ${track.artist}") { onAction(FriendTrackAction.ARTIST) }
+                        FriendActionRow(Icons.Rounded.Person, "Go to ${track.artist}") { act(FriendTrackAction.ARTIST) }
                         HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                     }
-                    FriendActionRow(Icons.Rounded.Search, "Search in PixelPlayer") { onAction(FriendTrackAction.SEARCH) }
+                    FriendActionRow(Icons.Rounded.Search, "Search in PixelPlayer") { act(FriendTrackAction.SEARCH) }
                 }
             }
         }
@@ -501,23 +682,88 @@ private fun FriendActionRow(icon: androidx.compose.ui.graphics.vector.ImageVecto
     }
 }
 
+/**
+ * A friend's playlist. Text sits inside the card's padding (the old card clipped the whole
+ * column to rounded corners, which cut the first digit of "16 songs"), titles always take two
+ * lines so the cards line up, and the platform badge has a solid backing so it shows on any cover.
+ * Heart = pin into Your playlists (long-press does the same).
+ */
 @Composable
-private fun FriendPlaylistCard(playlist: FriendPlaylistUi, onClick: () -> Unit) {
-    Column(Modifier.width(128.dp).clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick)) {
+private fun FriendPlaylistCard(
+    playlist: FriendPlaylistUi,
+    pinned: Boolean,
+    onClick: () -> Unit,
+    onTogglePin: () -> Unit,
+) {
+    val songsLabel = if (playlist.songCount <= 0 && playlist.playlistId == null) "Counting songs…"
+        else listOfNotNull(if (playlist.songCount == 1) "1 song" else "${playlist.songCount} songs",
+            playlist.durationMs?.let(::durationLabel)).joinToString(" · ")
+    val platform = when (playlist.source) {
+        "SPOTIFY" -> "Spotify"; "YOUTUBE_MUSIC" -> "YouTube Music"; "APPLE_MUSIC" -> "Apple Music"; else -> ""
+    }
+    Column(
+        Modifier
+            .width(FriendPlaylistCardWidth)
+            .clip(MaterialTheme.shapes.large)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .combinedClickable(onClick = onClick, onLongClick = onTogglePin,
+                onLongClickLabel = if (pinned) "Unpin from your playlists" else "Pin to your playlists")
+            .semantics(mergeDescendants = true) {
+                contentDescription = listOf(playlist.title, songsLabel, platform).filter { it.isNotBlank() }.joinToString(", ")
+            }
+            .padding(8.dp)
+    ) {
         Box {
-            SmartImage(model = playlist.coverUrl, contentDescription = null, modifier = Modifier.size(128.dp), shape = RoundedCornerShape(16.dp))
-            SourceBadge(playlist.source, Modifier.align(Alignment.TopEnd).padding(6.dp), iconSize = 12.dp, containerSize = 22.dp)
+            SmartImage(model = playlist.coverUrl, contentDescription = null,
+                modifier = Modifier.fillMaxWidth().aspectRatio(1f), shape = MaterialTheme.shapes.medium)
+            Box(Modifier.align(Alignment.TopEnd).padding(6.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest)) {
+                SourceBadge(playlist.source, iconSize = 12.dp, containerSize = 22.dp)
+            }
+            PlaylistPlayingBadge(
+                visible = rememberIsPlaylistPlaying(playlist.playlistId),
+                isPlaying = true,
+                modifier = Modifier.align(Alignment.TopStart).padding(6.dp),
+                size = 26.dp
+            )
+            Box(
+                Modifier.align(Alignment.BottomEnd).padding(4.dp).size(40.dp).clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                    .clickable(onClick = onTogglePin, onClickLabel = if (pinned) "Unpin from your playlists" else "Pin to your playlists"),
+                contentAlignment = Alignment.Center
+            ) {
+                AnimatedContent(
+                    targetState = pinned,
+                    transitionSpec = {
+                        (scaleIn(tween(MotionTokens.DurationShort4, easing = MotionTokens.EmphasizedDecelerate)) +
+                            fadeIn(tween(MotionTokens.DurationShort4, easing = MotionTokens.EmphasizedDecelerate))) togetherWith
+                            (scaleOut(tween(MotionTokens.DurationShort3, easing = MotionTokens.EmphasizedAccelerate)) +
+                                fadeOut(tween(MotionTokens.DurationShort3, easing = MotionTokens.EmphasizedAccelerate)))
+                    },
+                    label = "friendPlaylistPin"
+                ) { isPinned ->
+                    Icon(
+                        if (isPinned) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                        contentDescription = if (isPinned) "Pinned" else "Not pinned",
+                        tint = if (isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
         }
-        Spacer(Modifier.height(6.dp))
-        Text(playlist.title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        Text(if (playlist.songCount <= 0 && playlist.playlistId == null) "Counting songs…"
-            else listOfNotNull("${playlist.songCount} songs", playlist.durationMs?.let(::durationLabel)).joinToString(" · "),
-            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        Spacer(Modifier.height(8.dp))
+        Text(playlist.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface, minLines = 2, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(2.dp))
+        Text(songsLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (playlist.playlistId == null) {
-            Text("Tap to save", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            Text("Tap to save", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.SemiBold, maxLines = 1)
         }
     }
 }
+
+private val FriendPlaylistCardWidth = 148.dp
 
 // ---- History bottom sheet ---------------------------------------------------------------------
 
@@ -527,7 +773,7 @@ private fun FriendPlaylistCard(playlist: FriendPlaylistUi, onClick: () -> Unit) 
  * song to play it; ⋮ or a long press for more.
  */
 @Composable
-private fun FriendHistorySheet(
+internal fun FriendHistorySheet(
     friend: FriendUi,
     history: List<FriendTrack>,
     isFollowing: Boolean,
@@ -644,7 +890,7 @@ private fun FriendHistorySheet(
 }
 
 @Composable
-private fun AddFriendPlaylistDialog(onAdd: (String, String, () -> Unit) -> Unit, onDismiss: () -> Unit) {
+internal fun AddFriendPlaylistDialog(onAdd: (String, String, () -> Unit) -> Unit, onDismiss: () -> Unit) {
     var name by remember { mutableStateOf("") }
     var link by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }

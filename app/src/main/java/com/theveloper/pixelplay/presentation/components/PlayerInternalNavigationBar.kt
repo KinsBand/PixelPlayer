@@ -80,6 +80,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.style.TextOverflow
 import com.theveloper.pixelplay.presentation.components.voicesearch.VoiceCapturePhase
+import com.theveloper.pixelplay.presentation.components.voicesearch.VoiceMicButton
 import com.theveloper.pixelplay.presentation.components.voicesearch.VoiceSpeechCaptureState
 
 internal val NavBarContentHeight = 90.dp // Altura del contenido de la barra de navegación
@@ -496,31 +497,16 @@ private fun InlineNavSearchBar(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    val micScale by animateFloatAsState(
-                        targetValue = if (voiceLive) 1f + 0.3f * (voiceCapture?.level ?: 0f) else 1f,
-                        animationSpec = tween(durationMillis = 90),
-                        label = "voice_mic_level"
-                    )
-                    IconButton(
+                    VoiceMicButton(
                         onClick = onVoiceSearchClick,
-                        modifier = Modifier
-                            .size(28.dp)
-                            .graphicsLayer {
-                                scaleX = micScale
-                                scaleY = micScale
-                            }
-                            .clip(CircleShape)
-                            .background(
-                                if (voiceLive) MaterialTheme.colorScheme.primary else Color.Transparent
-                            )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Mic,
-                            contentDescription = if (voiceActive) "Speak again" else "Voice search",
-                            tint = if (voiceLive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
+                        listening = voiceLive,
+                        level = { voiceCapture?.level ?: 0f },
+                        processing = voicePhase == VoiceCapturePhase.Processing,
+                        error = isVoiceProblem,
+                        size = 30.dp,
+                        iconSize = 20.dp,
+                        contentDescription = if (voiceActive) "Speak again" else "Voice search"
+                    )
 
                     if (query.isNotEmpty()) {
                         IconButton(

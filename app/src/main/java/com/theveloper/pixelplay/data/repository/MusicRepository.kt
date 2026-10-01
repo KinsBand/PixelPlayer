@@ -258,6 +258,16 @@ interface MusicRepository {
     suspend fun searchPlaylists(query: String): List<Playlist> // Mantener suspend, ya que no hay Flow aún
     fun searchAll(query: String, filterType: SearchFilterType): Flow<List<SearchResultItem>>
 
+    /**
+     * "Show more" for song search: returns up to one more page of songs not in [shownSongIds],
+     * from the local library first, then the next online page. [reset] starts online paging over.
+     */
+    suspend fun loadMoreSearchSongs(
+        query: String,
+        shownSongIds: Set<String>,
+        reset: Boolean
+    ): SearchSongsPage = SearchSongsPage(emptyList(), hasMore = false)
+
     // Search History
     suspend fun addSearchHistoryItem(query: String)
     suspend fun getRecentSearchHistory(limit: Int): List<SearchHistoryItem>
@@ -385,3 +395,6 @@ interface MusicRepository {
 
     suspend fun getSongIdByContentUri(contentUri: String): Long?
 }
+
+/** One "Show more" page of song search results. */
+data class SearchSongsPage(val songs: List<Song>, val hasMore: Boolean)

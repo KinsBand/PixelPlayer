@@ -83,6 +83,9 @@ class FriendFollowController @Inject constructor(
                 if (!isNew) return@collect
                 last = track
                 val song = track.toPlayableSong() ?: return@collect
+                val session = _session.value
+                FriendQueueAttribution.tag(listOf(song.id), friendId, session?.friendName ?: friendName,
+                    activity.profiles.value[friendId]?.avatarUrl)
                 _newSongs.emit(song)
                 _session.update { it?.copy(queued = it.queued + 1) }
             }

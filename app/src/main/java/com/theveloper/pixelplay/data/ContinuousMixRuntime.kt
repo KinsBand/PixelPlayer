@@ -99,7 +99,8 @@ class ContinuousMixRuntime @Inject constructor(
                 }
             }
             while (isActive) {
-                withTimeoutOrNull(1_500) { kick.receive() }
+                // Re-check quickly while a top-up is still in progress; otherwise idle.
+                withTimeoutOrNull(if ((topUp || resumeAfterRefill) && android.os.SystemClock.elapsedRealtime() >= retryAfter) 150L else 1_000L) { kick.receive() }
                 if (remote() || _flavor.value == null) continue
                 try {
                     followUserPicks()
@@ -255,11 +256,23 @@ class ContinuousMixRuntime @Inject constructor(
      * never touched. No-op when no mix is running.
      */
     fun noteRemovedFromQueue(song: Song) {
-        if (_flavor.value == null) return
+        // No mix running: still a hint about the vibe (friends-in-the-room picks and the next
+        // mix use it), just not stored for later sessions.
+        if (_flavor.value == null) { adaptive.noteRemovedOutsideMix(song); return }
         adaptive.markOffVibe(song)
         pendingOffVibe.add(song)
         _status.value = "${_flavor.value?.title ?: "Mix"} · steering away from that"
         kick.trySend(Unit)
+    }
+
+    /**
+     * The user queued [song] by hand (Add to queue / Play next / Play soon): "more of this
+     * vibe". Similar-feeling songs rise in the next plans, mix or not; a running mix re-plans
+     * through [followUserPicks] as before.
+     */
+    fun noteQueuedByUser(song: Song) {
+        adaptive.markPicked(song)
+        if (_flavor.value != null) kick.trySend(Unit)
     }
 
     /** Undo of a queue removal: forget the signal and don't mistake the restored song for a new pick. */
@@ -393,7 +406,7 @@ class ContinuousMixRuntime @Inject constructor(
         val songs = withContext(Dispatchers.IO) { music.getSongsByIds(candidates.map { it.mediaId }.distinct()).first() }
             .associateBy { it.id }
         val drop = candidates.filter { item ->
-            songs[item.mediaId]?.let { adaptive.offVibePenalty(it, removed) >= OFF_VIBE_PRUNE } == true
+            songs[item.mediaId]?.let { adaptive.offVibePenalty(it, removed) >= OFF_VIBE_PRUNE || adaptive.feelsLike(it, removed) } == true
         }.map { it.mediaId }.toSet()
         if (drop.isEmpty() || playerProvider?.invoke() !== player || _flavor.value == null) return
         // The queue may have moved during the lookup; re-scan by id from the current position.
@@ -491,18 +504,18 @@ class ContinuousMixRuntime @Inject constructor(
         /** Pivot when [PIVOT_SKIPS] of the last [PIVOT_WINDOW] finished songs were early skips. */
         const val PIVOT_WINDOW = 5
         const val PIVOT_SKIPS = 3
-        const val RESOLVE_PARALLELISM = 4
+        const val RESOLVE_PARALLELISM = 8
         /** Upcoming songs that never move when the tail is re-ordered. */
         const val ROLLING_FIXED = 3
         /** Don't bother re-ordering fewer songs than this. */
         const val ROLLING_MIN = 4
         /** Extra planned songs resolved alongside, so a song that fails to resolve is covered. */
         const val RESOLVE_SPARE = 4
-        const val RESOLVE_GATHER_TIMEOUT_MS = 1_500L
+        const val RESOLVE_GATHER_TIMEOUT_MS = 800L
         /** Shorter metadata wait for the first songs after a start / switch. */
-        const val FAST_GATHER_TIMEOUT_MS = 600L
+        const val FAST_GATHER_TIMEOUT_MS = 300L
         /** Songs planned in the first pass after a start / switch (the rest follow next tick). */
-        const val FIRST_BATCH = 8
+        const val FIRST_BATCH = 10
         /** Songs played this recently aren't repeated by the relaxed fallback plan. */
         const val RECENT_REPEAT_GUARD = 25
     }

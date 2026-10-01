@@ -100,7 +100,9 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
@@ -410,6 +412,7 @@ fun FullPlayerContent(
     }
     
     val lyricsSearchUiState by playerViewModel.lyricsSearchUiState.collectAsStateWithLifecycle()
+    val lyricsSyncOffsetState by playerViewModel.currentSongLyricsSyncOffsetState.collectAsStateWithLifecycle()
     val isQueueSheetVisible by playerViewModel.isQueueSheetVisible.collectAsStateWithLifecycle()
     val isCastSheetVisible by playerViewModel.isCastSheetVisible.collectAsStateWithLifecycle()
     val activeMixFlavor by playerViewModel.activeMixFlavor.collectAsStateWithLifecycle()
@@ -1191,6 +1194,8 @@ fun FullPlayerContent(
                     onQueueRelease = onQueueRelease,
                     castIconPainter = castIconPainter,
                     queueBusy = playerViewModel.isQueueBusy.collectAsStateWithLifecycle(),
+                    bluetoothBattery = playerViewModel.bluetoothBattery.collectAsStateWithLifecycle().value
+                        ?.takeIf { isBluetoothActive },
                     containerColor = playerOnAccentColor.copy(alpha = 0.55f),
                     contentColor = playerAccentColor,
                     enabled = isGestureEnabled,
@@ -1235,6 +1240,9 @@ fun FullPlayerContent(
             onDismissLyricsSearch = { playerViewModel.resetLyricsSearchState() },
             lyricsSyncOffset = lyricsSyncOffset,
             onLyricsSyncOffsetChange = { currentSong?.id?.let { songId -> playerViewModel.setLyricsSyncOffset(songId, it) } },
+            lyricsSyncOffsetIsAutomatic = lyricsSyncOffsetState.isAutomatic,
+            lyricsSyncOffsetIsManual = lyricsSyncOffsetState.manualMs != null,
+            onLyricsSyncOffsetResetToAutomatic = { currentSong?.id?.let { songId -> playerViewModel.resetLyricsSyncOffsetToAuto(songId) } },
             // The user's lyrics font and size (Settings → Lyrics). effectiveLyricsFont falls
             // back to the platform font (fontFamily = null) whenever the chosen font has no
             // glyph for something in this song's lyrics, so extended Unicode (e.g. Icelandic
@@ -3298,7 +3306,9 @@ fun MusicPlayerCornerOverlay(
     onQueueRelease: (Float, Float) -> Unit = { _, _ -> },
     enabled: Boolean = true,
     /** Mixing / songs being added: the queue button's outline animates. */
-    queueBusy: androidx.compose.runtime.State<Boolean>? = null
+    queueBusy: androidx.compose.runtime.State<Boolean>? = null,
+    /** Connected Bluetooth device's battery (0–100), shown as the Bluetooth button's outline; null hides it. */
+    bluetoothBattery: Int? = null
 ) {
     // Root Box for absolute positioning of the 2 bottom corners
     Box(modifier = modifier.fillMaxSize()) {
@@ -3308,14 +3318,15 @@ fun MusicPlayerCornerOverlay(
             modifier = Modifier.align(Alignment.BottomStart),
             shape = BottomLeftPebbleShape,
             painter = castIconPainter,
-            contentDescription = "Bluetooth",
+            contentDescription = bluetoothBattery?.let { "Bluetooth, battery $it percent" } ?: "Bluetooth",
             iconOffsetX = (-8).dp,
             iconOffsetY = 8.dp,
             containerColor = containerColor,
             contentColor = contentColor,
             onClick = onBluetoothClick,
             onSwipeUp = onBluetoothClick,
-            enabled = enabled
+            enabled = enabled,
+            battery = bluetoothBattery?.let { it / 100f }
         )
 
         // Bottom-Right: Queue/Playlist music
@@ -3335,6 +3346,70 @@ fun MusicPlayerCornerOverlay(
             enabled = enabled,
             busy = queueBusy?.value == true
         )
+    }
+}
+
+/**
+ * The connected Bluetooth device's battery, drawn along the Bluetooth pebble's curved inner edge
+ * in the same style as the queue button's mixing outline. Full battery = the whole edge, from the
+ * top down to the bottom-right; as the battery drops the line shortens from the bottom-right end
+ * back towards the top. Re-read every 60 s; level changes glide, the line draws in from the top
+ * when a device connects and fades when it disconnects. Draw phase only.
+ */
+private fun Modifier.bluetoothBatteryEdge(
+    level: Float?,
+    color: Color,
+    strokeWidth: Dp = 3.dp
+): Modifier = composed {
+    val reducedMotion = com.theveloper.pixelplay.ui.theme.rememberSystemReducedMotion()
+    val target = level?.coerceIn(0f, 1f) ?: 0f
+    val shown by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = target,
+        animationSpec = if (reducedMotion) androidx.compose.animation.core.snap() else androidx.compose.animation.core.tween(
+            durationMillis = com.theveloper.pixelplay.ui.theme.MotionTokens.DurationLong2,
+            easing = com.theveloper.pixelplay.ui.theme.MotionTokens.Emphasized
+        ),
+        label = "bluetoothBatteryLevel"
+    )
+    val appear by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (level != null) 1f else 0f,
+        animationSpec = if (reducedMotion) androidx.compose.animation.core.snap() else androidx.compose.animation.core.tween(
+            durationMillis = if (level != null) com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort4
+                else com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium1,
+            easing = if (level != null) com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate
+                else com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate
+        ),
+        label = "bluetoothBatteryAppear"
+    )
+    drawWithCache {
+        val w = size.width
+        val h = size.height
+        // The pebble's visible edge (BottomLeftPebbleShape's curve), run from the top down to
+        // the bottom-right so the filled part is anchored at the top.
+        val edge = androidx.compose.ui.graphics.Path().apply {
+            moveTo(0f, 0f)
+            cubicTo(w * 0.4f, 0f, w, h * 0.6f, w, h)
+        }
+        val measure = androidx.compose.ui.graphics.PathMeasure().apply { setPath(edge, false) }
+        val length = measure.length
+        val filled = androidx.compose.ui.graphics.Path()
+        val strokePx = strokeWidth.toPx()
+        val thin = androidx.compose.ui.graphics.drawscope.Stroke(strokePx, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        val glow = androidx.compose.ui.graphics.drawscope.Stroke(strokePx * 2.6f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        onDrawWithContent {
+            drawContent()
+            val a = appear
+            if (a <= 0.01f) return@onDrawWithContent
+            // Faint full track, like the queue button's resting ring.
+            drawPath(edge, color = color.copy(alpha = 0.22f * a), style = thin)
+            val f = shown
+            if (f > 0.002f) {
+                filled.reset()
+                measure.getSegment(0f, length * f, filled, true)
+                drawPath(filled, color = color.copy(alpha = 0.35f * a), style = glow)
+                drawPath(filled, color = color.copy(alpha = a), style = thin)
+            }
+        }
     }
 }
 
@@ -3360,7 +3435,9 @@ private fun CornerControlButton(
     onVerticalDrag: ((Float) -> Unit)? = null,
     onDragEnd: ((Float, Float) -> Unit)? = null,
     enabled: Boolean = true,
-    busy: Boolean = false
+    busy: Boolean = false,
+    /** 0…1 battery shown along the inner edge (Bluetooth pebble only); null = none. */
+    battery: Float? = null
 ) {
     val buttonSize = 72.dp // Dimensions that give the organic curves enough space to breathe
     val density = LocalDensity.current
@@ -3406,6 +3483,7 @@ private fun CornerControlButton(
                 color = contentColor,
                 strokeWidth = 3.dp
             )
+            .bluetoothBatteryEdge(level = battery, color = contentColor)
             .clip(shape) // Clips both the background drawing AND the clickable interaction bounds
             .background(containerColor)
             .semantics {

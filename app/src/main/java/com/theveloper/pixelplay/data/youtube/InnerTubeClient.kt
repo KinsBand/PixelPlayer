@@ -315,4 +315,5 @@ internal fun SearchResultItem.searchIdentity(): String = when (this) {
     is SearchResultItem.ArtistItem -> "artist:${browseId ?: artist.id}"
     is SearchResultItem.AlbumItem -> "album:${browseId ?: album.id}"
     is SearchResultItem.PlaylistItem -> "playlist:${browseId ?: playlist.id}"
+    is SearchResultItem.FriendItem -> "friend:$friendId"
 }

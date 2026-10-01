@@ -15,5 +15,7 @@ interface YouTubeRepository {
     fun cachedSongs(query: String): List<Song> = emptyList()
     suspend fun relatedSongs(videoId: String): List<Song> = emptyList()
     suspend fun searchSongs(query: String): List<Song>
+    /** Next page of song results for "Show more"; pair.second = another page exists. */
+    suspend fun moreSongs(query: String, reset: Boolean = false): Pair<List<Song>, Boolean> = emptyList<Song>() to false
     suspend fun resolveStreamUrl(videoId: String): String?
 }

@@ -83,6 +83,13 @@ class ConnectivityStateHolder @Inject constructor(
     private val _bluetoothName = MutableStateFlow<String?>(null)
     val bluetoothName: StateFlow<String?> = _bluetoothName.asStateFlow()
 
+    private val _activeBluetoothBattery = MutableStateFlow<Int?>(null)
+    /**
+     * Battery (0–100) of the connected Bluetooth audio device, or null when none is connected or
+     * it doesn't report one. Refreshed by [refreshActiveBluetoothBattery] (every 60 s while connected).
+     */
+    val activeBluetoothBattery: StateFlow<Int?> = _activeBluetoothBattery.asStateFlow()
+
     private val _bluetoothAudioDeviceStates = MutableStateFlow<List<BluetoothAudioDeviceState>>(emptyList())
     val bluetoothAudioDeviceStates: StateFlow<List<BluetoothAudioDeviceState>> = _bluetoothAudioDeviceStates.asStateFlow()
 
@@ -694,6 +701,25 @@ class ConnectivityStateHolder @Inject constructor(
             majorClass = cls?.majorDeviceClass,
             deviceClass = cls?.deviceClass
         )
+    }
+
+    /**
+     * Re-reads the battery of the connected Bluetooth audio device (the one shown on the player's
+     * Bluetooth button). Cheap: only the connected A2DP / headset devices are asked.
+     */
+    @SuppressLint("MissingPermission")
+    fun refreshActiveBluetoothBattery() {
+        val name = _bluetoothName.value
+        if (!_isBluetoothEnabled.value || name.isNullOrBlank()) {
+            _activeBluetoothBattery.value = null
+            return
+        }
+        val connected = (safeGetConnectedDevices(BluetoothProfile.A2DP) + safeGetConnectedDevices(BluetoothProfile.HEADSET))
+            .distinctBy { safeBluetoothCall("") { it.address.orEmpty() } }
+        val device = connected.firstOrNull { safeBluetoothCall("") { it.name?.trim().orEmpty() }.equals(name.trim(), ignoreCase = true) }
+            ?: connected.singleOrNull()
+        _activeBluetoothBattery.value = device?.let(::resolveBatteryPercent)
+            ?: _bluetoothAudioDeviceStates.value.firstOrNull { it.isConnected && it.name == name }?.batteryPercent
     }
 
     private fun resolveBatteryPercent(device: BluetoothDevice): Int? {

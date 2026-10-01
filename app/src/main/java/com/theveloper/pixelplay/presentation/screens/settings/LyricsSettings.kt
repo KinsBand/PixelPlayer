@@ -1,6 +1,7 @@
 package com.theveloper.pixelplay.presentation.screens.settings
 
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForwardIos
 import androidx.compose.material.icons.outlined.ClearAll
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.rounded.ScreenRotation
 import androidx.compose.material.icons.rounded.ViewAgenda
 import androidx.compose.material.icons.rounded.TextFields
 import androidx.compose.material.icons.rounded.Timer
+import androidx.compose.material.icons.rounded.AutoFixHigh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -40,6 +42,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.LyricsSourcePreference
@@ -79,6 +82,7 @@ internal fun LyricsSettingsContent(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val lyricsDisplayPrefs by rememberLyricsDisplayPrefs()
+    val lyricsAutoSyncEnabled by settingsViewModel.lyricsAutoSyncEnabled.collectAsStateWithLifecycle()
 
     SettingsSubsection(title = stringResource(R.string.settings_lyrics_sources_section)) {
         ThemeSelectorItem(
@@ -121,6 +125,14 @@ internal fun LyricsSettingsContent(
             onCheckedChange = { settingsViewModel.setLyricsIntegrationEnabled(it) },
             leadingIcon = { Icon(painterResource(R.drawable.rounded_music_note_24), null, tint = MaterialTheme.colorScheme.secondary) }
         )
+        SwitchSettingItem(
+            settingKey = "lyrics_auto_sync",
+            title = stringResource(R.string.settings_lyrics_auto_sync_title),
+            subtitle = stringResource(R.string.settings_lyrics_auto_sync_subtitle),
+            checked = lyricsAutoSyncEnabled,
+            onCheckedChange = { settingsViewModel.setLyricsAutoSyncEnabled(it) },
+            leadingIcon = { Icon(Icons.Rounded.AutoFixHigh, null, tint = MaterialTheme.colorScheme.secondary) }
+        )
     }
 
     SettingsSubsection(
@@ -147,6 +159,30 @@ internal fun LyricsSettingsContent(
             checked = uiState.immersiveLyricsEnabled,
             onCheckedChange = { settingsViewModel.setImmersiveLyricsEnabled(it) },
             leadingIcon = { Icon(painterResource(R.drawable.rounded_lyrics_24), null, tint = MaterialTheme.colorScheme.secondary) }
+        )
+
+        // Settings → Lyrics → Animation style (its own screen with a live preview).
+        SettingsItem(
+            settingKey = "lyrics_animation_style",
+            title = stringResource(R.string.settings_lyrics_animation_style_title),
+            subtitle = stringResource(R.string.settings_lyrics_animation_style_subtitle),
+            leadingIcon = { Icon(Icons.Rounded.AutoAwesomeMotion, null, tint = MaterialTheme.colorScheme.secondary) },
+            trailingContent = {
+                androidx.compose.foundation.layout.Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text(
+                        text = lyricsDisplayPrefs.animationStyle.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1
+                    )
+                    Icon(
+                        Icons.AutoMirrored.Rounded.ArrowForwardIos, null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 8.dp).size(16.dp)
+                    )
+                }
+            },
+            onClick = { navController?.navigate(Screen.LyricsAnimationStyle.route) }
         )
 
         // Full screen just for lyrics: hides the status and gesture bars while lyrics are open.

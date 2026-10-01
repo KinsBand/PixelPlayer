@@ -40,6 +40,7 @@ class LikedSongsRepository @Inject constructor(
     music: MusicRepository,
     connected: ConnectedLibraryRepository,
     playlistPreferences: PlaylistPreferencesRepository,
+    removals: YourMusicRemovals,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -62,8 +63,9 @@ class LikedSongsRepository @Inject constructor(
     val likedSongs: Flow<List<Song>> = combine(
         connected.likedSongs.onStart { emit(emptyList()) }.catch { emit(emptyList()) },
         music.getFavoriteSongIdsByRecentFlow().onStart { emit(emptyList()) }.catch { emit(emptyList()) },
-        favoritesPlaylistSongs.onStart { emit(emptyList()) }
-    ) { liked, recentIds, favoritesPlaylist ->
+        favoritesPlaylistSongs.onStart { emit(emptyList()) },
+        removals.keys
+    ) { liked, recentIds, favoritesPlaylist, removed ->
         val rank = HashMap<String, Int>(recentIds.size * 2)
         recentIds.forEachIndexed { index, id -> rank.putIfAbsent(id, index) }
         // A downloaded copy may carry a different id than the one that was liked; fall back to
@@ -71,7 +73,10 @@ class LikedSongsRepository @Inject constructor(
         fun rankOf(song: Song): Int? = rank[song.id] ?: song.youtubeId?.let { rank["yt_$it"] }
         val (inApp, platform) = liked.partition { rankOf(it) != null }
         val ordered = inApp.sortedBy { rankOf(it) } + platform + favoritesPlaylist
-        mergeLikedSongs(ordered.filter { it.contentUriString.isNotBlank() || it.youtubeId != null })
+        // Songs deleted from Your Music stay hidden even if a service still reports them liked.
+        mergeLikedSongs(ordered.filter {
+            (it.contentUriString.isNotBlank() || it.youtubeId != null) && !removals.isRemoved(it, removed)
+        })
     }
         .distinctUntilChanged()
         .flowOn(Dispatchers.Default)

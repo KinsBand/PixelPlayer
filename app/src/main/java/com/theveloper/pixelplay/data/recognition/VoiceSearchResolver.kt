@@ -22,34 +22,44 @@ class VoiceSearchResolver @Inject constructor(
     private val favoritesDao: FavoritesDao
 ) {
     /**
-     * Resolves recognized song information into a concrete [Song] with favorite state
-     * and fetches any available synced [Lyrics].
+     * Finds the song in your library first, then online (YouTube Music). Null when neither has
+     * it. No lyrics are fetched, so this is cheap enough for list covers and taps.
      */
-    suspend fun resolve(title: String, artist: String): Pair<Song, Lyrics?> = withContext(Dispatchers.IO) {
+    suspend fun findSong(title: String, artist: String): Song? = withContext(Dispatchers.IO) {
         val query = "$title $artist".trim()
         Timber.d("VoiceSearchResolver: Resolving query '%s'", query)
-
-        // 1. Try local matching
         var matchedSong: Song? = null
         try {
             val localSongs = musicRepository.getAudioFiles().firstOrNull().orEmpty()
             matchedSong = localSongs.firstOrNull { song ->
+                song.title.equals(title, ignoreCase = true) &&
+                    (artist.isBlank() || song.artist.contains(artist, ignoreCase = true))
+            } ?: localSongs.firstOrNull { song ->
                 song.title.contains(title, ignoreCase = true) &&
-                        (artist.isBlank() || song.artist.contains(artist, ignoreCase = true))
+                    (artist.isBlank() || song.artist.contains(artist, ignoreCase = true))
             }
         } catch (e: Exception) {
             Timber.w(e, "VoiceSearchResolver: Error during local search")
         }
-
-        // 2. If not local, search online via YouTube Music
         if (matchedSong == null) {
             try {
-                val onlineResults = youTubeRepository.searchSongs(query)
-                matchedSong = onlineResults.firstOrNull()
+                matchedSong = youTubeRepository.searchSongs(query).firstOrNull()
             } catch (e: Exception) {
                 Timber.w(e, "VoiceSearchResolver: Error during online search")
             }
         }
+        matchedSong?.let { found ->
+            val isFav = runCatching { favoritesDao.isFavorite(found.id) }.getOrNull() ?: false
+            found.copy(isFavorite = isFav)
+        }
+    }
+
+    /**
+     * Resolves recognized song information into a concrete [Song] with favorite state
+     * and fetches any available synced [Lyrics].
+     */
+    suspend fun resolve(title: String, artist: String): Pair<Song, Lyrics?> = withContext(Dispatchers.IO) {
+        val matchedSong = findSong(title, artist)
 
         // 3. Fallback placeholder if completely unresolved
         val resolvedSong = matchedSong ?: Song.emptySong().copy(

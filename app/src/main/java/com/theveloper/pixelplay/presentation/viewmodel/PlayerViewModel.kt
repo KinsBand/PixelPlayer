@@ -89,6 +89,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -561,6 +562,10 @@ class PlayerViewModel @Inject constructor(
     // Lyrics sync offset - now managed by LyricsStateHolder
     val currentSongLyricsSyncOffset: StateFlow<Int> = lyricsStateHolder.currentSongSyncOffset
 
+    // Where that offset comes from: the user's manual offset, or one measured from the audio
+    val currentSongLyricsSyncOffsetState: StateFlow<com.theveloper.pixelplay.data.preferences.LyricsSyncOffsetState> =
+        lyricsStateHolder.currentSongSyncOffsetState
+
     // Lyrics source preference (API_FIRST, EMBEDDED_FIRST, LOCAL_FIRST)
     val lyricsSourcePreference: StateFlow<LyricsSourcePreference> = userPreferencesRepository.lyricsSourcePreferenceFlow
         .stateIn(
@@ -595,6 +600,11 @@ class PlayerViewModel @Inject constructor(
 
     fun setLyricsSyncOffset(songId: String, offsetMs: Int) {
         lyricsStateHolder.setSyncOffset(songId, offsetMs)
+    }
+
+    /** Clears the manual lyrics offset so the automatically measured one (if any) applies. */
+    fun resetLyricsSyncOffsetToAuto(songId: String) {
+        lyricsStateHolder.resetSyncOffsetToAuto(songId)
     }
 
     val useSmoothCorners: StateFlow<Boolean> = userPreferencesRepository.useSmoothCornersFlow
@@ -945,6 +955,29 @@ class PlayerViewModel @Inject constructor(
     val wifiName: StateFlow<String?> = connectivityStateHolder.wifiName
     val isBluetoothEnabled: StateFlow<Boolean> = connectivityStateHolder.isBluetoothEnabled
     val bluetoothName: StateFlow<String?> = connectivityStateHolder.bluetoothName
+    /** Battery (0–100) of the connected Bluetooth device, or null; drawn as the Bluetooth button's outline. */
+    val bluetoothBattery: StateFlow<Int?> = connectivityStateHolder.activeBluetoothBattery
+
+    init {
+        // While a Bluetooth device is connected, check its battery straight away and then every
+        // 60 s (a new device restarts the cycle; none clears it).
+        viewModelScope.launch {
+            bluetoothName.collectLatest { name ->
+                if (name == null) {
+                    connectivityStateHolder.refreshActiveBluetoothBattery()
+                    return@collectLatest
+                }
+                while (true) {
+                    try {
+                        withContext(Dispatchers.IO) { connectivityStateHolder.refreshActiveBluetoothBattery() }
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (_: Exception) { }
+                    delay(60_000L)
+                }
+            }
+        }
+    }
     val bluetoothAudioDeviceStates: StateFlow<List<BluetoothAudioDeviceState>> = connectivityStateHolder.bluetoothAudioDeviceStates
     val bluetoothAudioDevices: StateFlow<List<String>> = connectivityStateHolder.bluetoothAudioDevices
 
@@ -2273,8 +2306,8 @@ class PlayerViewModel @Inject constructor(
             getUiState = { _playerUiState.value },
             updateUiState = { mutation -> _playerUiState.update(mutation) }
         )
-        // During a mix, taking a song out of the queue says it doesn't fit the vibe: the mix
-        // steers away from similar songs (a soft, session-only signal; undo clears it).
+        // Taking a song out of the queue says it doesn't fit the vibe: similar-feeling songs
+        // drop in the mix and in friends-in-the-room picks (a soft signal; undo clears it).
         _playerUiState.value.lastRemovedQueueSong?.takeIf { it.id == songId }
             ?.let(continuousMixRuntime::noteRemovedFromQueue)
     }
@@ -2408,7 +2441,9 @@ class PlayerViewModel @Inject constructor(
 
     fun triggerArtistNavigationFromPlayer(artistId: Long, artistName: String? = null) {
         val songForArtist = playbackStateHolder.stablePlayerState.value.currentSong
-        if (songForArtist != null && !songForArtist.isLocal) {
+        // Catalogue songs (Spotify / Apple Music, e.g. friends' playlists) look local until matched
+        // to audio but have no library row either: a non-numeric id means no library artist.
+        if (songForArtist != null && (!songForArtist.isLocal || songForArtist.id.toLongOrNull() == null)) {
             // Online / downloaded songs have no library artist (their id is just a name hash), so
             // open the artist profile by name instead of dropping the tap.
             val name = artistName?.takeIf { it.isNotBlank() }
@@ -2550,11 +2585,15 @@ class PlayerViewModel @Inject constructor(
         val currentSong = playbackStateHolder.stablePlayerState.value.currentSong ?: return
         viewModelScope.launch {
             val favoriteSongId = resolveFavoriteSongId(currentSong) ?: return@launch
-            val currentlyFavorite = favoriteSongIds.value.contains(favoriteSongId)
+            // Read the table, not favoriteSongIds: that flow is only live while something collects
+            // it, so a like from the player right after opening it could read a stale empty set.
+            val currentlyFavorite = musicRepository.getFavoriteSongIdsOnce().contains(favoriteSongId)
             val newFavState = !currentlyFavorite
-            if (newFavState && (currentSong.id.startsWith("yt_") || currentSong.youtubeId != null || currentSong.contentUriString.startsWith("youtube://") || !currentSong.isLocal)) {
+            if (newFavState && currentSong.needsCloudRowForLike()) {
                 musicRepository.saveCloudSong(currentSong)
             }
+            // Liking a song deleted from Your Music brings it back there.
+            if (newFavState) songRemovalStateHolder.restoreToYourMusic(currentSong)
             setFavoriteStatusEverywhere(favoriteSongId, newFavState)
         }
     }
@@ -2570,9 +2609,10 @@ class PlayerViewModel @Inject constructor(
             val currentlyFavorite = musicRepository.getFavoriteSongIdsOnce().contains(favoriteSongId)
             
             val targetFavoriteState = if (removing) false else !currentlyFavorite
-            if (targetFavoriteState && (song.id.startsWith("yt_") || song.youtubeId != null || song.contentUriString.startsWith("youtube://") || !song.isLocal)) {
+            if (targetFavoriteState && song.needsCloudRowForLike()) {
                 musicRepository.saveCloudSong(song)
             }
+            if (targetFavoriteState) songRemovalStateHolder.restoreToYourMusic(song)
             setFavoriteStatusEverywhere(favoriteSongId, targetFavoriteState)
         }
     }
@@ -2584,6 +2624,14 @@ class PlayerViewModel @Inject constructor(
         }
 
         if (song.id.startsWith("yt_") || song.youtubeId != null || song.contentUriString.startsWith("youtube://") || !song.isLocal) {
+            return song.id
+        }
+
+        // Catalog songs (Spotify / Apple Music / Deezer — e.g. a friend's song, followed or queued)
+        // look "local" until they're matched to YouTube audio, because their path isn't http.
+        // They have no MediaStore row to resolve, so their own id is the favourite id. Without
+        // this, liking one before its audio match finished silently did nothing.
+        if (song.isCatalogSong()) {
             return song.id
         }
 
@@ -2614,6 +2662,15 @@ class PlayerViewModel @Inject constructor(
 
         return null
     }
+
+    private fun Song.isCatalogSong(): Boolean =
+        com.theveloper.pixelplay.data.accounts.CatalogTracks.isCatalogUri(contentUriString) ||
+            com.theveloper.pixelplay.data.accounts.CatalogTracks.isCatalogUri(path) ||
+            id.startsWith("spotify_") || id.startsWith("applemusic_") || id.startsWith("deezer_")
+
+    /** Online / catalog songs need a cloud_songs row so the liked list can show them. */
+    private fun Song.needsCloudRowForLike(): Boolean =
+        id.startsWith("yt_") || youtubeId != null || contentUriString.startsWith("youtube://") || !isLocal || isCatalogSong()
 
     private fun parseMediaStoreAudioId(uriString: String): Long? {
         val normalizedUri = uriString.substringBefore('?').substringBefore('#')
@@ -3132,8 +3189,8 @@ class PlayerViewModel @Inject constructor(
                         // Normal Mix from nothing: planned by the mix engine, seeded by the top of
                         // Your Mix, so it learns and sequences like the rest of the mix.
                         flavor == com.theveloper.pixelplay.data.MixFlavor.NORMAL ->
-                            dailyMixStateHolder.nextMixBatch(flavor, seeds.take(6), emptySet(), limit = 24)
-                                .ifEmpty { seeds.filterNot(dailyMixStateHolder::isDisliked).take(24) }
+                            dailyMixStateHolder.nextMixBatch(flavor, seeds.take(6), emptySet(), limit = 12)
+                                .ifEmpty { seeds.filterNot(dailyMixStateHolder::isDisliked).take(12) }
                         else -> dailyMixStateHolder.nextMixBatch(flavor, seeds.takeLast(6), seeds.map { com.theveloper.pixelplay.data.mixIdentity(it) }.toSet())
                     }
                     // Nothing in the library to start from: start from online songs instead.
@@ -3195,17 +3252,29 @@ class PlayerViewModel @Inject constructor(
             }
         }
     }
-    fun addSongToQueue(song: Song) {
+    /** [userPick] = the listener chose it (steers the mix's vibe); false for friend / follow additions. */
+    fun addSongToQueue(song: Song, userPick: Boolean = true) {
         playbackDispatchStateHolder.addSongToQueue(song)
+        if (userPick) continuousMixRuntime.noteQueuedByUser(song)
     }
 
-    fun addSongNextToQueue(song: Song) {
+    fun addSongNextToQueue(song: Song, userPick: Boolean = true) {
         playbackDispatchStateHolder.addSongNextToQueue(song)
+        if (userPick) continuousMixRuntime.noteQueuedByUser(song)
+    }
+
+    /**
+     * A friends-in-the-room song, lined up next. Tagged like a mix-button song, so it neither
+     * steers the mix (it isn't your pick) nor gets swapped out when the mix re-plans.
+     */
+    fun addFriendSongNext(song: Song) {
+        playbackDispatchStateHolder.addSongNextToQueue(song, markFilterPick = true)
     }
 
     /** Play Soon: after the current song and anything already added with Play next (max 3 ahead). */
     fun addSongSoon(song: Song) {
         playbackDispatchStateHolder.addSongSoon(song)
+        continuousMixRuntime.noteQueuedByUser(song)
     }
 
     // =====================================================
@@ -3267,6 +3336,14 @@ class PlayerViewModel @Inject constructor(
 
     fun deleteFromDevice(activity: Activity, song: Song, onResult: (Boolean) -> Unit = {}) {
         songRemovalStateHolder.deleteFromDevice(activity, song, onResult, songRemovalCallbacks())
+    }
+
+    /**
+     * Deletes a Your Music row and every copy behind it (file, download, streamed like), so it
+     * is gone from Your Music for good. See [SongRemovalStateHolder.deleteFromYourMusic].
+     */
+    fun deleteFromYourMusic(activity: Activity, song: Song, copies: List<Song>, onResult: (Boolean) -> Unit = {}) {
+        songRemovalStateHolder.deleteFromYourMusic(activity, song, copies, onResult, songRemovalCallbacks())
     }
 
     /** Called from the UI after the user approves or denies the MediaStore delete request. */
@@ -3582,6 +3659,10 @@ class PlayerViewModel @Inject constructor(
     }
 
     val searchError = searchStateHolder.searchError
+    val searchSongPaging = searchStateHolder.songPaging
+    fun loadMoreSearchSongs() = searchStateHolder.loadMoreSongs()
+    suspend fun resolveSearchPlaylist(playlist: com.theveloper.pixelplay.data.model.Playlist) = searchStateHolder.resolveSearchPlaylist(playlist)
+    fun isConnectedSearchPlaylist(playlistId: String) = searchStateHolder.isConnectedPlaylist(playlistId)
 
     fun updateSearchFilter(filterType: SearchFilterType) {
         searchStateHolder.updateSearchFilter(filterType)

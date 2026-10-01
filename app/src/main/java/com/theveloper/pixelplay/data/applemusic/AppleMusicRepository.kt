@@ -65,6 +65,44 @@ class AppleMusicRepository @Inject constructor(private val session: AppleMusicWe
         return getPlaylistTracks(favorites.id)
     }
 
+    /**
+     * Catalog song id for a track from another source: exact ISRC first, then a title + artist
+     * search checked with [com.theveloper.pixelplay.data.spotify.TrackMatching]. Null = no confident match.
+     */
+    suspend fun findCatalogSongId(title: String, artist: String, isrc: String?): String? {
+        val sf = session.storefront
+        if (!isrc.isNullOrBlank() && isrc.matches(Regex("[A-Za-z0-9]{8,15}"))) {
+            runCatching {
+                session.get("/v1/catalog/$sf/songs?filter[isrc]=${isrc.uppercase()}")
+                    .optJSONArray("data")?.optJSONObject(0)?.optString("id")?.ifBlank { null }
+            }.getOrNull()?.let { return it }
+        }
+        val term = java.net.URLEncoder.encode("$title $artist".trim(), "UTF-8")
+        val songs = session.get("/v1/catalog/$sf/search?types=songs&limit=10&term=$term")
+            .optJSONObject("results")?.optJSONObject("songs")?.optJSONArray("data") ?: return null
+        val sourceMods = com.theveloper.pixelplay.data.spotify.TrackMatching.modifiers(title)
+        for (i in 0 until songs.length()) {
+            val item = songs.optJSONObject(i) ?: continue
+            val a = item.optJSONObject("attributes") ?: continue
+            val name = a.optString("name")
+            if (!com.theveloper.pixelplay.data.spotify.TrackMatching.titlesMatch(title, name)) continue
+            if (!com.theveloper.pixelplay.data.spotify.TrackMatching.artistsOverlap(artist, a.optString("artistName"))) continue
+            if (com.theveloper.pixelplay.data.spotify.TrackMatching.modifiers(name) != sourceMods) continue
+            return item.optString("id").ifBlank { null }
+        }
+        return null
+    }
+
+    /** Adds catalog songs to one of your library playlists (`p.` ids, editable only). */
+    suspend fun addSongsToLibraryPlaylist(playlistId: String, catalogSongIds: List<String>) {
+        require(playlistId.matches(Regex("[A-Za-z0-9._-]+")))
+        if (catalogSongIds.isEmpty()) return
+        if (!playlistId.startsWith("p.")) throw AppleMusicException("Only playlists in your library can be edited.", 403)
+        val data = org.json.JSONArray()
+        catalogSongIds.distinct().forEach { data.put(JSONObject().put("id", it).put("type", "songs")) }
+        session.post("/v1/me/library/playlists/$playlistId/tracks", JSONObject().put("data", data))
+    }
+
     /** Follows Apple's `next` paths until the list ends (capped, to stay polite). */
     private suspend fun pages(first: String, maxPages: Int = 100): List<JSONObject> {
         val out = mutableListOf<JSONObject>()

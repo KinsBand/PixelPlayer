@@ -70,6 +70,9 @@ class PixelPlayApplication : Application(), ImageLoaderFactory, Configuration.Pr
     lateinit var streamCollectionRepository: dagger.Lazy<com.theveloper.pixelplay.data.library.StreamCollectionRepository>
 
     @Inject
+    lateinit var lyricsAudioSources: dagger.Lazy<com.theveloper.pixelplay.data.lyrics.autosync.LyricsAudioSources>
+
+    @Inject
     lateinit var downloadCoordinator: dagger.Lazy<com.theveloper.pixelplay.data.youtube.DownloadCoordinator>
 
     private val startupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -130,6 +133,8 @@ class PixelPlayApplication : Application(), ImageLoaderFactory, Configuration.Pr
         ProcessLifecycleOwner.get().lifecycle.addObserver(appLifecycleObserver)
         advancedPerformanceDiagnosticsController.get().start(startupScope)
         installHeapPressureTrimmers()
+        // Automatic lyrics timing: cheap to create; it only works when lyrics load.
+        com.theveloper.pixelplay.data.lyrics.autosync.LyricsAutoSync.install(this) { lyricsAudioSources.get() }
 
         runCatching {
             org.schabi.newpipe.extractor.NewPipe.init(newPipeDownloader.get())

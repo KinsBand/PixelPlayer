@@ -563,6 +563,16 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /** Automatic lyrics timing (measures each song's offset from its audio). On by default. */
+    val lyricsAutoSyncEnabled: StateFlow<Boolean> = userPreferencesRepository.lyricsAutoSyncEnabledFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
+    fun setLyricsAutoSyncEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setLyricsAutoSyncEnabled(enabled)
+        }
+    }
+
     fun setLyricsIntegrationEnabled(enabled: Boolean) {
         viewModelScope.launch {
             userPreferencesRepository.setLyricsIntegrationEnabled(enabled)

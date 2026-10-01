@@ -15,7 +15,7 @@ import kotlin.random.Random
  */
 internal object MixSequencePlanner {
     /** Planner generation + weight set; logged with every recommendation. */
-    val MODEL_VERSION = "session-vibe-beam-v5/" + MixWeights.DEFAULT.version
+    val MODEL_VERSION = "session-vibe-beam-v6/" + MixWeights.DEFAULT.version
     private const val POOL_LIMIT = 160
     private const val BEAM_WIDTH = 5
     private const val HORIZON = 3

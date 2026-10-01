@@ -27,7 +27,9 @@ import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 fun StandardScreenTopBar(
     title: String,
     onSettingsClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** Replaces the default big title when set (e.g. Search mirrors the typed query). */
+    titleContent: (@Composable () -> Unit)? = null
 ) {
     val headerContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
 
@@ -36,15 +38,19 @@ fun StandardScreenTopBar(
     ) {
         TopAppBar(
             title = {
-                Text(
-                    modifier = Modifier.padding(start = 8.dp),
-                    text = title,
-                    fontFamily = GoogleSansRounded,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontSize = 40.sp,
-                    letterSpacing = 1.sp
-                )
+                if (titleContent != null) {
+                    titleContent()
+                } else {
+                    Text(
+                        modifier = Modifier.padding(start = 8.dp),
+                        text = title,
+                        fontFamily = GoogleSansRounded,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 40.sp,
+                        letterSpacing = 1.sp
+                    )
+                }
             },
             actions = {
                 FilledIconButton(

@@ -498,6 +498,9 @@
     <string name="song_removal_batch_delete_partial_format">%1$d of %2$d files deleted</string>
     <string name="song_removal_delete_files_failed">Failed to delete files</string>
     <string name="song_removal_file_deleted">File deleted</string>
+    <string name="song_removal_deleted_from_your_music">Deleted from Your Music</string>
+    <string name="song_removal_your_music_title">Delete from Your Music?</string>
+    <string name="song_removal_your_music_message">\"%1$s\" by %2$s\n\nIts download and your like are removed everywhere, and it disappears from Your Music. Liking it again brings it back.</string>
     <string name="song_removal_delete_file_not_found">Can\'t delete the file or file not found</string>
     <string name="song_removal_deletion_cancelled">Deletion cancelled</string>
     <string name="song_removal_dialog_delete_song_title">Delete song?</string>

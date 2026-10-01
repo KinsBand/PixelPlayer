@@ -54,6 +54,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.animation.AnimatedVisibility
@@ -124,8 +125,12 @@ fun InstrumentsPerformanceView(
     accentColor: Color,
     modifier: Modifier = Modifier,
     onUserInteraction: () -> Boolean = { false },
+    /** Space kept clear at the top for the header that overlays the page (smaller in Lyrics + Tab). */
+    contentTopInset: Dp = 110.dp,
+    /** Space kept clear at the bottom for the controls deck. */
+    contentBottomInset: Dp = 160.dp,
 ) {
-    TabScoreView(controller, onBackgroundColor, accentColor, modifier, onUserInteraction)
+    TabScoreView(controller, onBackgroundColor, accentColor, modifier, onUserInteraction, contentTopInset, contentBottomInset)
 }
 
 /** The whole part as notation, wrapped to the screen (or the uploaded PDF). */
@@ -140,6 +145,8 @@ fun TabScoreView(
      * immersive-hidden controls back instead of jumping to a bar).
      */
     onUserInteraction: () -> Boolean = { false },
+    contentTopInset: Dp = 110.dp,
+    contentBottomInset: Dp = 160.dp,
 ) {
     // No default instrument yet: the instruments sheet opens by itself over this. Once it's
     // closed without a pick, this button brings it back.
@@ -160,13 +167,13 @@ fun TabScoreView(
     }
     val pdf = controller.pdfUri
     if (pdf != null) {
-        Box(modifier = modifier.fillMaxSize().padding(top = 110.dp)) {
+        Box(modifier = modifier.fillMaxSize().padding(top = contentTopInset)) {
             PdfViewerComponent(pdfUri = pdf, onBackgroundColor = onBackgroundColor)
         }
         return
     }
     when (val state = controller.state) {
-        TabUiState.Loading -> TabSkeleton(onBackgroundColor, modifier)
+        TabUiState.Loading -> TabSkeleton(onBackgroundColor, modifier, contentTopInset + 10.dp)
         is TabUiState.Failed -> Box(modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("🎸", fontSize = 40.sp)
@@ -181,7 +188,8 @@ fun TabScoreView(
                 }
             }
         }
-        is TabUiState.Ready -> TabScore(controller, state, onBackgroundColor, accentColor, modifier, onUserInteraction)
+        is TabUiState.Ready -> TabScore(controller, state, onBackgroundColor, accentColor, modifier, onUserInteraction,
+            contentTopInset, contentBottomInset)
     }
 }
 
@@ -193,7 +201,11 @@ private fun TabScore(
     accent: Color,
     modifier: Modifier,
     onUserInteraction: () -> Boolean,
+    contentTopInset: Dp,
+    contentBottomInset: Dp,
 ) {
+    // Where the followed line sits: a little below the top of the visible music.
+    val followAnchor = contentTopInset + 40.dp
     val density = LocalDensity.current
     val metrics = remember(density.density, density.fontScale) { ScoreMetrics(density.density, density.density * density.fontScale) }
     val colors = remember(onBg, accent) {
@@ -234,7 +246,7 @@ private fun TabScore(
         }
         // Starts a beat before the line ends (follows where the music will be), with a soft spring.
         LaunchedEffect(layout) {
-            val topPx = with(density) { 150.dp.toPx() }
+            val topPx = with(density) { followAnchor.toPx() }
             snapshotFlow { (controller.lookahead ?: controller.cursor)?.measure?.let { layout.placement[it]?.first } }
                 .distinctUntilChanged()
                 .collect { sys ->
@@ -249,7 +261,7 @@ private fun TabScore(
                                 spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow),
                             )
                         } else {
-                            listState.animateScrollToItem(sys, with(density) { -150.dp.roundToPx() })
+                            listState.animateScrollToItem(sys, with(density) { -followAnchor.roundToPx() })
                         }
                     }
                     autoScrolling = false
@@ -300,7 +312,7 @@ private fun TabScore(
 
         // ── Hold and drag across bars to set a loop ──
         val haptics = LocalHapticFeedback.current
-        val edgePx = with(density) { 150.dp.toPx() }
+        val edgePx = with(density) { followAnchor.toPx() }
         val viewportH = with(density) { maxHeight.toPx() }
         var dragAnchor by remember { mutableStateOf<Int?>(null) }
         var dragItem by remember { mutableStateOf(-1) }
@@ -384,7 +396,7 @@ private fun TabScore(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(top = 110.dp, bottom = 160.dp),
+            contentPadding = PaddingValues(top = contentTopInset, bottom = contentBottomInset),
         ) {
             items(layout.systems, key = { "s${it.index}-${it.sectionIndex}" }) { s ->
                 if (s.isCollapsed) {
@@ -630,7 +642,7 @@ internal fun tuningName(tuning: List<Int>): String? {
 }
 
 @Composable
-private fun TabSkeleton(onBg: Color, modifier: Modifier) {
+private fun TabSkeleton(onBg: Color, modifier: Modifier, topInset: Dp = 120.dp) {
     val pulse = rememberInfiniteTransition(label = "tab_skeleton")
     val alpha by pulse.animateFloat(
         initialValue = 0.04f,
@@ -639,7 +651,7 @@ private fun TabSkeleton(onBg: Color, modifier: Modifier) {
         label = "alpha",
     )
     Column(
-        modifier = modifier.fillMaxSize().padding(top = 120.dp, start = 16.dp, end = 16.dp),
+        modifier = modifier.fillMaxSize().padding(top = topInset, start = 16.dp, end = 16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         repeat(4) {

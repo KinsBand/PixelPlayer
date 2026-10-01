@@ -62,6 +62,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
@@ -304,9 +305,16 @@ fun PlaylistItems(
     val youtubePlaylists = remember(userPlaylists, showPinnedPlaylists) {
         if (showPinnedPlaylists) userPlaylists.filter { it.source.equals("YOUTUBE_MUSIC", true) } else emptyList()
     }
-    val localPlaylists = remember(userPlaylists, showPinnedPlaylists) {
-        if (showPinnedPlaylists) userPlaylists.filterNot { it.source.equals("SPOTIFY", true) || it.source.equals("YOUTUBE_MUSIC", true) }
-        else userPlaylists
+    // Friends' playlists pinned (liked) from the Friends screen sit with your own playlists,
+    // still showing the friend and platform.
+    val friendsViewModel: com.theveloper.pixelplay.presentation.viewmodel.FriendsViewModel = hiltViewModel()
+    val pinnedFriendIds by friendsViewModel.pinnedPlaylistIds.collectAsStateWithLifecycle()
+    val friendsById by friendsViewModel.friendsById.collectAsStateWithLifecycle()
+    val localPlaylists = remember(userPlaylists, showPinnedPlaylists, friendPlaylists, pinnedFriendIds) {
+        if (showPinnedPlaylists) {
+            userPlaylists.filterNot { it.source.equals("SPOTIFY", true) || it.source.equals("YOUTUBE_MUSIC", true) } +
+                friendPlaylists.filter { it.id in pinnedFriendIds }
+        } else userPlaylists
     }
     val playlistFastScrollLabelProvider = remember(localPlaylists, currentSortOption, pinnedCount) {
         { index: Int ->
@@ -339,27 +347,7 @@ fun PlaylistItems(
             contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + 30.dp)
         ) {
             if (showPinnedPlaylists) {
-                // Your Music first, then Spotify | YT Music, Friends, Practice, your own playlists.
-                item(key = "pinned_system_playlists", contentType = "pinned_playlists") {
-                    val likedIds by playerViewModel.favoriteSongIds.collectAsStateWithLifecycle()
-                    // The full merged liked list (local + Spotify / YT Music / Apple Music likes +
-                    // favourites playlists, duplicates removed), same as Home and Your Music.
-                    val likedSongsViewModel: LikedSongsViewModel = hiltViewModel()
-                    val likedCount by likedSongsViewModel.likedCount.collectAsStateWithLifecycle()
-                    val songCount by playerViewModel.songCountFlow.collectAsStateWithLifecycle()
-                    // Liked Songs + All Songs live together in the Your Music screen.
-                    PinnedSystemPlaylistItem(
-                        title = "Your Music",
-                        songCount = songCount,
-                        subtitle = "${formatSongCount(songCount)} · ${likedCount ?: likedIds.size} liked",
-                        iconRes = R.drawable.round_favorite_24,
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        enabled = !isSelectionMode,
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = { navController?.navigateSafely(Screen.YourMusic.route) }
-                    )
-                }
+                // Spotify | YT Music, Friends | Practice, then your own playlists (Your Music is in the top row).
                 item(key = "platform_cards", contentType = "platform_cards") {
                     PlatformPlaylistCards(
                         spotifyCount = spotifyPlaylists.size,
@@ -369,16 +357,15 @@ fun PlaylistItems(
                         }
                     )
                 }
-                item(key = "friends_dropdown", contentType = "friends_dropdown") {
-                    FriendsDropdownCard(navController = navController, playerViewModel = playerViewModel)
-                }
-                item(key = "practice_button", contentType = "practice_button") {
+                item(key = "friends_practice", contentType = "friends_practice") {
                     val context = LocalContext.current
                     val practiceStore = remember { PracticeStore.get(context) }
                     val practice by practiceStore.entries.collectAsStateWithLifecycle()
-                    PracticeButton(
-                        summary = practiceSummary(practice),
-                        onClick = { if (!isSelectionMode) navController?.navigateSafely(Screen.Practice.route) }
+                    FriendsPracticeTiles(
+                        navController = navController,
+                        practiceSummary = practiceSummary(practice),
+                        onOpenPractice = { navController?.navigateSafely(Screen.Practice.route) },
+                        enabled = !isSelectionMode
                     )
                 }
                 item(key = "your_playlists_header", contentType = "section_header") {
@@ -426,6 +413,7 @@ fun PlaylistItems(
                         -1
                     }
                 }
+                val pinnedFriend = playlist.friendId?.let { friendsById[it] }
                 PlaylistItem(
                     playlist = playlist,
                     playerViewModel = playerViewModel,
@@ -436,7 +424,10 @@ fun PlaylistItems(
                     isSelected = selectedPlaylistIds.contains(playlist.id),
                     selectionIndex = selectionIndex,
                     onLongPress = { onPlaylistLongPress(playlist) },
-                    onPlaylistSelectionToggle = { onPlaylistSelectionToggle(playlist) }
+                    onPlaylistSelectionToggle = { onPlaylistSelectionToggle(playlist) },
+                    friendName = if (playlist.friendId != null) pinnedFriend?.name ?: playlist.ownerName.ifBlank { "Friend" } else null,
+                    friendAvatarUrl = pinnedFriend?.avatarUrl,
+                    modifier = Modifier.animateItem()
                 )
             }
 
@@ -513,7 +504,7 @@ fun PlaylistItems(
     }
 }
 
-private const val PINNED_PLAYLIST_ITEM_COUNT = 1
+private const val PINNED_PLAYLIST_ITEM_COUNT = 0
 /** Spotify | YT Music buttons, Friends dropdown, Practice button, "Your playlists" header. */
 private const val HUB_ITEM_COUNT = 4
 
@@ -592,7 +583,11 @@ fun PlaylistItem(
     isSelected: Boolean = false,
     selectionIndex: Int = -1,
     onLongPress: () -> Unit = {},
-    onPlaylistSelectionToggle: () -> Unit = {}
+    onPlaylistSelectionToggle: () -> Unit = {},
+    /** Set for a friend's pinned playlist: shows "by {friend}" with their picture. */
+    friendName: String? = null,
+    friendAvatarUrl: String? = null,
+    modifier: Modifier = Modifier
 ) {
     val playlistPreviewSongIds = remember(playlist.songIds) {
         playlist.songIds.take(4)
@@ -637,7 +632,7 @@ fun PlaylistItem(
     )
 
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .scale(selectionScale)
             .then(
@@ -669,11 +664,23 @@ fun PlaylistItem(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            PlaylistCover(
-                playlist = playlist,
-                playlistSongs = playlistSongs ?: emptyList(),
-                size = 48.dp
-            )
+            val isThisPlaying = rememberIsPlaylistPlaying(playlist.id, playerViewModel)
+            val playerIsPlaying by playerViewModel.stablePlayerState
+                .map { it.isPlaying }
+                .collectAsStateWithLifecycle(initialValue = false)
+            Box {
+                PlaylistCover(
+                    playlist = playlist,
+                    playlistSongs = playlistSongs ?: emptyList(),
+                    size = 48.dp
+                )
+                PlaylistPlayingBadge(
+                    visible = isThisPlaying,
+                    isPlaying = playerIsPlaying,
+                    modifier = Modifier.align(Alignment.BottomEnd).offset(x = 4.dp, y = 4.dp),
+                    size = 20.dp
+                )
+            }
 
             Spacer(modifier = Modifier.width(16.dp))
 
@@ -686,6 +693,7 @@ fun PlaylistItem(
                         text = playlist.name,
                         style = MaterialTheme.typography.titleMedium.copy(fontFamily = GoogleSansRounded),
                         fontWeight = FontWeight.Bold,
+                        color = if (isThisPlaying) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Unspecified,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
@@ -700,11 +708,46 @@ fun PlaylistItem(
                         )
                     }
                 }
-                Text(
-                    text = formatSongCount(playlist.songIds.size),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                if (friendName != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (friendAvatarUrl != null) {
+                            SmartImage(
+                                model = friendAvatarUrl,
+                                contentDescription = "$friendName's playlist",
+                                modifier = Modifier.size(16.dp),
+                                shape = CircleShape
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.secondaryContainer),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = friendName.take(1).uppercase(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "by $friendName · ${formatSongCount(playlist.songIds.size)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                } else {
+                    Text(
+                        text = formatSongCount(playlist.songIds.size),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             if (playlist.source.equals("SPOTIFY", ignoreCase = true) || playlist.source.equals("YOUTUBE_MUSIC", ignoreCase = true)) {

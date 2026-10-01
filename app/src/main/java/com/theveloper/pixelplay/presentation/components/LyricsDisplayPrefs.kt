@@ -225,6 +225,8 @@ data class LyricsDisplayPrefs(
     val immersiveEnabled: Boolean = false,
     /** Auto-hide delay before immersive kicks in (lyrics menu → Auto-hide delay). */
     val immersiveTimeoutMs: Long = DEFAULT_IMMERSIVE_TIMEOUT_MS,
+    /** Settings → Lyrics → Animation style. Clean when nothing has been chosen. */
+    val animationStyle: com.theveloper.pixelplay.presentation.components.lyrics.LyricsAnimationStyle = com.theveloper.pixelplay.presentation.components.lyrics.LyricsAnimationStyle.DEFAULT,
 ) {
     /** Same gate the lyrics sheet uses: blur only exists as part of animated lyrics. */
     val lineBlurActive: Boolean
@@ -255,6 +257,7 @@ object LyricsDisplayPrefKeys {
     // (UserPreferencesRepository.PreferencesKeys.Lyrics) — same keys, same defaults.
     val IMMERSIVE_ENABLED = booleanPreferencesKey("immersive_lyrics_enabled")
     val IMMERSIVE_TIMEOUT = longPreferencesKey("immersive_lyrics_timeout")
+    val ANIMATION_STYLE = stringPreferencesKey("lyrics_animation_style_v1")
 }
 
 const val DEFAULT_IMMERSIVE_TIMEOUT_MS = 4000L
@@ -299,6 +302,7 @@ fun lyricsDisplayPrefsFlow(dataStore: DataStore<Preferences>): Flow<LyricsDispla
                 showSongStructure = p[LyricsDisplayPrefKeys.SHOW_SONG_STRUCTURE] ?: true,
                 immersiveEnabled = p[LyricsDisplayPrefKeys.IMMERSIVE_ENABLED] ?: false,
                 immersiveTimeoutMs = p[LyricsDisplayPrefKeys.IMMERSIVE_TIMEOUT] ?: DEFAULT_IMMERSIVE_TIMEOUT_MS,
+                animationStyle = com.theveloper.pixelplay.presentation.components.lyrics.LyricsAnimationStyle.fromKey(p[LyricsDisplayPrefKeys.ANIMATION_STYLE]),
             )
         }
         .distinctUntilChanged()

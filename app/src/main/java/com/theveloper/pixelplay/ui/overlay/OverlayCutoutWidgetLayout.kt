@@ -440,14 +440,17 @@ private fun IslandSurface(
                 // Black while it is the pill (it is the camera), the song's surface once open.
                 // Fully opaque, so the status bar underneath is hidden while the island is open.
                 drawRect(lerp(pillColor, containerColor, c))
-                if (c > 0f) {
-                    // Hairline only along the bottom edge, where the island floats over the app.
+                val outline = metrics.outlineAlpha(height())
+                if (c > 0f && outline > 0f) {
+                    // Pill outline along the bottom edge: around the lyric in state 1 and the
+                    // controls in states 3–4; none in state 2.
                     val bottom = lerp(metrics.pillSize / 2, metrics.bottomCornerRadius, c).toPx()
+                    val bandHeight = lerp(metrics.pillSize, metrics.outlineHeight, c).toPx()
                     val stroke = 1.dp.toPx()
                     drawRoundRect(
-                        color = outlineColor.copy(alpha = 0.5f * c),
-                        topLeft = androidx.compose.ui.geometry.Offset(0f, (size.height - bottom * 2).coerceAtLeast(0f)),
-                        size = androidx.compose.ui.geometry.Size(size.width, bottom * 2),
+                        color = outlineColor.copy(alpha = 0.5f * outline),
+                        topLeft = androidx.compose.ui.geometry.Offset(0f, (size.height - bandHeight).coerceAtLeast(0f)),
+                        size = androidx.compose.ui.geometry.Size(size.width, bandHeight),
                         cornerRadius = CornerRadius(bottom, bottom),
                         style = Stroke(width = stroke)
                     )
@@ -718,6 +721,7 @@ private fun IslandContent(
                         lyricColors = lyricColors,
                         positionProvider = positionProvider,
                         immersive = immersive,
+                        outlineHeight = metrics.outlineHeight,
                         onSeekTo = seekToLine,
                         onPlayPauseToggle = onPlayPauseToggle,
                         onSkipNext = onSkipNext,
@@ -727,26 +731,8 @@ private fun IslandContent(
             }
         }
 
-        // Tap: open the app's lyrics screen. Drag anywhere on the island resizes it.
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(metrics.handleHeight)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onHandleClick
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Box(
-                modifier = Modifier
-                    .width(36.dp)
-                    .height(4.dp)
-                    .clip(CircleShape)
-                    .background(scheme.onPrimaryContainer.copy(alpha = 0.4f))
-            )
-        }
+        // No drag-handle bar: dragging anywhere on the island still resizes it, and the handle's
+        // height goes to the content so the controls sit in the bottom pill outline.
     }
 }
 
@@ -880,6 +866,7 @@ private fun LevelContent(
     lyricColors: CoverLyricsColors,
     positionProvider: () -> Long,
     immersive: Boolean,
+    outlineHeight: Dp,
     onSeekTo: (Long) -> Unit,
     onPlayPauseToggle: () -> Unit,
     onSkipNext: () -> Unit,
@@ -900,13 +887,19 @@ private fun LevelContent(
     val onLineClick: (SyncedLine) -> Unit = { onSeekTo(it.time.toLong()) }
     val showControls = level == CutoutExpansionLevel.LEVEL_3_SIX || level == CutoutExpansionLevel.LEVEL_4_FULL
 
+    val singleLine = level == CutoutExpansionLevel.LEVEL_1_SINGLE
     Column(modifier = Modifier.fillMaxSize()) {
+        // State 1: the line sits in the middle of the bottom pill outline.
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-            contentAlignment = Alignment.Center
+            contentAlignment = if (singleLine) Alignment.BottomCenter else Alignment.Center
         ) {
+          Box(
+            modifier = if (singleLine) Modifier.fillMaxWidth().height(outlineHeight) else Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+          ) {
             val lines = state.syncedLines
             if (lines.isEmpty()) {
                 Text(
@@ -978,15 +971,18 @@ private fun LevelContent(
                     }
                 }
             }
+          }
         }
 
-        // Controls auto-hide in immersive, like the sheet's controls.
+        // Controls auto-hide in immersive, like the sheet's controls. They fill the bottom
+        // pill outline (states 3 and 4).
         AnimatedVisibility(
             visible = showControls && !immersive,
             enter = expandVertically() + fadeIn(),
             exit = shrinkVertically() + fadeOut()
         ) {
             IslandControls(
+                height = outlineHeight,
                 isPlaying = state.isPlaying,
                 onPlayPauseToggle = onPlayPauseToggle,
                 onSkipNext = onSkipNext,
@@ -999,6 +995,7 @@ private fun LevelContent(
 /** Same shape language as the app's mini player: tonal skip buttons around a primary play. */
 @Composable
 private fun IslandControls(
+    height: Dp,
     isPlaying: Boolean,
     onPlayPauseToggle: () -> Unit,
     onSkipNext: () -> Unit,
@@ -1008,7 +1005,7 @@ private fun IslandControls(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(IslandMetrics.CONTROLS_HEIGHT),
+            .height(height),
         horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically
     ) {

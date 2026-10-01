@@ -1089,7 +1089,14 @@ fun LibraryScreen(
                                     onNavigateBack = { playerViewModel.navigateBackFolder() },
                                     isShuffleEnabled = isShuffleEnabled,
                                     searchQuery = librarySearchQuery,
-                                    onSearchQueryChange = { libraryViewModel.setLibrarySearchQuery(it) }
+                                    onSearchQueryChange = { libraryViewModel.setLibrarySearchQuery(it) },
+                                    onYourMusicClick = { navController.navigateSafely(Screen.YourMusic.route) },
+                                    yourMusicDescription = run {
+                                        val likedSongsVm: com.theveloper.pixelplay.presentation.viewmodel.LikedSongsViewModel = hiltViewModel()
+                                        val liked by likedSongsVm.likedCount.collectAsStateWithLifecycle()
+                                        val songs by playerViewModel.songCountFlow.collectAsStateWithLifecycle()
+                                        "Your Music, $songs songs, ${liked ?: 0} liked"
+                                    }
                                 )
                             }
                         }
@@ -1721,7 +1728,7 @@ fun LibraryScreen(
                 },
                 onNavigateToArtistById = { artistId ->
                     navController.navigateSafelyReplacing(
-                        route = Screen.ArtistDetail.createRoute(artistId),
+                        route = Screen.ArtistDetail.createRouteForSongArtist(currentSong, artistId),
                         patternToPop = Screen.ArtistDetail.route
                     )
                     showSongInfoBottomSheet = false

@@ -27,6 +27,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
@@ -80,6 +81,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -1067,6 +1069,9 @@ fun TabOptionsSection(
     contentColor: Color,
     accentColor: Color,
     itemBackgroundColor: Color,
+    /** "Lyrics + Tab" mode state; null hides the option. */
+    lyricsWithTab: Boolean? = null,
+    onLyricsWithTabChange: (Boolean) -> Unit = {},
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
         Text(
@@ -1083,6 +1088,38 @@ fun TabOptionsSection(
             ) { controller.panelExpanded = !controller.panelExpanded }
             if (controller.pdfUri != null) {
                 OptionPill("Back to tab", contentColor, itemBackgroundColor, Modifier.weight(1f)) { controller.pdfUri = null }
+            }
+        }
+        if (lyricsWithTab != null) {
+            // Live lyrics above the tab, each taking half of the page.
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(itemBackgroundColor)
+                    .toggleable(
+                        value = lyricsWithTab,
+                        role = androidx.compose.ui.semantics.Role.Switch,
+                        onValueChange = onLyricsWithTabChange,
+                    )
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Lyrics + Tab", color = contentColor, style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "Live lyrics above the tab, half the page each",
+                        color = contentColor.copy(alpha = 0.6f),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Switch(
+                    checked = lyricsWithTab,
+                    onCheckedChange = null,
+                    colors = SwitchDefaults.colors(checkedTrackColor = accentColor),
+                )
             }
         }
         InstrumentSoundsOption(controller, contentColor, accentColor, itemBackgroundColor)

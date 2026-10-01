@@ -120,10 +120,19 @@ class FriendActivityRepository @Inject constructor(
             if (!file.baseFile.exists()) return@withLock
             try {
                 val stored = file.openRead().bufferedReader().use { gson.fromJson(it, FriendActivityFile::class.java) }
-                _profiles.value = stored.profiles.orEmpty()
-                _live.value = stored.live.orEmpty()
-                _history.value = prune(stored.history.orEmpty(), System.currentTimeMillis())
-            } catch (_: Exception) { /* unreadable cache: start fresh, it's re-fetchable */ }
+                // Rebuilt field by field, so every value is really the type it claims to be. If a
+                // release build dropped the generic types, Gson hands back LinkedTreeMaps; they
+                // must fail here (and be discarded) rather than crash whoever reads them later.
+                val profiles = stored.profiles.orEmpty().mapValues { (_, p) -> checkedProfile(p) }
+                val live = stored.live.orEmpty().mapValues { (_, l) -> checkedLive(l) }
+                val history = stored.history.orEmpty().mapValues { (_, list) -> list.map(::checkedTrack) }
+                _profiles.value = profiles
+                _live.value = live
+                _history.value = prune(history, System.currentTimeMillis())
+            } catch (_: Throwable) {
+                // Unreadable cache: start fresh, it's re-fetchable.
+                _profiles.value = emptyMap(); _live.value = emptyMap(); _history.value = emptyMap()
+            }
         }
     }
 
@@ -181,6 +190,26 @@ class FriendActivityRepository @Inject constructor(
             save(FriendActivityFile(profiles, live, pruned))
             _profiles.value = profiles; _live.value = live; _history.value = pruned
         }
+    }
+
+    private fun checkedTrack(value: Any?): FriendTrack {
+        val t = value as FriendTrack
+        return FriendTrack(t.title.orEmpty(), t.artist.orEmpty(), t.coverUrl, t.trackUri, t.durationMs, t.playedAt)
+    }
+
+    private fun checkedPlaylist(value: Any?): FriendPublicPlaylist {
+        val p = value as FriendPublicPlaylist
+        return FriendPublicPlaylist(p.remoteId.orEmpty(), p.source.orEmpty(), p.title.orEmpty(), p.coverUrl, p.trackCount, p.durationMs)
+    }
+
+    private fun checkedProfile(value: Any?): FriendProfile {
+        val p = value as FriendProfile
+        return FriendProfile(p.displayName.orEmpty(), p.avatarUrl, p.activityHidden, p.publicPlaylists?.map(::checkedPlaylist))
+    }
+
+    private fun checkedLive(value: Any?): FriendLive {
+        val l = value as FriendLive
+        return FriendLive(l.track?.let(::checkedTrack), l.isPlaying, l.seenAt)
     }
 
     private fun prune(history: Map<String, List<FriendTrack>>, now: Long) =

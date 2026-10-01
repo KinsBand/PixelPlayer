@@ -36,11 +36,26 @@ object CollectionKeys {
     private val nonAlnum = Regex("""[^\p{L}\p{N}]+""")
     private val marks = Regex("""\p{Mn}+""")
 
-    /** Lowercase, accents folded, leading "the " dropped, punctuation collapsed. */
+    /**
+     * Artist name without channel decorations: "Drake - Topic", "DrakeVEVO", "Drake (Official)"
+     * -> "Drake". Used for display and grouping so one artist never shows up several times.
+     */
+    fun cleanArtistName(name: String?): String {
+        val raw = name.orEmpty().trim()
+        if (raw.isEmpty()) return raw
+        return runCatching {
+            com.theveloper.pixelplay.data.repository.LyricsLookupMetadata.cleanArtist(raw)
+        }.getOrDefault(raw).ifBlank { raw }
+    }
+
+    /** Lowercase, accents folded, channel suffixes and leading "the " dropped, punctuation collapsed. */
     fun normalizeArtist(name: String?): String {
-        val folded = fold(name)
+        val folded = fold(cleanArtistName(name))
         return folded.removePrefix("the ").trim()
     }
+
+    /** Title of the album that holds an artist's downloads with no album information. */
+    const val SINGLES_ALBUM_TITLE = "Singles"
 
     /** Like [normalizeArtist] but also drops edition qualifiers ("(Deluxe)", "- Single"…). */
     fun normalizeAlbum(title: String?): String {

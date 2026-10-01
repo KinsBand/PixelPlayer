@@ -1055,6 +1055,50 @@ class PlaylistViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Ids of your Spotify / YouTube Music / Apple Music playlists that songs can be added to,
+     * for the add-to-playlist sheet's service sections.
+     */
+    val addableServicePlaylistIds: StateFlow<Set<String>> = connectedLibraryRepository.snapshot
+        .map { snapshot -> connectedLibraryRepository.addablePlaylists(snapshot).map { it.id }.toSet() }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptySet())
+
+    /**
+     * Adds songs to Spotify / Apple Music playlists (matched on each service) and reports one
+     * short message per playlist through [onMessage] (on the main thread).
+     */
+    fun addSongsToServicePlaylists(songs: List<Song>, playlistIds: List<String>, onMessage: (String) -> Unit) {
+        if (songs.isEmpty() || playlistIds.isEmpty()) return
+        viewModelScope.launch {
+            for (playlistId in playlistIds) {
+                val playlist = connectedLibraryRepository.snapshot.value.playlists.find { it.id == playlistId } ?: continue
+                val service = when (playlist.source) {
+                    "SPOTIFY" -> "Spotify"
+                    "APPLE_MUSIC" -> "Apple Music"
+                    else -> "YouTube Music"
+                }
+                val message = try {
+                    val result = connectedLibraryRepository.addSongsToService(playlistId, songs)
+                    when {
+                        result.added > 0 && result.notFound.isEmpty() -> "Added to ${playlist.title} on $service"
+                        result.added > 0 -> "Added to ${playlist.title} on $service. ${result.notFound.size} not found on $service"
+                        result.alreadyThere > 0 && result.notFound.isEmpty() -> "Already in ${playlist.title}"
+                        result.notFound.size == 1 -> "\u201C${result.notFound.first().title}\u201D isn't on $service"
+                        result.notFound.isNotEmpty() -> "${result.notFound.size} songs aren't on $service"
+                        else -> "Nothing to add to ${playlist.title}"
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.e("PlaylistVM", "Adding to $playlistId failed", e)
+                    "Couldn't add to ${playlist.title}: ${e.message ?: "try again"}"
+                }
+                onMessage(message)
+            }
+        }
+    }
+
     fun addSongsToPlaylists(songIds: List<String>, playlistIds: List<String>) {
         viewModelScope.launch {
             playlistIds.forEach { playlistId ->

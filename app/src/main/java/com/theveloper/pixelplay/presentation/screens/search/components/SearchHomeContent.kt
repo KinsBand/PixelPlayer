@@ -42,6 +42,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.theveloper.pixelplay.data.model.SearchHistoryItem
+import com.theveloper.pixelplay.data.recognition.RecentlyHeardEntry
+import com.theveloper.pixelplay.presentation.components.SmartImage
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.GraphicEq
 
 /**
  * What Search shows before you type (genres moved to Library › Genres):
@@ -58,7 +64,10 @@ fun SearchHomeContent(
     onNewReleases: () -> Unit,
     onCharts: () -> Unit,
     onGenresAndMoods: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    recentlyHeard: RecentlyHeardEntry? = null,
+    recentlyHeardTime: String = "",
+    onRecentlyHeard: () -> Unit = {}
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -103,6 +112,13 @@ fun SearchHomeContent(
                 QuickCard("Your charts", "Top songs & artists", Icons.AutoMirrored.Rounded.TrendingUp, Modifier.weight(1f), onCharts)
                 QuickCard("Genres & moods", "In your Library", Icons.Rounded.Category, Modifier.weight(1f), onGenresAndMoods)
             }
+        }
+        item(key = "recently_heard") {
+            RecentlyHeardCard(
+                latest = recentlyHeard,
+                time = recentlyHeardTime,
+                onClick = onRecentlyHeard
+            )
         }
         if (suggestions.isNotEmpty()) {
             item(key = "suggest_title") {
@@ -157,6 +173,79 @@ private fun QuickCard(title: String, subtitle: String, icon: ImageVector, modifi
             Spacer(Modifier.height(10.dp))
             Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 2)
             Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+        }
+    }
+}
+
+/** Full-width "Recently heard" button: the last song Now Playing recognised. */
+@Composable
+private fun RecentlyHeardCard(latest: RecentlyHeardEntry?, time: String, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClickLabel = "Open recently heard", onClick = onClick),
+        shape = RoundedCornerShape(24.dp),
+        color = colors.surfaceContainerHigh
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(colors.primaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                if (latest?.artUri != null) {
+                    SmartImage(
+                        model = latest.artUri,
+                        contentDescription = latest.title,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Icon(
+                        Icons.Rounded.GraphicEq,
+                        contentDescription = null,
+                        tint = colors.onPrimaryContainer
+                    )
+                }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Recently heard",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.primary
+                )
+                Text(
+                    text = latest?.title ?: "Nothing heard yet",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = if (latest != null) {
+                        listOf(latest.artist, time).filter { it.isNotBlank() }.joinToString(" \u2022 ")
+                    } else {
+                        "Songs Now Playing recognises show up here"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Icon(
+                Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                contentDescription = null,
+                tint = colors.onSurfaceVariant
+            )
         }
     }
 }

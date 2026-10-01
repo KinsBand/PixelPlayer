@@ -483,6 +483,18 @@ constructor(
         val artistSplitCache = mutableMapOf<String, List<String>>()
         val correctedSongs = ArrayList<SongEntity>(songs.size)
 
+        // Name variants ("Drake", "drake", "Drake - Topic", "DrakeVEVO") share one artist.
+        val artistIdByKey = HashMap<String, Long>()
+        artistNameToId.entries.sortedBy { it.value }.forEach { (name, id) ->
+            val key = com.theveloper.pixelplay.data.library.CollectionKeys.normalizeArtist(name)
+            if (key.isNotEmpty()) artistIdByKey.putIfAbsent(key, id)
+        }
+        // Existing twins from older syncs point at the surviving id from now on.
+        artistNameToId.keys.toList().forEach { name ->
+            val key = com.theveloper.pixelplay.data.library.CollectionKeys.normalizeArtist(name)
+            artistIdByKey[key]?.takeIf { key.isNotEmpty() }?.let { artistNameToId[name] = it }
+        }
+
         existingAlbums
             .sortedBy { it.id }
             .forEach { album ->
@@ -510,7 +522,9 @@ constructor(
             allArtistsForSong.forEach { artistName ->
                 val normalizedName = artistName.trim()
                 if (normalizedName.isNotEmpty() && !artistNameToId.containsKey(normalizedName)) {
-                     val id = nextArtistId.getAndIncrement()
+                     val key = com.theveloper.pixelplay.data.library.CollectionKeys.normalizeArtist(normalizedName)
+                     val id = artistIdByKey[key]?.takeIf { key.isNotEmpty() }
+                         ?: nextArtistId.getAndIncrement().also { if (key.isNotEmpty()) artistIdByKey[key] = it }
                      artistNameToId[normalizedName] = id
                 }
             }
@@ -520,10 +534,11 @@ constructor(
                             ?: songArtistNameTrimmed
             val primaryArtistId = artistNameToId[primaryArtistName] ?: song.artistId
 
+            val refsForSong = HashSet<Long>()
             allArtistsForSong.forEachIndexed { index, artistName ->
                 val normalizedName = artistName.trim()
                 val artistId = artistNameToId[normalizedName]
-                if (artistId != null) {
+                if (artistId != null && refsForSong.add(artistId)) {
                     val isPrimary = (index == 0) // First artist is primary
                     allCrossRefs.add(
                             SongArtistCrossRef(
@@ -558,7 +573,10 @@ constructor(
         }
 
         // Build Entities
-        val artistEntities = artistNameToId.map { (name, id) ->
+        // One row per artist id; the display name drops channel decorations ("X - Topic").
+        val artistEntities = artistNameToId.entries.groupBy({ it.value }, { it.key }).map { (id, names) ->
+            val name = names.firstOrNull { com.theveloper.pixelplay.data.library.CollectionKeys.cleanArtistName(it) == it.trim() }
+                ?: com.theveloper.pixelplay.data.library.CollectionKeys.cleanArtistName(names.first()).ifBlank { names.first() }
             val count = artistTrackCounts[id] ?: 0
             val metadata = existingArtistMetadata[id]
             ArtistEntity(

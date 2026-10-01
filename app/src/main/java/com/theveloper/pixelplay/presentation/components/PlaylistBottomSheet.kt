@@ -1,6 +1,25 @@
 package com.theveloper.pixelplay.presentation.components
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import com.theveloper.pixelplay.data.model.Playlist
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,14 +63,13 @@ import com.theveloper.pixelplay.R
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.media3.common.util.UnstableApi
 import com.theveloper.pixelplay.data.model.Song
-import com.theveloper.pixelplay.presentation.components.subcomps.LibraryActionRow
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.PlaylistUiState
 import com.theveloper.pixelplay.presentation.viewmodel.PlaylistViewModel
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 
 @androidx.annotation.OptIn(UnstableApi::class)
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun PlaylistBottomSheet(
     playlistUiState: PlaylistUiState,
@@ -67,7 +85,6 @@ fun PlaylistBottomSheet(
     val songAddedToPlaylistsMessage = stringResource(R.string.playlist_sheet_song_added_to_playlists)
     val commonSavedMessage = stringResource(R.string.common_saved)
     val saveActionText = stringResource(R.string.common_save)
-    val internalStorageText = stringResource(R.string.playlist_sheet_internal_storage)
 
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
 
@@ -77,12 +94,20 @@ fun PlaylistBottomSheet(
         confirmValueChange = { true }
     )
 
+    val sheetScope = rememberCoroutineScope()
     var searchQuery by remember { mutableStateOf("") }
     val filteredPlaylists = remember(searchQuery, playlistUiState.playlists) {
         if (searchQuery.isBlank()) playlistUiState.playlists
         else playlistUiState.playlists.filter { it.name.contains(searchQuery, true) }
     }
     val hasActiveAiProviderApiKey by playerViewModel.hasActiveAiProviderApiKey.collectAsStateWithLifecycle()
+    val addableServiceIds by playlistViewModel.addableServicePlaylistIds.collectAsStateWithLifecycle()
+    val reducedMotion = com.theveloper.pixelplay.ui.theme.rememberSystemReducedMotion()
+    // Spotify / Apple Music playlists are add-only (matched on the service), never pre-checked.
+    val addOnlyServiceIds = remember(playlistUiState.playlists) {
+        playlistUiState.playlists.filter { it.source == "SPOTIFY" || it.source == "APPLE_MUSIC" }
+            .mapTo(HashSet()) { it.id }
+    }
 
     val selectedPlaylists = remember {
         mutableStateMapOf<String, Boolean>().apply {
@@ -90,7 +115,7 @@ fun PlaylistBottomSheet(
                 // Single song: pre-select playlists containing it
                 val songId = songs.first().id
                 filteredPlaylists.forEach {
-                    put(it.id, it.songIds.contains(songId))
+                    put(it.id, it.id !in addOnlyServiceIds && it.songIds.contains(songId))
                 }
             } else {
                 // Multiple songs: start empty (additive only)
@@ -163,43 +188,80 @@ fun PlaylistBottomSheet(
 
 
 
-                LibraryActionRow(
-                    modifier = Modifier.padding(
-                        top = 10.dp,
-                        start = 10.dp,
-                        end = 10.dp
-                    ),
-                    //currentPage = pagerState.currentPage,
-                    onMainActionClick = {
-                        showCreatePlaylistDialog = true
+                // "New playlist" plus one jump chip per connected service with playlists you own.
+                val listState = rememberLazyListState()
+                val sections = remember(filteredPlaylists, addableServiceIds) {
+                    buildAddToPlaylistSections(filteredPlaylists, addableServiceIds)
+                }
+                val sectionStartIndex = remember(sections) {
+                    var index = 0
+                    sections.associate { section ->
+                        val start = index
+                        index += 1 + section.playlists.size
+                        section.source to start
+                    }
+                }
+                val activeSource by remember(sections, sectionStartIndex) {
+                    derivedStateOf {
+                        val first = listState.firstVisibleItemIndex
+                        sections.lastOrNull { (sectionStartIndex[it.source] ?: Int.MAX_VALUE) <= first }?.source
+                    }
+                }
+                val scrollScope = rememberCoroutineScope()
+                AddToPlaylistHeaderRow(
+                    services = sections.map { it.source }.filter { it != SOURCE_PIXELPLAYER },
+                    activeSource = activeSource,
+                    reducedMotion = reducedMotion,
+                    onNewPlaylist = { showCreatePlaylistDialog = true },
+                    onJump = { source ->
+                        val target = sectionStartIndex[source] ?: return@AddToPlaylistHeaderRow
+                        scrollScope.launch {
+                            if (reducedMotion) listState.scrollToItem(target) else listState.animateScrollToItem(target)
+                        }
                     },
-                    iconRotation = 0f,
-                    showSortButton = false,
-                    showImportButton = false,
-                    onSortClick = { },
-                    isPlaylistTab = true,
-                    isFoldersTab = false,
-                    currentFolder = null,
-                    folderRootPath = "",
-                    folderRootLabel = internalStorageText,
-                    onFolderClick = { },
-                    onNavigateBack = { }
+                    modifier = Modifier.padding(top = 10.dp, start = 14.dp, end = 14.dp)
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                PlaylistContainer(
-                    playlistUiState = playlistUiState,
-                    isRefreshing = false,
-                    onRefresh = { },
-                    bottomBarHeight = bottomBarHeight,
-                    navController = null,
-                    playerViewModel = playerViewModel,
-                    isAddingToPlaylist = true,
-                    currentSong = songs.firstOrNull() ?: Song.emptySong(), // Fallback safe
-                    filteredPlaylists = filteredPlaylists,
-                    selectedPlaylists = selectedPlaylists
-                )
+                if (playlistUiState.isLoading && sections.isEmpty()) {
+                    Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                        androidx.compose.material3.CircularProgressIndicator()
+                    }
+                } else if (sections.isEmpty()) {
+                    Text(
+                        text = "No playlists found",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth().padding(24.dp)
+                    )
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = bottomBarHeight + 96.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        sections.forEach { section ->
+                            stickyHeader(key = "header_${section.source}") {
+                                AddToPlaylistSectionHeader(section.source)
+                            }
+                            items(section.playlists, key = { "pl_${it.id}" }) { playlist ->
+                                Box(Modifier.animateItem()) {
+                                    PlaylistItem(
+                                        playlist = playlist,
+                                        playerViewModel = playerViewModel,
+                                        onClick = {
+                                            selectedPlaylists[playlist.id] = !(selectedPlaylists[playlist.id] ?: false)
+                                        },
+                                        isAddingToPlaylist = true,
+                                        selectedPlaylists = selectedPlaylists
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
 
                 if (showCreatePlaylistDialog) {
                     CreatePlaylistDialogRedesigned(
@@ -234,29 +296,163 @@ fun PlaylistBottomSheet(
                 onClick = {
                     if (!isAnyPlaylistSelected) return@MediumExtendedFloatingActionButton
 
+                    val selectedIds = selectedPlaylists.filter { it.value }.keys.toList()
+                    // Spotify / Apple Music: matched and added on the service; they report their own result.
+                    val serviceIds = selectedIds.filter { it in addOnlyServiceIds }
+                    val otherIds = selectedIds.filterNot { it in addOnlyServiceIds }
                     if (songs.size == 1) {
                          playlistViewModel.addOrRemoveSongFromPlaylists(
                             songs.first().id,
-                            selectedPlaylists.filter { it.value }.keys.toList(),
+                            otherIds,
                             currentPlaylistId
                         )
-                    } else {
+                    } else if (otherIds.isNotEmpty()) {
                          // Batch add
-                         val selectedPlaylistIds = selectedPlaylists.filter { it.value }.keys.toList()
-                         if (selectedPlaylistIds.isNotEmpty()) {
-                             playlistViewModel.addSongsToPlaylists(
-                                 songs.map { it.id },
-                                 selectedPlaylistIds
-                             )
-                         }
+                         playlistViewModel.addSongsToPlaylists(
+                             songs.map { it.id },
+                             otherIds
+                         )
                     }
-                    onDismiss()
-                    playerViewModel.sendToast(if (songs.size > 1) songAddedToPlaylistsMessage else commonSavedMessage)
+                    if (serviceIds.isNotEmpty()) {
+                        playlistViewModel.addSongsToServicePlaylists(songs, serviceIds) { message ->
+                            playerViewModel.sendToast(message)
+                        }
+                    }
+                    // Hide first, then remove the sheet (keeps the exit animation).
+                    sheetScope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+                    if (otherIds.isNotEmpty() || songs.size == 1 && serviceIds.isEmpty()) {
+                        playerViewModel.sendToast(if (songs.size > 1) songAddedToPlaylistsMessage else commonSavedMessage)
+                    }
                     playerViewModel.multiSelectionStateHolder.clearSelection()
                 },
                 icon = { Icon(Icons.Rounded.Save, saveActionText) },
                 text = { Text(if (songs.size > 1) stringResource(R.string.common_add) else saveActionText) },
             )
         }
+    }
+}
+
+
+private const val SOURCE_PIXELPLAYER = "LOCAL"
+
+/** One section of the add-to-playlist list: PixelPlayer, Spotify, YouTube Music or Apple Music. */
+private data class AddToPlaylistSection(val source: String, val playlists: List<Playlist>)
+
+private fun buildAddToPlaylistSections(playlists: List<Playlist>, addableServiceIds: Set<String>): List<AddToPlaylistSection> {
+    val local = playlists.filter { (it.source == "LOCAL" || it.source.isBlank()) && it.friendId == null }
+    val service = playlists.filter { it.id in addableServiceIds }
+    return buildList {
+        if (local.isNotEmpty()) add(AddToPlaylistSection(SOURCE_PIXELPLAYER, local))
+        listOf("SPOTIFY", "YOUTUBE_MUSIC", "APPLE_MUSIC").forEach { source ->
+            val list = service.filter { it.source == source }
+            if (list.isNotEmpty()) add(AddToPlaylistSection(source, list))
+        }
+    }
+}
+
+private fun addToPlaylistServiceLabel(source: String) = when (source) {
+    "SPOTIFY" -> "Spotify"
+    "YOUTUBE_MUSIC" -> "YouTube Music"
+    "APPLE_MUSIC" -> "Apple Music"
+    else -> "PixelPlayer"
+}
+
+private fun addToPlaylistServiceIcon(source: String): Int? = when (source) {
+    "SPOTIFY" -> R.drawable.ic_source_spotify
+    "YOUTUBE_MUSIC" -> R.drawable.ic_source_youtube_music
+    "APPLE_MUSIC" -> R.drawable.ic_source_apple_music
+    else -> null
+}
+
+/** "New playlist" and, next to it, a chip per service that jumps to that service's playlists. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun AddToPlaylistHeaderRow(
+    services: List<String>,
+    activeSource: String?,
+    reducedMotion: Boolean,
+    onNewPlaylist: () -> Unit,
+    onJump: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        FilledTonalIconButton(
+            onClick = onNewPlaylist,
+            shape = CircleShape,
+            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+            ),
+            modifier = Modifier.size(48.dp)
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Rounded.PlaylistAdd,
+                contentDescription = stringResource(R.string.library_cd_create_new_playlist)
+            )
+        }
+        services.forEach { source ->
+            val isSelected = activeSource == source
+            val effects = MaterialTheme.motionScheme.defaultEffectsSpec<Color>()
+            val container by animateColorAsState(
+                targetValue = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                animationSpec = if (reducedMotion) snap() else effects,
+                label = "serviceChipContainer"
+            )
+            val content by animateColorAsState(
+                targetValue = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                animationSpec = if (reducedMotion) snap() else effects,
+                label = "serviceChipContent"
+            )
+            val label = addToPlaylistServiceLabel(source)
+            FilledTonalIconButton(
+                onClick = { onJump(source) },
+                shape = CircleShape,
+                colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = container, contentColor = content),
+                modifier = Modifier
+                    .size(48.dp)
+                    .semantics {
+                        selected = isSelected
+                    }
+            ) {
+                addToPlaylistServiceIcon(source)?.let { icon ->
+                    Icon(
+                        painter = painterResource(icon),
+                        contentDescription = "Jump to $label playlists",
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AddToPlaylistSectionHeader(source: String, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .semantics { heading() },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        addToPlaylistServiceIcon(source)?.let { icon ->
+            Icon(
+                painter = painterResource(icon),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+        Text(
+            text = addToPlaylistServiceLabel(source),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface
+        )
     }
 }

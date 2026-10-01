@@ -21,6 +21,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.theveloper.pixelplay.R
@@ -71,6 +73,8 @@ internal fun ServicesSettingsContent(
         )
     }
 
+    DiscordStatusSetting()
+
     if (showListenBrainzDialog) {
         var tokenInput by remember { mutableStateOf(listenBrainzToken) }
         AlertDialog(
@@ -109,6 +113,115 @@ internal fun ServicesSettingsContent(
                             stringResource(R.string.common_cancel)
                         }
                     )
+                }
+            }
+        )
+    }
+}
+
+
+/**
+ * "Discord status": shows what you play in PixelPlayer as "Listening to" on your Discord
+ * profile. Signs in with your own Discord application (official OAuth2, no user token).
+ */
+@Composable
+private fun DiscordStatusSetting(
+    viewModel: com.theveloper.pixelplay.presentation.viewmodel.DiscordPresenceViewModel =
+        androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel()
+) {
+    val status by viewModel.status.collectAsStateWithLifecycle()
+    val enabled by viewModel.enabled.collectAsStateWithLifecycle()
+    val error by viewModel.error.collectAsStateWithLifecycle()
+    var showDialog by remember { mutableStateOf(false) }
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    val connected = status is com.theveloper.pixelplay.data.presence.DiscordPresenceManager.Status.Connected
+
+    val subtitle = when (val s = status) {
+        is com.theveloper.pixelplay.data.presence.DiscordPresenceManager.Status.Connected ->
+            if (enabled) "On \u00B7 ${s.userName}" else "Off \u00B7 connected as ${s.userName}"
+        is com.theveloper.pixelplay.data.presence.DiscordPresenceManager.Status.Waiting -> s.message
+        is com.theveloper.pixelplay.data.presence.DiscordPresenceManager.Status.Error -> s.message
+        else -> "Show what you're playing on your Discord profile"
+    }
+
+    SettingsSubsection(title = "Discord", addBottomSpace = false) {
+        SettingsItem(
+            settingKey = "discord_status",
+            title = "Discord status",
+            subtitle = subtitle,
+            onClick = { showDialog = true },
+            leadingIcon = { Icon(Icons.Rounded.AccountCircle, null, tint = MaterialTheme.colorScheme.secondary) },
+            trailingContent = if (connected) {
+                {
+                    androidx.compose.material3.Switch(
+                        checked = enabled,
+                        onCheckedChange = { viewModel.setEnabled(it) },
+                        modifier = Modifier.semantics { contentDescription = "Show listening on Discord" }
+                    )
+                }
+            } else null
+        )
+    }
+
+    if (showDialog) {
+        var clientId by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text("Discord status") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (connected) {
+                        Text(
+                            "Songs you play in PixelPlayer show as \u201CListening to\u201D on your Discord profile. " +
+                                "The status clears 30 seconds after you pause.",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    } else {
+                        Text(
+                            "1. In the Discord Developer Portal, create an application.\n" +
+                                "2. Under OAuth2, turn on Public Client and add these redirects:",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        viewModel.redirectUris.forEach {
+                            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Text("3. Paste its Application ID here and connect.", style = MaterialTheme.typography.bodyMedium)
+                        OutlinedTextField(
+                            value = clientId,
+                            onValueChange = { clientId = it.filter(Char::isDigit) },
+                            label = { Text("Application ID") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Text(
+                            "Discord may only allow status updates for approved apps. If it refuses, you'll see why here.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    (error ?: (status as? com.theveloper.pixelplay.data.presence.DiscordPresenceManager.Status.Error)?.message)?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                if (connected) {
+                    TextButton(onClick = { showDialog = false }) { Text(stringResource(R.string.common_save)) }
+                } else {
+                    TextButton(
+                        enabled = clientId.length >= 17,
+                        onClick = {
+                            viewModel.error.value = null
+                            viewModel.connect(clientId) { url -> uriHandler.openUri(url) }
+                        }
+                    ) { Text("Connect") }
+                }
+            },
+            dismissButton = {
+                if (connected) {
+                    TextButton(onClick = { viewModel.disconnect(); showDialog = false }) { Text("Disconnect") }
+                } else {
+                    TextButton(onClick = { showDialog = false }) { Text(stringResource(R.string.common_cancel)) }
                 }
             }
         )

@@ -106,6 +106,7 @@ import com.theveloper.pixelplay.presentation.viewmodel.PlaylistViewModel
 import com.theveloper.pixelplay.presentation.components.VinylSleeveCard
 import com.theveloper.pixelplay.presentation.components.RecentTracksList
 import com.theveloper.pixelplay.presentation.components.PlaylistsCarousel
+import com.theveloper.pixelplay.presentation.components.FriendsDiscoverySection
 import com.theveloper.pixelplay.presentation.components.MixFilterDropdown
 import com.theveloper.pixelplay.presentation.components.DailyMixLauncher
 import com.theveloper.pixelplay.presentation.components.GeneratedMix
@@ -165,6 +166,8 @@ fun HomeScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
 
     val playlistUiState by playlistViewModel.uiState.collectAsStateWithLifecycle()
+    val homeFriendsViewModel: com.theveloper.pixelplay.presentation.viewmodel.FriendsViewModel = hiltViewModel()
+    val homeFriends by homeFriendsViewModel.friends.collectAsStateWithLifecycle()
     val stablePlayerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
     val currentSong = stablePlayerState.currentSong
     val isPlaying = stablePlayerState.isPlaying
@@ -432,6 +435,33 @@ fun HomeScreen(
                                     )
                                 }
 
+                                Spacer(modifier = Modifier.height(20.dp))
+
+                                PlaylistsCarousel(
+                                    likedSongs = likedSongs,
+                                    likedPlaylistId = likedPlaylistId ?: PlaylistViewModel.LIKED_PLAYLIST_ID,
+                                    navController = navController,
+                                    playlists = remember(playlistUiState.playlists, likedPlaylistId) {
+                                        // "Favourites"-style playlists are part of Your Music (the first
+                                        // card), exactly as on the Playlists tab, so they aren't repeated.
+                                        playlistUiState.playlists.filter {
+                                            !PlaylistViewModel.isSystemPlaylistId(it.id) && it.id != likedPlaylistId &&
+                                                !com.theveloper.pixelplay.presentation.library.isFavoritesPlaylistName(it.name)
+                                        }
+                                    },
+                                    // Friends' pictures next to the title filter the row to their playlists.
+                                    friendFilters = remember(homeFriends) {
+                                        homeFriends.map { friend ->
+                                            com.theveloper.pixelplay.presentation.components.PlaylistFriendFilter(
+                                                id = friend.id,
+                                                name = friend.name,
+                                                avatarUrl = friend.avatarUrl,
+                                                playlistIds = friend.playlists.mapNotNullTo(HashSet()) { it.playlistId }
+                                            )
+                                        }.filter { it.playlistIds.isNotEmpty() }
+                                    }
+                                )
+
                                 if (speedDialTiles.isNotEmpty()) {
                                     Spacer(modifier = Modifier.height(20.dp))
                                     SpeedDialRow(
@@ -505,17 +535,16 @@ fun HomeScreen(
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.height(24.dp))
 
-                                PlaylistsCarousel(
-                                    likedSongs = likedSongs,
-                                    likedPlaylistId = likedPlaylistId ?: PlaylistViewModel.LIKED_PLAYLIST_ID,
-                                    navController = navController,
-                                    playlists = remember(playlistUiState.playlists, likedPlaylistId) {
-                                        playlistUiState.playlists.filter {
-                                            !PlaylistViewModel.isSystemPlaylistId(it.id) && it.id != likedPlaylistId
-                                        }
-                                    }
+                                FriendsDiscoverySection(
+                                    currentSongId = currentSong?.id,
+                                    onPlaySongs = { songs, start ->
+                                        playerViewModel.playSongs(songsToPlay = songs, startSong = start, queueName = "New from friends")
+                                    },
+                                    onOpenArtist = { name ->
+                                        navController.navigateSafely(Screen.ArtistDetail.createRouteForName(name))
+                                    },
+                                    modifier = Modifier.padding(top = 24.dp)
                                 )
 
                                 Spacer(modifier = Modifier.height(24.dp))

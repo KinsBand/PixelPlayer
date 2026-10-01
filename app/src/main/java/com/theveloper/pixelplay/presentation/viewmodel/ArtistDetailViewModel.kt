@@ -160,6 +160,7 @@ class ArtistDetailViewModel @Inject constructor(
     private val downloadCoordinator: DownloadCoordinator,
     private val videoRepository: VideoRepository,
     private val lastFmRepository: LastFmRepository,
+    private val connectedLibrary: com.theveloper.pixelplay.data.accounts.ConnectedLibraryRepository,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -281,7 +282,15 @@ class ArtistDetailViewModel @Inject constructor(
                     }
                     .collect { (artist, librarySongs) ->
                         if (artist == null) {
-                            loadArtistByName("Artist $id")
+                            // Not a library artist: streamed songs (Spotify, YouTube Music, friends'
+                            // playlists) carry a name-hash id. Find the name among songs we know
+                            // and open the real artist, never a made-up "Artist <id>".
+                            val name = artistNameForUnknownId(id)
+                            if (name != null) {
+                                loadArtistByName(name)
+                            } else {
+                                _uiState.update { it.copy(error = context.getString(R.string.artist_detail_id_not_found), isLoading = false) }
+                            }
                             return@collect
                         }
                         // Liked songs by this artist that you only stream.
@@ -327,6 +336,18 @@ class ArtistDetailViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    /** Name of an artist id that isn't in the artists table, from connected / friends' playlists. */
+    private suspend fun artistNameForUnknownId(id: Long): String? = kotlinx.coroutines.withContext(Dispatchers.Default) {
+        streamCollection.artistName(id)?.let { return@withContext it }
+        for (playlist in connectedLibrary.snapshot.value.playlists) {
+            for (song in playlist.songs) {
+                song.artists.firstOrNull { it.id == id && it.name.isNotBlank() }?.let { return@withContext it.name }
+                if (song.artistId == id && song.artist.isNotBlank()) return@withContext song.artist
+            }
+        }
+        null
     }
 
     private fun loadArtistByName(artistName: String) {

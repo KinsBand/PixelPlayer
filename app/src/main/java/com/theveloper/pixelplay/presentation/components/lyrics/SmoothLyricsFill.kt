@@ -540,24 +540,45 @@ fun SmoothLyricLine(
     wordLayout: LyricWordLayout? = null,
     /** Per-word styles (adaptive expressive typography). Ranges index into [text]. */
     spans: List<AnnotatedString.Range<SpanStyle>> = emptyList(),
-    motion: LyricMotion = LocalLyricMotion.current
+    @Suppress("UNUSED_PARAMETER") motion: LyricMotion = LocalLyricMotion.current,
+    /** Word timing (indexes match [wordLayout]) so accents follow the clock. */
+    timeline: LyricWordTimeline? = null,
+    /** The playback clock (ms); read only while drawing. */
+    nowMs: (() -> Long)? = null,
+    animationStyle: LyricsAnimationStyle = LocalLyricAnimationStyle.current,
+    reducedMotion: Boolean = LocalLyricReducedMotion.current,
 ) {
     val layout = remember { mutableStateOf<TextLayoutResult?>(null) }
     val styledText = remember(text, spans) { styled(text, spans) }
     val density = LocalDensity.current
-    val featherPx = remember(style, density) {
-        with(density) { (style.fontSize.takeIf { it.isSp }?.toPx() ?: 16.dp.toPx()) * 0.55f }
+    val fontPx = remember(style, density) {
+        with(density) { style.fontSize.takeIf { it.isSp }?.toPx() ?: 16.dp.toPx() }
     }
+    val featherPx = fontPx * 0.55f
     val defaultBoundaries = remember(text) { findWordBoundaries(text) }
     val wordStarts = wordLayout?.starts ?: defaultBoundaries.first
     val wordEnds = wordLayout?.ends ?: defaultBoundaries.second
     val length = text.length
-    val motionState = rememberUpdatedState(motion)
+    // Word and letter effects need real word timing; a line-only line gets line treatment only.
+    val wordTimed = wordLayout != null
+    val styleState = rememberUpdatedState(animationStyle)
+    val reducedState = rememberUpdatedState(reducedMotion)
+    val timelineState = rememberUpdatedState(timeline)
+    val nowState = rememberUpdatedState(nowMs)
 
-    fun piecesNow(p: Float): List<LiftedPiece> {
-        val result = layout.value ?: return emptyList()
-        return liftedPieces(result, p, length, text, mode, wordStarts, wordEnds, motionState.value)
-    }
+    fun frame(result: TextLayoutResult, p: Float) = StyleFrame(
+        result = result,
+        p = p,
+        length = length,
+        starts = wordStarts,
+        ends = wordEnds,
+        timeline = timelineState.value?.takeIf { it.size == wordStarts.size },
+        nowMs = nowState.value?.invoke(),
+        style = styleState.value,
+        reduced = reducedState.value,
+        featherPx = featherPx,
+        highlight = highlightColor,
+    )
 
     Box(modifier = modifier) {
         Text(
@@ -567,10 +588,18 @@ fun SmoothLyricLine(
             textAlign = textAlign,
             modifier = Modifier
                 .fillMaxWidth()
-                // The unsung copy moves with the sung one, so a lifted word never leaves a ghost.
+                // Decorations sit behind the glyphs; the unsung copy moves with the sung one,
+                // so a lifted word never leaves a ghost.
                 .drawWithContent {
-                    val pieces = piecesNow(sungChars())
-                    drawWithLifts(pieces) { drawContent() }
+                    val result = layout.value
+                    val p = sungChars()
+                    if (result == null || !wordTimed || p <= 0f || p >= length) {
+                        drawContent()
+                        return@drawWithContent
+                    }
+                    val f = frame(result, p)
+                    drawStyleBehind(f)
+                    drawWithLifts(styledPieces(f, fontPx)) { drawContent() }
                 },
             onTextLayout = { layout.value = it }
         )
@@ -585,19 +614,27 @@ fun SmoothLyricLine(
                 .drawWithContent {
                     val p = sungChars()
                     if (p <= 0f) return@drawWithContent
-                    if (p >= length) {
-                        drawContent()
-                        return@drawWithContent
-                    }
                     val result = layout.value
                     if (result == null) {
                         drawContent()
                         return@drawWithContent
                     }
-                    val pieces = piecesNow(p)
-                    drawWithLifts(pieces) {
+                    if (p >= length) {
                         drawContent()
-                        drawSungMask(result, p, mode, wordStarts, wordEnds, featherPx, highlightColor)
+                        // Whole line sung: completed look (quieter than an active word).
+                        val quiet = styleState.value.spec.completedQuiet
+                        if (wordTimed && quiet > 0f) eraseRange(result, 0, length, length, quiet)
+                        return@drawWithContent
+                    }
+                    if (!wordTimed) {
+                        drawContent()
+                        eraseAfter(result, p, featherPx * 0.3f)
+                        return@drawWithContent
+                    }
+                    val f = frame(result, p)
+                    drawWithLifts(styledPieces(f, fontPx)) {
+                        drawContent()
+                        drawStyledSung(f)
                     }
                 }
         )
@@ -863,7 +900,10 @@ fun LyricLineLayers(
      * the widest, so both looks share its line breaks.
      */
     restSpans: List<AnnotatedString.Range<SpanStyle>> = emptyList(),
-    activeSpans: List<AnnotatedString.Range<SpanStyle>> = emptyList()
+    activeSpans: List<AnnotatedString.Range<SpanStyle>> = emptyList(),
+    /** Word timing + clock for style accents (see [SmoothLyricLine]). */
+    timeline: LyricWordTimeline? = null,
+    nowMs: (() -> Long)? = null,
 ) {
     var shown by remember(text) { mutableStateOf(text) }
     val reserveText = remember(text, activeSpans) { styled(text, activeSpans) }
@@ -900,6 +940,8 @@ fun LyricLineLayers(
             mode = mode,
             wordLayout = wordLayout,
             spans = activeSpans,
+            timeline = timeline,
+            nowMs = nowMs,
             modifier = Modifier
                 .fillMaxWidth()
                 .graphicsLayer { alpha = emphasis().coerceIn(0f, 1f) }

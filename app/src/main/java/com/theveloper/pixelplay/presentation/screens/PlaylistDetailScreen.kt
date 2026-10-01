@@ -154,6 +154,8 @@ import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.animation.togetherWith
 import androidx.compose.material.icons.rounded.HeartBroken
 import androidx.compose.material.icons.rounded.RemoveCircleOutline
 import androidx.compose.material.icons.rounded.SkipNext
@@ -229,6 +231,12 @@ fun PlaylistDetailScreen(
         val friendsViewModel: com.theveloper.pixelplay.presentation.viewmodel.FriendsViewModel = hiltViewModel()
         val friends by friendsViewModel.friends.collectAsStateWithLifecycle()
         friends.find { it.id == friendId }
+    }
+    // A friend's playlist can be pinned (liked) into Your playlists; it stays theirs and keeps syncing.
+    val friendPinned: Pair<Boolean, (Boolean) -> Unit>? = currentPlaylist?.takeIf { it.friendId != null }?.let { playlist ->
+        val friendsViewModel: com.theveloper.pixelplay.presentation.viewmodel.FriendsViewModel = hiltViewModel()
+        val pinnedIds by friendsViewModel.pinnedPlaylistIds.collectAsStateWithLifecycle()
+        (playlist.id in pinnedIds) to { pin: Boolean -> friendsViewModel.setPinned(playlist.id, pin) }
     }
     // YouTube Music playlists can be edited: changes are saved in the app and pushed to the account.
     val isEditableConnectedPlaylist = currentPlaylist?.source == "YOUTUBE_MUSIC"
@@ -617,6 +625,7 @@ fun PlaylistDetailScreen(
                                         }
                                     },
                                     isFromPlaylist = true,
+                                    showFriendAttribution = false,
                                     isReorderModeEnabled = isReorderModeEnabled,
                                     isDragHandleVisible = isReorderModeEnabled,
                                     isRemoveButtonVisible = false,
@@ -723,6 +732,33 @@ fun PlaylistDetailScreen(
                             )
                         }
                         if (!isHeaderCollapsed) Spacer(Modifier.weight(1f))
+                        // Friend's playlist: pin it into Your playlists (keeps their name and picture).
+                        friendPinned?.let { (pinned, setPinned) ->
+                            FilledTonalIconButton(
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = if (isHeaderCollapsed) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Black.copy(alpha = 0.25f),
+                                    contentColor = if (isHeaderCollapsed) MaterialTheme.colorScheme.onSurface else Color.White
+                                ),
+                                onClick = { setPinned(!pinned) },
+                                modifier = Modifier.padding(end = 8.dp)
+                            ) {
+                                androidx.compose.animation.AnimatedContent(
+                                    targetState = pinned,
+                                    transitionSpec = {
+                                        (androidx.compose.animation.scaleIn(androidx.compose.animation.core.tween(com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort4, easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate)) +
+                                            androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort4, easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate))) togetherWith
+                                            (androidx.compose.animation.scaleOut(androidx.compose.animation.core.tween(com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort3, easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate)) +
+                                                androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort3, easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate)))
+                                    },
+                                    label = "friendPlaylistPinHeader"
+                                ) { isPinned ->
+                                    Icon(
+                                        imageVector = if (isPinned) androidx.compose.material.icons.Icons.Rounded.Favorite else androidx.compose.material.icons.Icons.Rounded.FavoriteBorder,
+                                        contentDescription = if (isPinned) "Unpin from your playlists" else "Pin to your playlists"
+                                    )
+                                }
+                            }
+                        }
                         // Edit playlist (name / cover), top right of the playlist.
                         if (!isReadOnlyPlaylist) {
                             FilledTonalIconButton(
@@ -1148,7 +1184,7 @@ fun PlaylistDetailScreen(
                 },
                 onNavigateToArtistById = { artistId ->
                     navController.navigateSafelyReplacing(
-                        route = Screen.ArtistDetail.createRoute(artistId),
+                        route = Screen.ArtistDetail.createRouteForSongArtist(currentSong, artistId),
                         patternToPop = Screen.ArtistDetail.route
                     )
                     showSongInfoBottomSheet = false
