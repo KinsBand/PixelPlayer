@@ -22,6 +22,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
+import com.theveloper.pixelplay.data.dsp.TimeStretchGuard
 import com.theveloper.pixelplay.data.service.MusicService
 import com.theveloper.pixelplay.data.songsterr.RenderedTrack
 import com.theveloper.pixelplay.data.songsterr.SongsterrClient
@@ -165,18 +166,105 @@ class TabPracticeController(context: Context) {
     var cursor by mutableStateOf<TabTimeline.Position?>(null)
         private set
     var panelExpanded by mutableStateOf(false)
-    /**
-     * SYNTH plays guitar and bass on modelled strings ([StringSynthPlayer]) instead of the
-     * General MIDI synth. Saved in prefs `real_strings`.
-     */
-    var realStrings by mutableStateOf(prefs.getBoolean("real_strings", true))
+    /** Tab timing panel above the play row (opened from "Adjust tab timing" in the options menu). */
+    var timingPanelVisible by mutableStateOf(false)
+
+    // ── Edit mode ──
+    /** Set while a part is being edited (the page shows the editor instead of practice tools). */
+    var editor by mutableStateOf<com.theveloper.pixelplay.presentation.components.tabs.edit.TabEditController?>(null)
         private set
-    /**
-     * SYNTH plays every part on recorded instruments (the downloaded SoundFont) instead of
-     * Android's General MIDI synth and the modelled strings. Saved in prefs `sampled_sounds`.
-     */
-    var sampledSounds by mutableStateOf(prefs.getBoolean("sampled_sounds", true))
+    val isEditing: Boolean get() = editor != null
+    var editStarting by mutableStateOf(false)
         private set
+    private var editScope: kotlinx.coroutines.CoroutineScope? = null
+
+    /** Starts editing the part on screen (a copy of the version on screen, or its waiting draft). */
+    fun beginEditing() {
+        if (editor != null || editStarting) return
+        val scope = editScope ?: kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.SupervisorJob() + Dispatchers.Main.immediate
+        ).also { editScope = it }
+        editStarting = true
+        if (isPlaying) pauseAll()
+        panelExpanded = false
+        timingPanelVisible = false
+        clearLoop()
+        scope.launch {
+            val ed = com.theveloper.pixelplay.presentation.components.tabs.edit.TabEditController.start(appContext, this@TabPracticeController, scope)
+            editor = ed
+            editStarting = false
+            if (ed != null) rebuild()
+        }
+    }
+
+    private var pendingEditTrack: Int? = null
+
+    /** Edit part [index]: straight away if it's on screen, otherwise once it has loaded. */
+    fun requestEditOf(index: Int) {
+        if (loaded?.trackIndex == index && state is TabUiState.Ready) {
+            beginEditing()
+        } else {
+            pendingEditTrack = index
+            selectTrack(index)
+        }
+    }
+
+    /** The part on screen as Songsterr sent it (raw JSON, from the cache). */
+    internal suspend fun rawPartJson(): String? {
+        val tab = loaded ?: return null
+        return SongsterrClient.fetchPartJson(tab.meta, tab.trackIndex, appContext.cacheDir)
+    }
+
+    /** Shows an edited copy of the part on screen (and plays it in Synth). */
+    internal suspend fun applyEditedTrack(track: com.theveloper.pixelplay.data.songsterr.model.RevisionTrack) {
+        val tab = loaded ?: return
+        loaded = tab.copy(track = track)
+        if (rawParts.isNotEmpty()) rawParts = rawParts + (tab.trackIndex to track)
+        rebuild()
+    }
+
+    /** Leaves edit mode and shows [original] again. */
+    internal suspend fun endEditing(original: com.theveloper.pixelplay.data.songsterr.model.RevisionTrack) {
+        editor = null
+        applyEditedTrack(original)
+    }
+    /**
+     * How SYNTH sounds: recorded instruments ([SoundStyle.REAL]), 8-bit, synth, or the modelled
+     * strings ([SoundStyle.STRINGS], also the fallback until the sounds are downloaded). Saved in
+     * prefs `sound_style`; older installs are migrated from `sampled_sounds`.
+     */
+    var soundStyle by mutableStateOf(loadSoundStyle())
+        private set
+    /** Guitar and bass always use the modelled strings when no samples play them. */
+    val realStrings: Boolean get() = true
+    /** The chosen style plays on samples (anything but Strings). */
+    val sampledSounds: Boolean get() = soundStyle.usesSamples
+
+    private fun loadSoundStyle(): com.theveloper.pixelplay.data.soundfont.SoundStyle {
+        val saved = prefs.getString("sound_style", null)
+        val style = when {
+            saved != null -> com.theveloper.pixelplay.data.soundfont.SoundStyle.fromName(saved)
+            // Before styles existed: sampled sounds switched off meant the modelled strings.
+            prefs.contains("sampled_sounds") && !prefs.getBoolean("sampled_sounds", true) ->
+                com.theveloper.pixelplay.data.soundfont.SoundStyle.STRINGS
+            else -> com.theveloper.pixelplay.data.soundfont.SoundStyle.REAL
+        }
+        com.theveloper.pixelplay.data.soundfont.SoundStyle.current = style
+        return style
+    }
+    /**
+     * "Focus fade": while playing, bars fade and blur by how far they are from the one playing
+     * (like animated lyrics). Saved in prefs `focus_fade`, off by default.
+     */
+    var focusFade by mutableStateOf(prefs.getBoolean("focus_fade", false))
+        private set
+
+    fun updateFocusFade(on: Boolean) {
+        if (on == focusFade) return
+        focusFade = on
+        prefs.edit().putBoolean("focus_fade", on).apply()
+    }
+
     /** Parts (track index) with a note sounding right now, for the live speaker animation. */
     var soundingParts by mutableStateOf<Set<Int>>(emptySet())
         private set
@@ -241,6 +329,8 @@ class TabPracticeController(context: Context) {
     fun setSong(title: String, artist: String, songId: String?, uri: String? = null) {
         songUri = uri
         if (title == this.title && artist == this.artist) return
+        // Another song started: keep the draft and leave edit mode.
+        editor?.let { it.saveNowAndForget(); editor = null }
         stopSynth()
         stopLooper(handBack = false)
         stopBacking(resumeMain = false)
@@ -435,6 +525,10 @@ class TabPracticeController(context: Context) {
                 mainPoints = SongsterrClient.pickVideoPoints(videos, playingSongId)?.points
             }
             rebuild()
+            if (pendingEditTrack == tab.trackIndex) {
+                pendingEditTrack = null
+                beginEditing()
+            }
             fillRevisions(tab.meta.songId)
             loadAllParts(tab)
         }.onFailure { e ->
@@ -458,7 +552,8 @@ class TabPracticeController(context: Context) {
         val points = backingVideo?.points ?: mainPoints
         val newReady = withContext(Dispatchers.Default) {
             val rendered = TabParser.toRenderModel(tab.track, tab.family, t)
-            TabUiState.Ready(tab, rendered, TabLayout.sections(rendered), TabTimeline(rendered, points))
+            // While editing, every bar is drawn on its own (no folded riffs or "same as" lines).
+            TabUiState.Ready(tab, rendered, TabLayout.sections(rendered, foldRiffs = editor == null), TabTimeline(rendered, points))
         }
         state = newReady
         drums.setScore(newReady.track)
@@ -575,6 +670,18 @@ class TabPracticeController(context: Context) {
     private var stringPlayer: StringSynthPlayer? = null
     private var synthResult: TabMidi.Result? = null
     private var synthStartEntry = 0
+    /** Synth is paused with its players kept, so play resumes on the same beat. */
+    private var synthPaused = false
+    /** A setting changed while paused: the next play rebuilds instead of resuming. */
+    private var synthDirty = false
+    /** Building / preparing the Synth off the main thread (the play button already shows Pause). */
+    var synthPreparing by mutableStateOf(false)
+        private set
+    private val synthScope = CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Main.immediate)
+    private var synthJob: kotlinx.coroutines.Job? = null
+    private var restartJob: kotlinx.coroutines.Job? = null
+    /** Bumped on every start / stop so a slow build that lost the race is thrown away. */
+    private var synthToken = 0
     private var soundPool: SoundPool? = null
     private var clickAccent = 0
     private var clickNormal = 0
@@ -620,10 +727,7 @@ class TabPracticeController(context: Context) {
     /** Stops playback (the tap test needs quiet). */
     fun pauseAll() {
         if (sound == TabSound.SYNTH) {
-            if (mediaPlayer?.isPlaying == true) {
-                synthStartEntry = cursor?.entry ?: synthStartEntry
-                stopSynth()
-            }
+            if (synthPreparing) stopSynth() else if (mediaPlayer?.isPlaying == true) pauseSynth()
         } else {
             origPause()
         }
@@ -645,6 +749,9 @@ class TabPracticeController(context: Context) {
     }
 
     fun detach() {
+        editor?.saveNowAndForget()
+        editScope?.coroutineContext?.get(kotlinx.coroutines.Job)?.cancel()
+        editScope = null
         drums.stop()
         stopSynth()
         stopLooper(handBack = true)
@@ -697,25 +804,26 @@ class TabPracticeController(context: Context) {
         }
     }
 
-    fun toggleRealStrings() {
-        realStrings = !realStrings
-        prefs.edit().putBoolean("real_strings", realStrings).apply()
+    fun selectSoundStyle(style: com.theveloper.pixelplay.data.soundfont.SoundStyle) {
+        if (style == soundStyle) return
+        soundStyle = style
+        com.theveloper.pixelplay.data.soundfont.SoundStyle.current = style
+        prefs.edit().putString("sound_style", style.name).remove("sampled_sounds").remove("real_strings").apply()
         restartSynthIfPlaying()
     }
 
-    fun toggleSampledSounds() {
-        sampledSounds = !sampledSounds
-        prefs.edit().putBoolean("sampled_sounds", sampledSounds).apply()
-        restartSynthIfPlaying()
-    }
-
-    /** Recorded instruments are available and switched on. */
+    /** Recorded instruments are available and the chosen style uses them. */
     val usesSampledSounds: Boolean
         get() = sampledSounds && com.theveloper.pixelplay.data.soundfont.SoundFontStore.fontOrNull() != null
 
     /** The instrument sounds finished downloading / loading: switch a playing Synth over. */
     fun onSampledSoundsReady() {
         if (sampledSounds) restartSynthIfPlaying()
+    }
+
+    /** The instrument sounds were deleted: a playing Synth falls back to the modelled strings. */
+    fun onSampledSoundsRemoved() {
+        restartSynthIfPlaying()
     }
 
     fun toggleMetronome() {
@@ -737,10 +845,21 @@ class TabPracticeController(context: Context) {
             resetOriginalParams()
             sound = TabSound.SYNTH
             synthStartEntry = entry ?: 0
+            if (wasPlaying) {
+                isPlaying = true
+                synthPreparing = true
+            }
+            val token = ++synthToken
             scope.launch {
                 rebuild() // back to the main recording's timing
                 rebuildParts()
-                if (wasPlaying) playSynth(synthStartEntry, withCountIn = false)
+                // Skip if the user stopped, switched back or started something else meanwhile.
+                if (sound == TabSound.SYNTH && token == synthToken && wasPlaying) {
+                    playSynth(synthStartEntry, withCountIn = false)
+                } else if (token == synthToken) {
+                    synthPreparing = false
+                    if (sound == TabSound.SYNTH && mediaPlayer == null) isPlaying = false
+                }
             }
         } else {
             stopSynth()
@@ -849,7 +968,8 @@ class TabPracticeController(context: Context) {
         backingVideo = video
         backingUrl = url
         rebuild() // cursor follows the backing video's own sync points
-        val player = ExoPlayer.Builder(appContext).build().apply {
+        // Software speed / pitch with the post-Sonic limiter, like the main player.
+        val player = TimeStretchGuard.newPlayer(appContext).apply {
             setAudioAttributes(
                 androidx.media3.common.AudioAttributes.Builder()
                     .setUsage(androidx.media3.common.C.USAGE_MEDIA)
@@ -920,7 +1040,7 @@ class TabPracticeController(context: Context) {
             )
             .build()
         val player = runCatching {
-            ExoPlayer.Builder(appContext).build().apply {
+            TimeStretchGuard.newPlayer(appContext).apply {
                 setAudioAttributes(
                     androidx.media3.common.AudioAttributes.Builder()
                         .setUsage(androidx.media3.common.C.USAGE_MEDIA)
@@ -992,13 +1112,19 @@ class TabPracticeController(context: Context) {
         val tl = ready?.timeline ?: return
         if (countingIn) return
         if (sound == TabSound.SYNTH) {
-            if (mediaPlayer?.isPlaying == true) {
-                synthStartEntry = cursor?.entry ?: synthStartEntry
-                stopSynth()
-            } else {
-                controller?.pause()
-                val from = if (loopActive) loopRange(tl)?.first ?: synthStartEntry else synthStartEntry
-                playSynth(from, withCountIn = countIn)
+            when {
+                // A tap while it's still getting ready cancels the start.
+                synthPreparing -> stopSynth()
+                mediaPlayer?.isPlaying == true -> pauseSynth()
+                // Paused with nothing changed: carry on from the same beat (no count-in).
+                synthPaused && !synthDirty && mediaPlayer != null -> resumeSynth()
+                else -> {
+                    controller?.pause()
+                    val resumeAt = if (synthPaused) cursor?.entry ?: synthStartEntry else null
+                    val from = resumeAt
+                        ?: if (loopActive) loopRange(tl)?.first ?: synthStartEntry else synthStartEntry
+                    playSynth(from, withCountIn = countIn && resumeAt == null)
+                }
             }
             return
         }
@@ -1021,10 +1147,19 @@ class TabPracticeController(context: Context) {
                 val barBeats = m.timeSignature[0].coerceAtLeast(1)
                 val beats = (countInBeats ?: barBeats).coerceIn(1, 32)
                 val beatMs = 60_000.0 / (m.bpm * speed) * 4.0 / m.timeSignature[1].coerceAtLeast(1)
+                // Each click (and the downbeat) is scheduled against one fixed start time, so
+                // fractional beat lengths and coroutine wake-up delays never add up to drift.
+                val beatNs = (beatMs * 1_000_000.0).toLong()
+                val t0 = System.nanoTime()
                 repeat(beats) { k ->
+                    val wait = t0 + k * beatNs - System.nanoTime()
+                    if (wait > 0) delay(wait / 1_000_000L)
                     click(k % barBeats == 0)
-                    delay(beatMs.toLong())
                 }
+                // The player needs a moment to get sound out: start it that much before the downbeat.
+                val downbeat = t0 + beats * beatNs - ORIGINAL_START_LATENCY_NS
+                val wait = downbeat - System.nanoTime()
+                if (wait > 0) delay(wait / 1_000_000L)
                 countingIn = false
                 origPlay()
             }
@@ -1053,9 +1188,12 @@ class TabPracticeController(context: Context) {
         val tl = ready?.timeline ?: return
         seekSerial++
         if (sound == TabSound.SYNTH) {
+            val wasRunning = mediaPlayer?.isPlaying == true || synthPreparing
+            // A paused Synth would resume where it was: drop it so play starts at the new bar.
+            if (synthPaused) stopSynth()
             synthStartEntry = entry
             cursor = TabTimeline.Position(entry, tl.entries[entry].measure, 0, 0f)
-            if (mediaPlayer?.isPlaying == true) playSynth(entry, withCountIn = false)
+            if (wasRunning) playSynth(entry, withCountIn = false)
         } else {
             origSeekTab(tl.entries[entry].startMs)
         }
@@ -1063,6 +1201,9 @@ class TabPracticeController(context: Context) {
 
     /** Passes already played of the tab's own repeat closing at bar [closing], if [entry] is inside it. */
     fun tabRepeatPass(entry: Int, closing: Int): Int? = ready?.timeline?.repeatPass(entry, closing)
+
+    /** Timeline of the loaded part (bars in play order), or null while loading. */
+    val activeTimeline: TabTimeline? get() = ready?.timeline
 
     /** Loop button: start choosing a loop, or clear the current one. */
     fun toggleLoop() {
@@ -1090,8 +1231,10 @@ class TabPracticeController(context: Context) {
         if (!inside) seekSerial++
         if (sound == TabSound.SYNTH) {
             val start = if (inside) cur!! else range.first
+            val wasRunning = mediaPlayer?.isPlaying == true || synthPreparing
+            if (synthPaused) stopSynth()
             synthStartEntry = start
-            if (mediaPlayer?.isPlaying == true) playSynth(start, withCountIn = false)
+            if (wasRunning) playSynth(start, withCountIn = false)
             else cursor = TabTimeline.Position(start, tl.entries[start].measure, 0, 0f)
         } else {
             if (!inside) origSeekTab(tl.entries[range.first].startMs)
@@ -1135,39 +1278,108 @@ class TabPracticeController(context: Context) {
         } else {
             (from until tl.entries.size).toList()
         }
+        // Snapshot everything the build reads: it runs off the main thread.
         val partList = parts.values.toList().ifEmpty { listOf(TabMidi.Part(tl.track)) }
-        fun buildFile(real: Boolean) = TabMidi.build(
-            tl, sequence,
-            TabMidi.Options(
-                speed = speed, pitchShift = pitch, metronome = metronome, countIn = withCountIn,
-                countInBeats = countInBeats, realStrings = real,
-            ),
-            partList,
+        val options = TabMidi.Options(
+            speed = speed, pitchShift = pitch, metronome = metronome, countIn = withCountIn,
+            countInBeats = countInBeats, realStrings = false, humanize = true,
         )
+        val font = if (sampledSounds) com.theveloper.pixelplay.data.soundfont.SoundFontStore.fontOrNull() else null
+        val style = soundStyle
+        val wantRealStrings = realStrings
+        val file = File(appContext.cacheDir, "tab_synth.mid")
+
+        val token = ++synthToken
+        synthStartEntry = from
+        isPlaying = true
+        synthPreparing = true
+        synthJob = synthScope.launch {
+            // Published as soon as it exists so a cancel can never leak a player.
+            val holder = java.util.concurrent.atomic.AtomicReference<PreparedSynth?>(null)
+            val prepared = try {
+                withContext(Dispatchers.Default) {
+                    prepareSynth(tl, sequence, options, partList, font, style, wantRealStrings, file)
+                        .also { holder.set(it) }
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                holder.get()?.release()
+                throw cancelled
+            } catch (e: Exception) {
+                Log.w(TAG, "Synth failed: ${e.message}")
+                null
+            }
+            if (token != synthToken) {
+                prepared?.release()
+                return@launch
+            }
+            synthPreparing = false
+            if (prepared == null) {
+                stopSynth()
+                return@launch
+            }
+            prepared.mp.setOnCompletionListener { onSynthComplete() }
+            runCatching {
+                // Strings first: their buffer is primed and starts at once, while the MIDI
+                // player's start latency is longer; [StringSynthPlayer.follow] trims the rest.
+                prepared.strings?.start()
+                prepared.mp.start()
+            }.onFailure {
+                Log.w(TAG, "Synth start failed: ${it.message}")
+                prepared.release()
+                stopSynth()
+                return@launch
+            }
+            stringPlayer = prepared.strings
+            mediaPlayer = prepared.mp
+            synthResult = prepared.result
+            synthPaused = false
+            synthDirty = false
+            clock.reset()
+            isPlaying = true
+        }
+    }
+
+    private class PreparedSynth(val mp: MediaPlayer, val strings: StringSynthPlayer?, val result: TabMidi.Result) {
+        fun release() {
+            runCatching { strings?.release() }
+            runCatching { mp.release() }
+        }
+    }
+
+    /** Builds the file and players. Runs on a background thread. */
+    private fun prepareSynth(
+        tl: TabTimeline,
+        sequence: List<Int>,
+        options: TabMidi.Options,
+        partList: List<TabMidi.Part>,
+        font: com.theveloper.pixelplay.data.soundfont.SoundFont?,
+        style: com.theveloper.pixelplay.data.soundfont.SoundStyle,
+        wantRealStrings: Boolean,
+        file: File,
+    ): PreparedSynth {
+        fun buildFile(real: Boolean) = TabMidi.build(tl, sequence, options.copy(realStrings = real), partList)
         // Recorded instruments (downloaded SoundFont): every part is rendered from samples, guitars
         // and basses with their full articulation; the MIDI player only keeps time (muted).
-        val font = if (sampledSounds) com.theveloper.pixelplay.data.soundfont.SoundFontStore.fontOrNull() else null
         var result: TabMidi.Result
         var strings: StringSynthPlayer? = null
         var sampled = false
         if (font != null) {
             result = buildFile(true)
-            strings = StringSynthPlayer.createSampled(font, result.bytes, result.strings)
+            strings = StringSynthPlayer.createSampled(font, result.bytes, result.strings, style, options.speed)
             sampled = strings != null
         } else {
-            result = buildFile(realStrings)
+            result = buildFile(wantRealStrings)
         }
         if (!sampled) {
-            if (font != null) result = buildFile(realStrings)
+            if (font != null) result = buildFile(wantRealStrings)
             // Guitar / bass on modelled strings; if the audio track can't open, fall back to MIDI.
             val score = result.strings
             strings = if (score != null) StringSynthPlayer.create(score) else null
             if (score != null && strings == null) result = buildFile(false)
         }
-        val file = File(appContext.cacheDir, "tab_synth.mid")
-        runCatching {
+        val mp = MediaPlayer()
+        try {
             file.writeBytes(result.bytes)
-            val mp = MediaPlayer()
             mp.setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -1175,23 +1387,37 @@ class TabPracticeController(context: Context) {
                     .build(),
             )
             mp.setDataSource(file.absolutePath)
-            mp.setOnCompletionListener { onSynthComplete() }
             mp.prepare()
             if (sampled) mp.setVolume(0f, 0f)
             strings?.prime()
-            mp.start()
-            strings?.start()
-            stringPlayer = strings
-            mediaPlayer = mp
-            synthResult = result
-            synthStartEntry = from
-            clock.reset()
-            isPlaying = true
-        }.onFailure {
-            Log.w(TAG, "Synth failed: ${it.message}")
-            strings?.release()
-            stopSynth()
+        } catch (e: Exception) {
+            runCatching { strings?.release() }
+            runCatching { mp.release() }
+            throw e
         }
+        return PreparedSynth(mp, strings, result)
+    }
+
+    private fun pauseSynth() {
+        val mp = mediaPlayer ?: return
+        runCatching { mp.pause() }
+        stringPlayer?.pause()
+        synthPaused = true
+        restartJob?.cancel()
+        isPlaying = false
+    }
+
+    private fun resumeSynth() {
+        val mp = mediaPlayer ?: return
+        stringPlayer?.resume()
+        runCatching { mp.start() }.onFailure {
+            // The player is gone: rebuild from the bar on screen.
+            playSynth(cursor?.entry ?: synthStartEntry, withCountIn = false)
+            return
+        }
+        synthPaused = false
+        clock.reset()
+        isPlaying = true
     }
 
     private fun onSynthComplete() {
@@ -1205,16 +1431,40 @@ class TabPracticeController(context: Context) {
         }
     }
 
+    /**
+     * A setting changed (speed, pitch, mutes, style…). Restarts once the user settles, so a
+     * slider drag or a run of toggles costs one rebuild instead of one per change.
+     */
     private fun restartSynthIfPlaying() {
-        if (sound != TabSound.SYNTH || mediaPlayer?.isPlaying != true) return
-        seekSerial++
-        playSynth(cursor?.entry ?: synthStartEntry, withCountIn = false)
+        if (sound != TabSound.SYNTH) return
+        if (synthPaused) {
+            synthDirty = true
+            return
+        }
+        if (mediaPlayer?.isPlaying != true && !synthPreparing) return
+        restartJob?.cancel()
+        restartJob = synthScope.launch {
+            delay(RESTART_DEBOUNCE_MS)
+            if (sound != TabSound.SYNTH || synthPaused) return@launch
+            seekSerial++
+            playSynth(cursor?.entry ?: synthStartEntry, withCountIn = false)
+        }
     }
 
     private fun stopSynth() {
-        stringPlayer?.release()
+        synthToken++
+        synthJob?.cancel()
+        synthJob = null
+        restartJob?.cancel()
+        restartJob = null
+        synthPreparing = false
+        synthPaused = false
+        synthDirty = false
+        // Joining the audio thread can take a moment: never on the main thread.
+        stringPlayer?.let { sp -> Thread({ sp.release() }, "StringSynthRelease").start() }
         stringPlayer = null
         mediaPlayer?.let { mp ->
+            runCatching { mp.setOnCompletionListener(null) }
             runCatching { mp.stop() }
             mp.release()
         }
@@ -1433,5 +1683,9 @@ class TabPracticeController(context: Context) {
         private const val TAG = "TabPractice"
         /** How much of a loop is written into one synth file (repeats until then are gapless). */
         private const val LOOP_FILE_MS = 8 * 60_000.0
+        /** Settle time before a settings change rebuilds a playing Synth. */
+        private const val RESTART_DEBOUNCE_MS = 150L
+        /** Typical gap between asking the app's player to play and hearing it. */
+        private const val ORIGINAL_START_LATENCY_NS = 60_000_000L
     }
 }

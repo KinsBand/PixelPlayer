@@ -8,6 +8,7 @@ import androidx.media3.common.Player
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.repository.MusicRepository
 import com.theveloper.pixelplay.presentation.viewmodel.exts.DeckController
+import com.theveloper.pixelplay.presentation.viewmodel.exts.KeyLockMode
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -24,6 +25,8 @@ data class DeckState(
     val progress: Float = 0f,
     val volume: Float = 1f,
     val speed: Float = 1f,
+    /** On: speed changes tempo only. Off (vinyl): pitch follows speed. */
+    val keyLock: Boolean = true,
     val stemWaveforms: Map<String, List<Int>> = emptyMap()
 )
 
@@ -104,6 +107,13 @@ class MashupViewModel @Inject constructor(
         val safeSpeed = speed.coerceIn(0.5f, 2.0f)
         if (deck == 1) deck1Controller.setSpeed(safeSpeed) else deck2Controller.setSpeed(safeSpeed)
         updateDeckState(deck) { it.copy(speed = safeSpeed) }
+    }
+
+    fun toggleKeyLock(deck: Int) {
+        val controller = if (deck == 1) deck1Controller else deck2Controller
+        val next = if (controller.keyLockMode == KeyLockMode.ON) KeyLockMode.OFF else KeyLockMode.ON
+        controller.setKeyLockMode(next)
+        updateDeckState(deck) { it.copy(keyLock = next == KeyLockMode.ON) }
     }
 
     private fun updateCrossfaderAndVolumes() {

@@ -407,7 +407,8 @@
     <!-- PlaylistBottomSheet -->
     <string name="playlist_sheet_add_songs_title">Add %1$d songs to…</string>
     <string name="playlist_sheet_select_playlists">Select playlists</string>
-    <string name="playlist_sheet_search_playlists_hint">Search for playlists…</string>
+    <string name="playlist_sheet_search_playlists_hint">Search or name a new playlist…</string>
+    <string name="playlist_sheet_create_named">Create “%1$s”</string>
     <string name="playlist_sheet_song_added_to_playlists">Songs added to playlists</string>
     <string name="playlist_sheet_created_and_songs_added">Playlist created and songs added</string>
     <string name="playlist_sheet_internal_storage">Internal Storage</string>
@@ -429,6 +430,10 @@
 
     <!-- PlayerViewModel -->
     <string name="player_view_model_no_valid_songs">No valid songs found to play</string>
+    <string name="song_card_starting">Starting</string>
+    <string name="song_card_failed">Couldn\'t play this song</string>
+    <string name="song_card_retry">Tap to retry</string>
+    <string name="song_card_failed_toast">Couldn\'t play “%1$s”</string>
     <string name="player_view_model_song_not_found_in_list">Song not found in current list</string>
     <string name="player_view_model_could_not_locate_song">Could not locate song</string>
     <string name="player_view_model_no_songs_in_library_toast">No songs found in library</string>
@@ -537,4 +542,199 @@
     <string name="ai_state_daily_mix_updated">Daily Mix updated with AI</string>
     <string name="ai_state_could_not_update">Could not update: %s</string>
     <string name="ai_state_no_songs_for_mix">AI couldn\'t find songs for this mix</string>
+    <!-- Compact song counts ("[note] 42") -->
+    <string name="compact_count_counting">Counting songs…</string>
+    <plurals name="compact_count_songs">
+        <item quantity="one">%d song</item>
+        <item quantity="other">%d songs</item>
+    </plurals>
+
+    <!-- Friends: mutual follow badge, history sheet, followers / following -->
+    <string name="friends_mutual_badge">Friends</string>
+    <string name="friends_mutual_badge_cd">You follow each other</string>
+    <string name="friends_deselect_all">Deselect all</string>
+    <string name="friend_history_listening_to">Listening to %1$s</string>
+    <string name="friend_history_last_played">Last played %1$s</string>
+    <string name="friend_history_no_plays">No plays seen yet</string>
+    <string name="friend_history_this_week">%1$d this week</string>
+    <plurals name="friend_history_plays_this_week">
+        <item quantity="one">%d play this week</item>
+        <item quantity="other">%d plays this week</item>
+    </plurals>
+    <plurals name="friend_history_followers_count">
+        <item quantity="one">%d follower</item>
+        <item quantity="other">%d followers</item>
+    </plurals>
+    <plurals name="friend_history_following_count">
+        <item quantity="one">Following %d person</item>
+        <item quantity="other">Following %d people</item>
+    </plurals>
+    <string name="friend_history_view_followers">View followers</string>
+    <string name="friend_history_view_following">View following</string>
+    <string name="friend_history_followers_title">Followers</string>
+    <string name="friend_history_following_title">Following</string>
+    <string name="friend_history_shuffle">Shuffle</string>
+    <string name="friend_history_follow">Follow</string>
+    <string name="friend_history_following">Following</string>
+    <string name="friend_history_follow_hint">Songs %1$s starts will play next.</string>
+    <string name="friend_history_empty">Nothing yet. This fills in as PixelPlayer sees %1$s play songs.</string>
+    <string name="friend_history_now">Now</string>
+    <string name="friend_history_open_artist">Open %1$s</string>
+    <string name="friend_history_played_times">Played %1$d times this week</string>
+    <string name="friend_history_song_options">Song options</string>
+    <string name="friend_history_like">Like %1$s</string>
+    <string name="friend_history_unlike">Unlike %1$s</string>
+    <string name="friend_people_follow">Follow</string>
+    <string name="friend_people_following">Following</string>
+    <string name="friend_people_friends">Friends</string>
+    <plurals name="friend_people_followers">
+        <item quantity="one">%d follower</item>
+        <item quantity="other">%d followers</item>
+    </plurals>
+    <string name="friend_people_unable_followers">Unable to load followers</string>
+    <string name="friend_people_unable_following">Unable to load following</string>
+    <string name="friend_people_empty_followers">No followers yet</string>
+    <string name="friend_people_empty_following">Not following anyone yet</string>
+    <string name="friend_people_retry">Retry</string>
+
+    <!-- Friends: playlist cards -->
+    <string name="friend_playlist_by">By %1$s</string>
+    <string name="friend_playlist_updated_cd">Updated %1$s ago</string>
+    <string name="friend_playlist_collaborative_cd">Collaborative playlist</string>
+    <plurals name="friend_playlist_saves">
+        <item quantity="one">%d save</item>
+        <item quantity="other">%d saves</item>
+    </plurals>
+    <string name="friend_playlist_pinned">Pinned to your playlists</string>
+    <string name="friend_playlist_not_pinned">Not pinned</string>
+    <string name="friend_playlist_pin">Pin to your playlists</string>
+    <string name="friend_playlist_unpin">Unpin from your playlists</string>
+
+    <!-- Blends: label and contributor filter -->
+    <string name="blend_label">Blend</string>
+    <string name="blend_filter_all">All</string>
+    <string name="blend_filter_you">You</string>
+    <string name="blend_filter_empty">No songs contributed by %1$s</string>
+    <string name="blend_filter_clear">Clear filter</string>
+
+    <!-- Song picker -->
+    <string name="song_picker_clear_search">Clear search</string>
+
+    <!-- Playlist multi-selection sheet -->
+    <string name="playlist_multi_one_selected">1 playlist selected</string>
+    <plurals name="playlist_multi_selected">
+        <item quantity="one">%d playlist selected</item>
+        <item quantity="other">%d playlists selected</item>
+    </plurals>
+    <string name="playlist_multi_add_to_queue">Add to queue</string>
+    <string name="playlist_multi_play_next">Play next</string>
+    <string name="playlist_multi_share_file">Share file</string>
+    <string name="playlist_multi_share_zip">Share ZIP</string>
+    <string name="playlist_multi_share_on">Share on %1$s</string>
+    <string name="playlist_multi_focus">Act on %1$s only</string>
+    <string name="playlist_multi_show_all">Back to all selected</string>
+    <!-- Friends: unfollow confirmation; blends: filter row and song badges -->
+    <string name="friend_people_unfollow_title">Unfollow %1$s?</string>
+    <string name="friend_people_unfollow_body">You\'ll stop following %1$s on Spotify.</string>
+    <string name="friend_people_unfollow_friend_body">You\'ll stop following %1$s on Spotify, so you won\'t be Friends anymore.</string>
+    <string name="friend_people_unfollow">Unfollow</string>
+    <string name="friend_people_cancel">Cancel</string>
+    <string name="blend_filter_liked">Liked</string>
+    <string name="blend_filter_none">No songs match these filters</string>
+    <string name="blend_song_from">Added by %1$s</string>
+    <string name="blend_song_shared">Recommended from what you both play</string>
+    <!-- Friends: track sheet, profiles in the history sheet, Add friend, Friends Mix page -->
+    <string name="unknown_track">Unknown track</string>
+    <string name="friend_track_open_album">Open album</string>
+    <string name="friend_track_open_artist">Open %1$s</string>
+    <string name="friend_breadcrumb_followers">%1$s\'s followers</string>
+    <string name="friend_breadcrumb_following">Who %1$s follows</string>
+    <string name="friend_profile_unable">Couldn\'t load this profile</string>
+    <string name="friend_profile_playlists">Playlists</string>
+    <string name="friend_profile_no_playlists">No public playlists</string>
+    <string name="friend_people_open_profile">Open %1$s\'s profile</string>
+    <string name="friends_mix_open">Open Friends Mix</string>
+    <string name="friends_mix_empty">Listen with friends to generate your Friends Mix</string>
+    <string name="add_friend_title">Add a friend</string>
+    <string name="add_friend_search_hint">Search Spotify people or paste a profile link</string>
+    <string name="add_friend_clear">Clear search</string>
+    <string name="add_friend_connect_spotify">Connect Spotify in Accounts to find people.</string>
+    <string name="add_friend_failed">Couldn\'t search Spotify right now</string>
+    <string name="add_friend_no_suggestions">Search for someone by name, or paste their Spotify profile link</string>
+    <string name="add_friend_no_results">No Spotify users found</string>
+    <string name="add_friend_by_link">Add by playlist link</string>
+    <string name="add_friend_suggestions">Suggestions</string>
+    <string name="load_more_failed_retry">Couldn\'t load more – Retry</string>
+    <string name="search_filter_profiles">Profiles</string>
+    <!-- Queue · Play · Next row: hold Next for Soon -->
+    <string name="action_row_next_hold_soon">Play soon</string>
+    <string name="action_row_soon_open_state">Soon options open</string>
+    <string name="song_option_soon_title">Play this song soon</string>
+    <string name="song_option_soon_back">Back to song options</string>
+    <string name="song_soon_then_now">Playing now, then this song</string>
+    <string name="song_soon_then_after">Then this song, after</string>
+    <!-- Friends: manage, pins, add-friend circle (batch 18) -->
+    <plurals name="friends_rename_title">
+        <item quantity="one">Rename friend</item>
+        <item quantity="other">Rename %d friends</item>
+    </plurals>
+    <string name="friends_rename_reset_cd">Use their %1$s name</string>
+    <string name="friends_rename_save">Save</string>
+    <plurals name="friends_remove_title">
+        <item quantity="one">Remove friend?</item>
+        <item quantity="other">Remove %d friends?</item>
+    </plurals>
+    <string name="friends_remove_body">Their saved playlists are removed from PixelPlayer.</string>
+    <string name="friends_remove_unfollow">Also unfollow on Spotify</string>
+    <string name="friends_remove_unfollow_sub">You stop following them on your Spotify account</string>
+    <string name="friends_remove_confirm">Remove</string>
+    <plurals name="friends_unfollow_failed">
+        <item quantity="one">Couldn\'t unfollow %d person on Spotify. They were still removed from PixelPlayer.</item>
+        <item quantity="other">Couldn\'t unfollow %d people on Spotify. They were still removed from PixelPlayer.</item>
+    </plurals>
+    <string name="friends_pin">Pin</string>
+    <string name="friends_unpin">Unpin</string>
+    <string name="friends_pinned_cd">Pinned</string>
+    <string name="add_friend_filter_all">Everyone</string>
+    <string name="add_friend_filter_cd">Show people %1$s follows and is followed by</string>
+    <string name="add_friend_circle_empty">No one to show for %1$s</string>
+    <string name="friend_sheet_tab_top">Top</string>
+    <string name="friend_sheet_tab_history">History</string>
+    <string name="friend_sheet_top_artists">Top artists</string>
+    <string name="friend_sheet_top_songs">Top songs</string>
+    <string name="friend_sheet_rank_cd">Number %1$d, %2$s, %3$d plays this week</string>
+    <string name="queue_action_move_next">Move to play next</string>
+    <string name="queue_action_move_soon">Move to play soon</string>
+    <string name="library_connect_services_title">Connect Spotify, YouTube Music or Apple Music</string>
+    <string name="library_connect_services_action">Connect</string>
+    <string name="friend_playlist_syncing">Syncing…</string>
+    <!-- Playlist export sheet -->
+    <string name="playlist_export_title">Export playlist</string>
+    <plurals name="playlist_export_subtitle">
+        <item quantity="one">%1$s · %2$d song</item>
+        <item quantity="other">%1$s · %2$d songs</item>
+    </plurals>
+    <string name="playlist_export_exporting">Exporting…</string>
+    <string name="playlist_export_spotify">Spotify</string>
+    <string name="playlist_export_youtube_music">YouTube Music</string>
+    <string name="playlist_export_action">Export</string>
+    <string name="playlist_export_connect_first">Connect first</string>
+    <string name="playlist_export_auto_sync">Auto-sync</string>
+    <string name="playlist_export_auto_sync_body">Keeps the exported playlist up to date</string>
+    <string name="playlist_export_file">Export as file</string>
+    <string name="playlist_export_transfer">Transfer</string>
+    <!-- Friend profile options + picture viewer -->
+    <string name="friend_options_cd">Options for %1$s</string>
+    <string name="friend_options_unfollow">Unfollow</string>
+    <string name="friend_options_block">Block</string>
+    <string name="friend_options_block_confirm">Tap to block</string>
+    <string name="friend_options_block_body">Blocking unfollows %1$s, hides them from Friends and keeps them out of people lists. Undo it in Accounts → Hidden.</string>
+    <string name="friend_options_hide">Hide</string>
+    <string name="friend_options_play_along">Play along</string>
+    <string name="avatar_viewer_saved">Saved to Pictures/PixelPlayer</string>
+    <string name="avatar_viewer_save_failed">Couldn\'t save the picture</string>
+    <string name="playlist_transfer_title">Transfer</string>
+    <string name="playlist_transfer_body">TuneMyMusic can import this playlist from a file. Save it first, then upload it there.</string>
+    <string name="playlist_transfer_save_and_open">Save file &amp; open TuneMyMusic</string>
+    <string name="playlist_transfer_just_open">Open without a file</string>
 </resources>

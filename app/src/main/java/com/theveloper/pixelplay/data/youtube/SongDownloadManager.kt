@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -58,7 +59,9 @@ class SongDownloadManager @Inject constructor(
     private val okHttpClient: OkHttpClient,
     @YouTubeOkHttpClient private val youTubeHttpClient: OkHttpClient,
     private val metadataGatherer: com.theveloper.pixelplay.data.metadata.SongMetadataGatherer,
-    private val libraryIndexer: com.theveloper.pixelplay.data.library.DownloadedLibraryIndexer
+    private val libraryIndexer: com.theveloper.pixelplay.data.library.DownloadedLibraryIndexer,
+    private val lyricsRepository: dagger.Lazy<com.theveloper.pixelplay.data.repository.LyricsRepository>,
+    private val qualityStore: DownloadQualityStore
 ) {
     private val downloadLocks = Array(32) { Mutex() }
     private val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -95,9 +98,14 @@ class SongDownloadManager @Inject constructor(
      * Downloads an online song to local storage.
      * Pipeline: resolve stream URL -> download -> tag metadata -> scan to MediaStore
      */
-    suspend fun downloadSong(song: Song, quality: DownloadQuality? = null): Result<File> =
+    /**
+     * [replaceExisting]: download again at [quality] even when the song is already on the device
+     * (playlist quality upgrade / downgrade). The old file stays until the new one is complete,
+     * verified and indexed, so a failure never loses the song.
+     */
+    suspend fun downloadSong(song: Song, quality: DownloadQuality? = null, replaceExisting: Boolean = false): Result<File> =
         downloadLocks[(song.id.hashCode() and Int.MAX_VALUE) % downloadLocks.size].withLock {
-            downloadLocked(song, quality)
+            downloadLocked(song, quality, replaceExisting)
         }
 
     /** Recent download speed (bytes/s) measured from real transfers, or 0 before the first one. */
@@ -138,7 +146,7 @@ class SongDownloadManager @Inject constructor(
         } else song.id.removePrefix("yt_"))?.removePrefix("yt_")
 
     // Background-priority threads: a download must never steal CPU from audio decoding/rendering.
-    private suspend fun downloadLocked(song: Song, quality: DownloadQuality?): Result<File> = withContext(com.theveloper.pixelplay.data.stream.PlaybackBandwidthGate.downloadDispatcher) {
+    private suspend fun downloadLocked(song: Song, quality: DownloadQuality?, replaceExisting: Boolean = false): Result<File> = withContext(com.theveloper.pixelplay.data.stream.PlaybackBandwidthGate.downloadDispatcher) {
         val songId = song.id
         var stagingFile: File? = null
         try {
@@ -146,7 +154,11 @@ class SongDownloadManager @Inject constructor(
             val savedFile = saved?.takeIf { it.isDownloaded }?.let {
                 File(it.localFilePath ?: it.localSongId ?: "")
             }
-            if (savedFile != null && savedFile.isFile && savedFile.canRead() && savedFile.length() > 0) {
+            // Already at the quality asked for: nothing to change.
+            val alreadyAtQuality = quality != null && qualityStore.get(songId) == quality
+            if (savedFile != null && savedFile.isFile && savedFile.canRead() && savedFile.length() > 0 &&
+                (!replaceExisting || alreadyAtQuality)
+            ) {
                 updateProgress(songId, DownloadProgress.Completed(songId, savedFile.absolutePath))
                 return@withContext Result.success(savedFile)
             }
@@ -178,6 +190,19 @@ class SongDownloadManager @Inject constructor(
                         return@withContext Result.failure(Exception(error))
                     }
             val renditionKey = stream.renditionKey()
+            // Full metadata lookup (album, album artist, genre, year, track / disc, credits, cover)
+            // for every download, whatever the container, running alongside the transfer.
+            val deepMetadata = CoroutineScope(currentCoroutineContext()).async {
+                try {
+                    metadataGatherer.gatherDeep(song, timeoutMs = DEEP_METADATA_TIMEOUT_MS)
+                        .copy(title = song.title, artist = song.artist)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Timber.tag(TAG).w(e, "Metadata lookup failed for %s", songId)
+                    song
+                }
+            }
 
             // Step 2: Download audio file
             updateProgress(songId, DownloadProgress.Downloading(songId, 0))
@@ -233,11 +258,13 @@ class SongDownloadManager @Inject constructor(
             // tag writers reject; an untagged file still plays and is indexed via the DB).
             // Tagging happens on a copy so a tag writer failure can never damage the audio.
             updateProgress(songId, DownloadProgress.Tagging(songId))
+            val gathered = deepMetadata.await()
+            // Opus / WebM can't be tagged by the tag writer; its metadata goes to the library index.
             if (stream.container == "mp4") {
                 val tagged = File.createTempFile(".tag-", ".${stream.fileExtension}", downloadDir)
                 try {
                     partial.copyTo(tagged, overwrite = true)
-                    tagMetadata(tagged, song)
+                    tagMetadata(tagged, song, gathered)
                     if (isPlayableAudio(tagged)) {
                         java.nio.file.Files.move(tagged.toPath(), partial.toPath(),
                             java.nio.file.StandardCopyOption.REPLACE_EXISTING)
@@ -294,37 +321,30 @@ class SongDownloadManager @Inject constructor(
                 Timber.tag(TAG).w(e, "Could not read audio header for bitrate/sampleRate")
             }
 
-            // Album, album artist, year and genre from the metadata lookup the tagging step
-            // already ran, so the download joins the right album instead of "YouTube Music".
-            val filled = runCatching { metadataGatherer.applyCached(song) }.getOrDefault(song)
-            // Never fail a finished download just because the library index could not be updated.
-            try {
-                libraryIndexer.index(
-                    com.theveloper.pixelplay.data.library.DownloadedLibraryIndexer.Input(
-                        cloudSongId = songId,
-                        title = song.title,
-                        artist = song.artist,
-                        album = filled.album.takeUnless {
-                            com.theveloper.pixelplay.data.library.CollectionKeys.isPlaceholderAlbum(it)
-                        } ?: song.album,
-                        albumArtist = filled.albumArtist ?: song.albumArtist,
-                        albumArtUri = song.albumArtUriString ?: filled.albumArtUriString,
-                        durationMs = song.duration.takeIf { it > 0 } ?: filled.duration,
-                        genre = filled.genre ?: song.genre,
-                        year = filled.year.takeIf { it > 0 } ?: song.year,
-                        trackNumber = filled.trackNumber.takeIf { it > 0 } ?: song.trackNumber,
-                        file = outputFile,
-                        mimeType = stream.mimeType,
-                        bitrate = actualBitrate,
-                        sampleRate = actualSampleRate,
-                        isFavorite = song.isFavorite
-                    )
-                )
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Timber.tag(TAG).w(e, "Downloaded %s but could not add it to the library index", songId)
+            // Everything the lookup found (falling back to anything cached and to the song itself).
+            val filled = mergeMetadata(gathered, runCatching { metadataGatherer.applyCached(song) }.getOrDefault(song))
+            indexDownload(songId, song, filled, outputFile, stream.mimeType, actualBitrate, actualSampleRate)
+            // What it was saved at: the quality picked, else what the default rule chose.
+            (quality ?: classifyDownloadQuality(stream.mimeType + " " + stream.container, stream.bitrate / 1000))
+                ?.let { qualityStore.record(songId, it) }
+            // Re-downloaded at another quality into a different file: the old one goes now that
+            // the new one is saved, verified and indexed.
+            if (savedFile != null && savedFile.absolutePath != outputFile.absolutePath && savedFile.isFile) {
+                runCatching { savedFile.delete() }
+                    .onFailure { Timber.tag(TAG).w(it, "Couldn't remove the replaced download for %s", songId) }
             }
+            // A lookup that ran out of time keeps going in the background; re-index when it lands.
+            if (isMissingBasics(filled)) {
+                managerScope.launch {
+                    val later = runCatching { metadataGatherer.gatherDeep(song, timeoutMs = LATE_METADATA_TIMEOUT_MS) }
+                        .getOrNull() ?: return@launch
+                    val merged = mergeMetadata(later.copy(title = song.title, artist = song.artist), filled)
+                    if (merged != filled) indexDownload(songId, song, merged, outputFile, stream.mimeType, actualBitrate, actualSampleRate)
+                }
+            }
+            // Lyrics for offline listening (best effort; stored by the lyrics repository), plus a
+            // synced .lrc next to the file so the download is ready as word-sync training data.
+            managerScope.launch { saveLyricsFor(song, outputFile) }
 
             updateProgress(songId, DownloadProgress.Completed(songId, outputFile.absolutePath))
             Timber.tag(TAG).i("Download completed: ${outputFile.absolutePath}")
@@ -437,11 +457,10 @@ class SongDownloadManager @Inject constructor(
         return output.toByteArray()
     }
 
-    private suspend fun tagMetadata(file: File, original: Song) {
-        // Fill album, genre, track / disc number, album artist, cover etc. first (cached after
-        // the first lookup, so usually instant). Title and artist stay exactly as the user saw them.
-        val song = runCatching { metadataGatherer.gatherDeep(original, timeoutMs = 8_000) }.getOrDefault(original)
-            .copy(title = original.title, artist = original.artist)
+    private suspend fun tagMetadata(file: File, original: Song, gathered: Song) {
+        // Album, genre, track / disc number, album artist, cover etc. from the lookup that ran
+        // during the transfer. Title and artist stay exactly as the user saw them.
+        val song = gathered.copy(title = original.title, artist = original.artist)
         val extra = metadataGatherer.cachedFor(original)
         val audioFile = AudioFileIO.read(file)
         val tag = audioFile.tagOrCreateAndSetDefault
@@ -532,6 +551,89 @@ class SongDownloadManager @Inject constructor(
         }
     }
 
+    /** [primary]'s fields, with blanks filled from [fallback]. */
+    private fun mergeMetadata(primary: Song, fallback: Song): Song = primary.copy(
+        album = primary.album.takeUnless { com.theveloper.pixelplay.data.library.CollectionKeys.isPlaceholderAlbum(it) }
+            ?: fallback.album,
+        albumArtist = primary.albumArtist ?: fallback.albumArtist,
+        albumArtUriString = primary.albumArtUriString ?: fallback.albumArtUriString,
+        genre = primary.genre?.takeIf { it.isNotBlank() } ?: fallback.genre,
+        year = primary.year.takeIf { it > 0 } ?: fallback.year,
+        trackNumber = primary.trackNumber.takeIf { it > 0 } ?: fallback.trackNumber,
+        discNumber = primary.discNumber?.takeIf { it > 0 } ?: fallback.discNumber,
+        lyrics = primary.lyrics ?: fallback.lyrics,
+        duration = primary.duration.takeIf { it > 0 } ?: fallback.duration,
+    )
+
+    private fun isMissingBasics(song: Song): Boolean =
+        com.theveloper.pixelplay.data.library.CollectionKeys.isPlaceholderAlbum(song.album) ||
+            song.genre.isNullOrBlank() || song.year <= 0
+
+    private suspend fun indexDownload(
+        songId: String, song: Song, filled: Song, outputFile: File,
+        mimeType: String, bitrate: Int, sampleRate: Int,
+    ) {
+        // Never fail a finished download just because the library index could not be updated.
+        try {
+            libraryIndexer.index(
+                com.theveloper.pixelplay.data.library.DownloadedLibraryIndexer.Input(
+                    cloudSongId = songId,
+                    title = song.title,
+                    artist = song.artist,
+                    album = filled.album.takeUnless {
+                        com.theveloper.pixelplay.data.library.CollectionKeys.isPlaceholderAlbum(it)
+                    } ?: song.album,
+                    albumArtist = filled.albumArtist ?: song.albumArtist,
+                    albumArtUri = com.theveloper.pixelplay.data.metadata.ArtworkUrls.upgrade(
+                        song.albumArtUriString ?: filled.albumArtUriString
+                    ) ?: song.albumArtUriString ?: filled.albumArtUriString,
+                    durationMs = song.duration.takeIf { it > 0 } ?: filled.duration,
+                    genre = filled.genre ?: song.genre,
+                    year = filled.year.takeIf { it > 0 } ?: song.year,
+                    trackNumber = filled.trackNumber.takeIf { it > 0 } ?: song.trackNumber,
+                    discNumber = filled.discNumber?.takeIf { it > 0 } ?: song.discNumber,
+                    lyrics = filled.lyrics ?: song.lyrics,
+                    file = outputFile,
+                    mimeType = mimeType,
+                    bitrate = bitrate,
+                    sampleRate = sampleRate,
+                    isFavorite = song.isFavorite
+                )
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Timber.tag(TAG).w(e, "Downloaded %s but could not add it to the library index", songId)
+        }
+    }
+
+    /**
+     * Stores lyrics for [song] and, when line-synced lyrics exist, writes `<file>.lrc` beside the
+     * download. Returns true when a synced sidecar exists afterwards. Never throws.
+     */
+    suspend fun saveLyricsFor(song: Song, file: File): Boolean = withContext(Dispatchers.IO) {
+        if (com.theveloper.pixelplay.data.lyrics.training.LyricsSidecar.hasSynced(file)) return@withContext true
+        try {
+            val repo = lyricsRepository.get()
+            var lyrics = runCatching { repo.fetchFromRemote(song).getOrNull()?.first }.getOrNull()
+            if (lyrics?.synced.isNullOrEmpty()) {
+                lyrics = runCatching { repo.upgradeToSynced(song, ignoreBackoff = true) }.getOrNull() ?: lyrics
+            }
+            if (lyrics?.synced.isNullOrEmpty()) {
+                lyrics = runCatching { repo.getStoredLyrics(song)?.first }.getOrNull() ?: lyrics
+            }
+            val written = com.theveloper.pixelplay.data.lyrics.training.LyricsSidecar
+                .write(file, lyrics, song.title, song.displayArtist)
+            if (!written) Timber.tag(TAG).d("No synced lyrics for %s", song.id)
+            written
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Timber.tag(TAG).d("No lyrics stored for %s: %s", song.id, e.message)
+            false
+        }
+    }
+
     /** Song ids whose next cancellation is a pause (keep bytes) rather than a cancel. */
     private val pauseRequested: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
@@ -588,6 +690,8 @@ class SongDownloadManager @Inject constructor(
         private const val TAG = "SongDownloadManager"
         private const val MANIFEST_RETRIES = 2
         private const val MIN_AUDIO_BYTES = 16 * 1024L
+        private const val DEEP_METADATA_TIMEOUT_MS = 12_000L
+        private const val LATE_METADATA_TIMEOUT_MS = 45_000L
 
         /** Library (SongEntity) id used for the downloaded copy of the online song [songId]. */
         fun localLibraryId(songId: String): Long =

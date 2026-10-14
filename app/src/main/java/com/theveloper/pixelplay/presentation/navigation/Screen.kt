@@ -1,6 +1,7 @@
 package com.theveloper.pixelplay.presentation.navigation
 
 import androidx.compose.runtime.Immutable
+import com.theveloper.pixelplay.data.library.CollectionKeys
 import com.theveloper.pixelplay.data.model.Song
 
 
@@ -11,6 +12,8 @@ sealed class Screen(val route: String) {
     object Library : Screen("library")
     object Settings : Screen("settings")
     object Accounts : Screen("settings_accounts")
+    /** Settings → Profile: the PixelPlay email + password account. */
+    object Profile : Screen("settings_profile")
     object SettingsCategory : Screen("settings_category/{categoryId}?highlight={highlight}") {
         fun createRoute(categoryId: String, highlight: String? = null) =
             if (!highlight.isNullOrBlank()) "settings_category/$categoryId?highlight=$highlight"
@@ -39,17 +42,111 @@ sealed class Screen(val route: String) {
     /** Internet radio: local → region → country → world, as a list, tuner dial or map. */
     object Radio : Screen("radio")
     object  DailyMixScreen : Screen("daily_mix")
-    object RecentlyPlayed : Screen("recently_played")
+    /** Listening history; `mode` = "Listened" (default) or "Liked". */
+    object RecentlyPlayed : Screen("recently_played?mode={mode}") {
+        fun createRoute(mode: String? = null) =
+            if (mode.isNullOrBlank()) "recently_played" else "recently_played?mode=$mode"
+    }
     object RecentlyHeard : Screen("recently_heard")
     object Stats : Screen("stats")
+    object LiveEvents : Screen("live_events")
     object GenreDetail : Screen("genre_detail/{genreId}") { // New screen
         fun createRoute(genreId: String) = "genre_detail/$genreId"
     }
     object DJSpace : Screen("dj_space")
     // La ruta base es "album_detail". La ruta completa con el argumento se define en AppNavigation.
     object AlbumDetail : Screen("album_detail/{albumId}") {
+        /** Prefix marking the route argument as an album *name* ("Title|Artist") rather than an id. */
+        const val NAME_PREFIX = "name:"
+        /** Separates the album title from its artist in a name route. */
+        const val NAME_SEPARATOR = "|"
+
+        /** Prefix marking the route argument as an online YouTube Music browse album. */
+        const val BROWSE_PREFIX = "browse:"
+        const val BROWSE_SEPARATOR = "|"
+
         fun createRoute(albumId: Long) = "album_detail/$albumId"
         fun createRoute(albumId: String) = "album_detail/${java.net.URLEncoder.encode(albumId, "UTF-8")}"
+
+        /**
+         * Opens an online album by its YouTube Music browseId, title, artist, artwork URL, and release year.
+         */
+        fun createRouteForBrowse(
+            browseId: String,
+            title: String,
+            artist: String,
+            artUrl: String? = null,
+            year: Int = 0
+        ): String {
+            val encodedArt = artUrl?.let {
+                try { java.net.URLEncoder.encode(it, "UTF-8") } catch (e: Exception) { it }
+            }.orEmpty()
+            val payload = listOf(
+                browseId.trim(),
+                title.trim(),
+                artist.trim(),
+                encodedArt,
+                year.toString()
+            ).joinToString(BROWSE_SEPARATOR)
+            return createRoute(BROWSE_PREFIX + payload)
+        }
+
+        data class BrowsePayload(
+            val browseId: String,
+            val title: String,
+            val artist: String,
+            val artUrl: String?,
+            val year: Int
+        )
+
+        fun parseBrowsePayload(payload: String): BrowsePayload? {
+            val parts = payload.split(BROWSE_SEPARATOR)
+            if (parts.isEmpty()) return null
+            val browseId = parts.getOrNull(0)?.trim()?.takeIf { it.isNotBlank() } ?: return null
+            val title = parts.getOrNull(1)?.trim().orEmpty()
+            val artist = parts.getOrNull(2)?.trim().orEmpty()
+            val rawArt = parts.getOrNull(3)?.trim()?.takeIf { it.isNotBlank() }
+            val artUrl = rawArt?.let {
+                try { java.net.URLDecoder.decode(it, "UTF-8") } catch (e: Exception) { it }
+            }
+            val year = parts.getOrNull(4)?.toIntOrNull() ?: 0
+            return BrowsePayload(browseId, title, artist, artUrl, year)
+        }
+
+        /**
+         * Opens an album by title (and artist) — for cloud songs, streams and unindexed files whose
+         * `albumId` is -1 and so have no library album row to open by id.
+         */
+        fun createRouteForName(albumTitle: String, artistName: String? = null): String {
+            val title = albumTitle.trim()
+            val payload = if (artistName.isNullOrBlank()) title else "$title$NAME_SEPARATOR${artistName.trim()}"
+            return createRoute(NAME_PREFIX + payload)
+        }
+
+        /** Splits a name-route payload (without [NAME_PREFIX]) into title and optional artist. */
+        fun parseNamePayload(payload: String): Pair<String, String?> {
+            val cut = payload.lastIndexOf(NAME_SEPARATOR)
+            if (cut <= 0) return payload.trim() to null
+            val title = payload.substring(0, cut).trim()
+            val artist = payload.substring(cut + NAME_SEPARATOR.length).trim().takeIf { it.isNotBlank() }
+            return title to artist
+        }
+
+        /**
+         * Best route for a song's album: library id when it has one, otherwise by name.
+         * Null when the song has neither (no album to open).
+         */
+        fun createRouteForSong(song: Song): String? = when {
+            song.albumId > 0L -> createRoute(song.albumId)
+            // By name also finds the stream album a song belongs to, and works without one.
+            song.album.isNotBlank() && !CollectionKeys.isPlaceholderAlbum(song.album) ->
+                createRouteForName(
+                    song.album,
+                    song.albumArtist?.takeIf { it.isNotBlank() } ?: song.artist
+                )
+            CollectionKeys.isStreamAlbumId(song.albumId) -> createRoute(song.albumId)
+            else -> null
+        }
     }
 
     object ArtistDetail : Screen("artist_detail/{artistId}") {

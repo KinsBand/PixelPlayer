@@ -1,6 +1,8 @@
 package com.theveloper.pixelplay.presentation.components.external
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.animation.core.tween
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -97,18 +99,34 @@ fun ExternalPlayerOverlay(
         )
     }
 
+    // Close = play the slide-down/fade exit first, then tell the host (which finishes the
+    // activity). Calling onDismiss() straight away cut the exit animation off.
+    val latestOnDismiss by rememberUpdatedState(onDismiss)
+    var dismissRequested by remember { mutableStateOf(false) }
+    val requestDismiss: () -> Unit = {
+        if (!dismissRequested) {
+            dismissRequested = true
+            sheetVisible = false
+        }
+    }
+    LaunchedEffect(dismissRequested) {
+        if (dismissRequested) {
+            kotlinx.coroutines.delay(EXTERNAL_OVERLAY_EXIT_MS.toLong())
+            latestOnDismiss()
+        }
+    }
+
     LaunchedEffect(currentSong) {
         if (currentSong != null) {
             awaitingSong = false
-            sheetVisible = true
+            if (!dismissRequested) sheetVisible = true
         } else if (!awaitingSong) {
-            sheetVisible = false
-            onDismiss()
+            requestDismiss()
         }
     }
 
     BackHandler(enabled = sheetVisible) {
-        onDismiss()
+        requestDismiss()
     }
 
     val backgroundScrim = MaterialTheme.colorScheme.scrim.copy(alpha = 0.35f)
@@ -119,7 +137,7 @@ fun ExternalPlayerOverlay(
         AnimatedVisibility(
             visible = sheetVisible,
             enter = fadeIn(),
-            exit = fadeOut()
+            exit = fadeOut(tween(EXTERNAL_OVERLAY_EXIT_MS))
         ) {
             Box(
                 modifier = Modifier
@@ -128,14 +146,17 @@ fun ExternalPlayerOverlay(
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
-                    ) { onDismiss() }
+                    ) { requestDismiss() }
             )
         }
 
         AnimatedVisibility(
             visible = sheetVisible,
             enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            exit = slideOutVertically(
+                targetOffsetY = { it },
+                animationSpec = tween(EXTERNAL_OVERLAY_EXIT_MS, easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerateEasing)
+            ) + fadeOut(tween(EXTERNAL_OVERLAY_EXIT_MS)),
             modifier = Modifier.align(Alignment.BottomCenter)
         ) {
             Surface(
@@ -346,3 +367,5 @@ fun ExternalPlayerOverlay(
         }
     }
 }
+
+private const val EXTERNAL_OVERLAY_EXIT_MS = 250

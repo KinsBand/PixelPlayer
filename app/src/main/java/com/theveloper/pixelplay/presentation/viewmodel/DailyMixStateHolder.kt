@@ -43,8 +43,15 @@ class DailyMixStateHolder @Inject constructor(
     private val musicRepository: MusicRepository,
     private val cloudSongDao: CloudSongDao,
     private val connectedLibraryRepository: ConnectedLibraryRepository,
-    private val youtubeRepository: YouTubeRepository
+    private val youtubeRepository: YouTubeRepository,
+    private val nanoMixIntent: com.theveloper.pixelplay.data.ai.nano.NanoMixIntentReader,
 ) {
+    /** On-device Gemini Nano is ready to read queue prompts. */
+    val isPromptAiReady: Boolean get() = nanoMixIntent.isReady
+    fun warmUpPromptAi() = nanoMixIntent.warmUp()
+    /** Nano's reading of a queue prompt, or null (not ready / busy / too slow). */
+    suspend fun readMixPromptWithAi(query: String) = nanoMixIntent.read(query)
+
     var discoveryBalance: Double
         get() = adaptiveMix.discoveryBalance
         set(value) { adaptiveMix.discoveryBalance = value }
@@ -71,12 +78,21 @@ class DailyMixStateHolder @Inject constructor(
     val feedbackLog get() = adaptiveMix.feedbackLog
     fun undoFeedback(id: String) = adaptiveMix.undoFeedback(id)
     suspend fun personalAdjustments(songs: List<Song>) = adaptiveMix.personalAdjustments(songs)
-    suspend fun resolveMixPrompt(query: String) = adaptiveMix.resolvePrompt(query)
-    fun steerMixTowards(songs: List<Song>) = adaptiveMix.steerTowards(songs)
+    suspend fun resolveMixPrompt(query: String, refined: com.theveloper.pixelplay.data.PromptIntent? = null) =
+        adaptiveMix.resolvePrompt(query, refined)
+    fun steerMixTowards(songs: List<Song>, filter: com.theveloper.pixelplay.presentation.library.VibeFilter? = null) =
+        adaptiveMix.steerTowards(songs, filter)
     fun clearMixPromptSteer() = adaptiveMix.clearPromptSteer()
+    /** Turns a resolved prompt into steers (toward, away, less, blend, path, shifts); returns what was applied. */
+    fun applyMixPrompt(resolution: com.theveloper.pixelplay.data.AdaptiveMix.PromptResolution) = adaptiveMix.applyPrompt(resolution)
+    val mixSteers get() = adaptiveMix.steers
+    fun removeMixSteer(id: String) = adaptiveMix.removeSteer(id)
+    fun mixHeadingSummary() = adaptiveMix.headingSummary()
     fun deactivateMix() = adaptiveMix.deactivate()
     fun undoMixFeedback() = adaptiveMix.undo()
     fun dislikeEverywhere(song: Song) = adaptiveMix.dislikeEverywhere(song)
+    /** A lyrics-screen reaction steers the mix (session vibe now, the song's ranking later). */
+    fun onSongReaction(song: Song, reaction: com.theveloper.pixelplay.data.SongReaction) = adaptiveMix.onReaction(song, reaction)
     val feedbackRevision get() = adaptiveMix.revision
 
     fun dislike(song: Song) {

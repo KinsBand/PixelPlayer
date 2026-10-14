@@ -103,6 +103,8 @@ fun LibrarySongsTab(
             .map { it.currentSong?.id }
             .distinctUntilChanged()
     }.collectAsStateWithLifecycle(initialValue = null)
+    // One playback collector for all rows (they used to start one each while scrolling).
+    val playbackSnapshot = rememberLibraryPlaybackSnapshot(playerViewModel)
 
     // Check if list is effectively empty (based on Paging state)
     // val isListEmpty = songs.itemCount == 0 && songs.loadState.refresh is LoadState.NotLoading
@@ -355,6 +357,7 @@ fun LibrarySongsTab(
                                     LibraryPlaybackAwareSongItem(
                                         song = song,
                                         playerViewModel = playerViewModel,
+                                        playback = playbackSnapshot,
                                         isSelected = isSelected,
                                         //albumArtSize = 46.dp,
                                         isSelectionMode = isSelectionMode,

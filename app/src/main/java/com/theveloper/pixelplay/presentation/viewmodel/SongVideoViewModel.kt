@@ -13,6 +13,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import android.content.Context
+import android.net.ConnectivityManager
+import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
+import com.theveloper.pixelplay.data.youtube.VideoRendition
+import com.theveloper.pixelplay.data.youtube.VideoStreams
+import com.theveloper.pixelplay.data.youtube.YouTubeChunkedDataSource
+import com.theveloper.pixelplay.data.youtube.YouTubeVideoStreamResolver
+import com.theveloper.pixelplay.data.youtube.pickVideoRendition
+import dagger.hilt.android.qualifiers.ApplicationContext
 
 data class SongVideoUiState(
     val songId: String? = null,
@@ -23,10 +32,103 @@ data class SongVideoUiState(
     val error: String? = null,
 )
 
+/**
+ * Which player plays the selected video, and at what quality. [streams] non-null = ExoPlayer
+ * with a real quality list; [fallback] = the YouTube embed (extraction failed or the stream
+ * errored), where quality can't change and the button is hidden.
+ */
+data class VideoQualityState(
+    val videoId: String? = null,
+    val resolving: Boolean = false,
+    val streams: VideoStreams? = null,
+    val fallback: Boolean = false,
+    /** This session's pick; null = Auto (or the starred quality when there is one). */
+    val pickedHeight: Int? = null,
+    /** True when the user explicitly picked Auto, so the star doesn't override it. */
+    val pickedAuto: Boolean = false,
+    val starredHeight: Int? = null,
+)
+
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @HiltViewModel
-class SongVideoViewModel @Inject constructor(private val repository: VideoRepository) : ViewModel() {
+class SongVideoViewModel @Inject constructor(
+    private val repository: VideoRepository,
+    private val streamResolver: YouTubeVideoStreamResolver,
+    private val userPreferencesRepository: UserPreferencesRepository,
+    @ApplicationContext private val appContext: Context,
+) : ViewModel() {
     private val mutableState = MutableStateFlow(SongVideoUiState())
     val state = mutableState.asStateFlow()
+
+    private val mutableQuality = MutableStateFlow(VideoQualityState())
+    val quality = mutableQuality.asStateFlow()
+    private var resolveJob: Job? = null
+
+    /** Feeds this video's streams to ExoPlayer. */
+    val videoDataSourceFactory = YouTubeChunkedDataSource.Factory(streamResolver.okHttpClient)
+
+    init {
+        viewModelScope.launch {
+            userPreferencesRepository.preferredVideoQualityFlow.collect { starred ->
+                mutableQuality.value = mutableQuality.value.copy(starredHeight = starred)
+            }
+        }
+    }
+
+    /** Looks up [videoId]'s real streams once; falls back to the embed when that fails. */
+    fun resolveStreams(videoId: String) {
+        val current = mutableQuality.value
+        if (current.videoId == videoId && (current.resolving || current.streams != null || current.fallback)) return
+        resolveJob?.cancel()
+        // A new video: the session pick resets, so the starred quality applies again.
+        mutableQuality.value = current.copy(
+            videoId = videoId, resolving = true, streams = null, fallback = false,
+            pickedHeight = null, pickedAuto = false
+        )
+        resolveJob = viewModelScope.launch {
+            val streams = streamResolver.resolve(videoId)
+            if (mutableQuality.value.videoId != videoId) return@launch
+            mutableQuality.value = mutableQuality.value.copy(
+                resolving = false, streams = streams, fallback = streams == null
+            )
+        }
+    }
+
+    /** ExoPlayer couldn't play the stream (expired URL, network): use the embed instead. */
+    fun exoPlaybackFailed(videoId: String) {
+        streamResolver.invalidate(videoId)
+        if (mutableQuality.value.videoId != videoId) return
+        mutableQuality.value = mutableQuality.value.copy(resolving = false, streams = null, fallback = true)
+    }
+
+    /** Picks a quality for now; null = Auto. */
+    fun pickQuality(height: Int?) {
+        mutableQuality.value = mutableQuality.value.copy(pickedHeight = height, pickedAuto = height == null)
+    }
+
+    /** Stars [height] (used every time a video loads), or clears the star if it's already starred. */
+    fun toggleStar(height: Int) {
+        val starred = mutableQuality.value.starredHeight
+        val next = if (starred == height) null else height
+        if (next != null) pickQuality(next)
+        viewModelScope.launch { userPreferencesRepository.setPreferredVideoQuality(next) }
+    }
+
+    /** The quality to play right now (pick, then star, then Auto by network). */
+    fun renditionFor(q: VideoQualityState): VideoRendition? {
+        val streams = q.streams ?: return null
+        val requested = when {
+            q.pickedAuto -> null
+            q.pickedHeight != null -> q.pickedHeight
+            else -> q.starredHeight
+        }
+        return pickVideoRendition(streams, requested, isUnmetered())
+    }
+
+    private fun isUnmetered(): Boolean {
+        val cm = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+        return !cm.isActiveNetworkMetered
+    }
     private var searchJob: Job? = null
     private var generation = 0
     private var track: Song? = null
@@ -42,7 +144,7 @@ class SongVideoViewModel @Inject constructor(private val repository: VideoReposi
         if (current.songId == song.id && (current.loading || current.selected != null)) return
         prefetchJob?.cancel()
         prefetchJob = viewModelScope.launch {
-            try { repository.searchVideosForTrack(song.displayArtist, song.title, state.value.type) }
+            try { repository.searchVideosForTrack(song.displayArtist, song.title, state.value.type, durationMs = song.duration) }
             catch (e: CancellationException) { throw e }
             catch (_: Exception) { }
         }
@@ -65,7 +167,7 @@ class SongVideoViewModel @Inject constructor(private val repository: VideoReposi
         mutableState.value = SongVideoUiState(songId = song.id, type = type, loading = true)
         searchJob = viewModelScope.launch {
             try {
-                val results = repository.searchVideosForTrack(song.displayArtist, song.title, type, refresh)
+                val results = repository.searchVideosForTrack(song.displayArtist, song.title, type, refresh, durationMs = song.duration)
                 if (request != generation) return@launch
                 mutableState.value = state.value.copy(loading = false, candidates = results,
                     selected = results.firstOrNull(),

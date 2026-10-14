@@ -387,6 +387,24 @@ fun lyricsBlurRadius(distance: Float, strength: Float, max: Dp): Dp {
 }
 
 /**
+ * Reuses the last BlurEffect while the (whole-pixel) radius is unchanged. Shared by the lyrics
+ * sheet and the tab "Focus fade".
+ */
+internal class LyricLineBlurCache {
+    private var radiusPx = -1f
+    private var effect: androidx.compose.ui.graphics.BlurEffect? = null
+
+    fun effectFor(radius: Float): androidx.compose.ui.graphics.BlurEffect {
+        val cached = effect
+        if (cached != null && radius == radiusPx) return cached
+        return androidx.compose.ui.graphics.BlurEffect(radius, radius, androidx.compose.ui.graphics.TileMode.Clamp).also {
+            effect = it
+            radiusPx = radius
+        }
+    }
+}
+
+/**
  * The line to show in the centre: the last line that has started. Unlike
  * [resolveCurrentLineIndex], this stays on the last sung line through instrumental gaps
  * instead of returning -1. Returns -1 only before the first line.

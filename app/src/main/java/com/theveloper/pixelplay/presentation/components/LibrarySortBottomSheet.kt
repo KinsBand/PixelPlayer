@@ -75,7 +75,11 @@ fun LibrarySortBottomSheet(
     onViewToggleChange: (Boolean) -> Unit = {},
     viewToggleContent: (@Composable () -> Unit)? = null,
     sourceToggleContent: (@Composable () -> Unit)? = null,
-    extraContent: (@Composable () -> Unit)? = null
+    extraContent: (@Composable () -> Unit)? = null,
+    /** A second switch under the view toggle (Folders: "Synced lyrics badge"). */
+    secondToggleLabel: String? = null,
+    secondToggleChecked: Boolean = false,
+    onSecondToggleChange: (Boolean) -> Unit = {}
 ) {
     @Suppress("DEPRECATION")
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -93,6 +97,15 @@ fun LibrarySortBottomSheet(
     val boxCornerRadius by animateDpAsState(
         targetValue = if (viewToggleChecked) 18.dp else 50.dp,
         label = "boxCornerRadiusAnimation"
+    )
+
+    val secondBoxColor by animateColorAsState(
+        targetValue = if (secondToggleChecked) MaterialTheme.colorScheme.tertiary else unselectedColor,
+        label = "secondToggleColor"
+    )
+    val secondBoxCorner by animateDpAsState(
+        targetValue = if (secondToggleChecked) 18.dp else 50.dp,
+        label = "secondToggleCorner"
     )
 
     ModalBottomSheet(
@@ -246,6 +259,16 @@ fun LibrarySortBottomSheet(
                         boxBackgroundColor = boxBackgroundColor,
                         boxCornerRadius = boxCornerRadius,
                         onCheckedChange = onViewToggleChange
+                    )
+                }
+                if (secondToggleLabel != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    LibrarySheetToggleCard(
+                        label = secondToggleLabel,
+                        checked = secondToggleChecked,
+                        boxBackgroundColor = secondBoxColor,
+                        boxCornerRadius = secondBoxCorner,
+                        onCheckedChange = onSecondToggleChange
                     )
                 }
             }

@@ -25,6 +25,9 @@ import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LoadingIndicator
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material3.MotionScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -78,6 +81,8 @@ fun AnimatedPlaybackControls(
     iconSize: Dp = 32.dp,
     /** The queue finished: the centre button shows Replay (tap restarts the last song). */
     isQueueEndedProvider: () -> Boolean = { false },
+    /** Video mode: the video is loading/buffering, so the centre button shows a spinner. */
+    isLoadingProvider: () -> Boolean = { false },
 ) {
     val isPlaying = isPlayingProvider()
     var lastClicked by remember { mutableStateOf<PlaybackButtonType?>(null) }
@@ -213,6 +218,7 @@ fun AnimatedPlaybackControls(
                 MorphingPlayPauseIcon(
                     isPlaying = playPauseVisualState,
                     isQueueEnded = isQueueEndedProvider(),
+                    isLoading = isLoadingProvider(),
                     tint = tintPlayPauseIcon,
                     size = playPauseIconSize,
                     motionScheme = motionScheme
@@ -251,16 +257,20 @@ fun AnimatedPlaybackControls(
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun MorphingPlayPauseIcon(
     isPlaying: Boolean,
     tint: Color,
     size: Dp,
     motionScheme: MotionScheme,
-    isQueueEnded: Boolean = false
+    isQueueEnded: Boolean = false,
+    isLoading: Boolean = false
 ) {
-    // 0 = play, 1 = pause, 2 = replay (queue finished).
+    val loadingLabel = androidx.compose.ui.res.stringResource(com.theveloper.pixelplay.R.string.player_loading)
+    // 0 = play, 1 = pause, 2 = replay (queue finished), 3 = loading (song or video buffering).
     val iconState = when {
+        isLoading -> 3
         isQueueEnded -> 2
         isPlaying -> 1
         else -> 0
@@ -270,6 +280,15 @@ private fun MorphingPlayPauseIcon(
         animationSpec = motionScheme.fastEffectsSpec(),
         label = "playPauseCrossfade"
     ) { state ->
+        if (state == 3) {
+            LoadingIndicator(
+                modifier = Modifier
+                    .size(size + 8.dp)
+                    .semantics { contentDescription = loadingLabel },
+                color = tint
+            )
+            return@Crossfade
+        }
         Icon(
             imageVector = when (state) {
                 2 -> Icons.Rounded.Replay

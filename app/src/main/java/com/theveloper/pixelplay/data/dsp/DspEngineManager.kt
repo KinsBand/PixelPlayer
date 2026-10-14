@@ -1,5 +1,11 @@
 package com.theveloper.pixelplay.data.dsp
 
+import com.theveloper.pixelplay.data.preferences.EqualizerPreferencesRepository
+import com.theveloper.pixelplay.di.AppScope
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,7 +21,15 @@ import kotlin.math.pow
  * Coordinates real-time configuration between Compose UI, ViewModel, and Media3 [DspAudioProcessor].
  */
 @Singleton
-class DspEngineManager @Inject constructor() {
+class DspEngineManager @Inject constructor(
+    private val equalizerPreferencesRepository: EqualizerPreferencesRepository,
+    @AppScope private val appScope: CoroutineScope
+) {
+
+    companion object {
+        /** Top of the Extreme volume range, in dB above the device's maximum. */
+        const val MAX_VOLUME_BOOST_DB = 12f
+    }
 
     private val atomicConfig = AtomicReference(DspConfig())
 
@@ -42,8 +56,22 @@ class DspEngineManager @Inject constructor() {
     private var limiterEnabled: Boolean = true
     private var softSaturationEnabled: Boolean = true
     private var auditionLoudnessMultiplier: Float = 1.0f
+    private var volumeBoostDb: Float = 0f
 
     init {
+        recalculateAndPublish()
+        // Restore Extreme volume at startup (not only when the Equalizer screen opens).
+        appScope.launch(Dispatchers.Main.immediate) {
+            equalizerPreferencesRepository.volumeBoostDbFlow
+                .distinctUntilChanged()
+                .collect { setVolumeBoostDb(it) }
+        }
+    }
+
+    fun setVolumeBoostDb(db: Float) {
+        val clamped = db.coerceIn(0f, MAX_VOLUME_BOOST_DB)
+        if (clamped == volumeBoostDb) return
+        volumeBoostDb = clamped
         recalculateAndPublish()
     }
 
@@ -193,7 +221,8 @@ class DspEngineManager @Inject constructor() {
             crossfeedStrength = crossfeedStrength,
             limiterEnabled = limiterEnabled,
             softSaturationEnabled = softSaturationEnabled,
-            loudnessCompGain = auditionLoudnessMultiplier
+            loudnessCompGain = auditionLoudnessMultiplier,
+            volumeBoostGain = 10.0.pow((volumeBoostDb / 20.0).toDouble()).toFloat()
         )
 
         atomicConfig.set(snapshot)

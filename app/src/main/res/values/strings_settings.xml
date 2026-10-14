@@ -60,7 +60,7 @@
     <string name="settings_label_sync_rebuilding">Rebuilding database</string>
     <string name="settings_toast_rebuilding_database">Rebuilding database…</string>
     <string name="settings_auto_scan_lrc_title">Auto-scan .lrc files</string>
-    <string name="settings_auto_scan_lrc_subtitle">Automatically scan and assign .lrc files in the same folder during library sync.</string>
+    <string name="settings_auto_scan_lrc_subtitle">Pick up .lrc files next to your songs on sync.</string>
     <string name="settings_lyrics_management_section">Lyrics Management</string>
     <string name="settings_lyrics_source_priority_title">Lyrics Source Priority</string>
     <string name="settings_lyrics_source_priority_subtitle">Choose which source to try first when fetching lyrics.</string>
@@ -78,7 +78,9 @@
     <string name="settings_lyrics_lrclib_title">Enable Lyrics Fetching</string>
     <string name="settings_lyrics_lrclib_subtitle">Allow PixelPlayer to query LRCLIB for lyrics when missing.</string>
     <string name="settings_lyrics_auto_sync_title">Auto-sync lyrics timing</string>
-    <string name="settings_lyrics_auto_sync_subtitle">Listens to each song once, on your phone, and shifts synced lyrics that start early or late. Your own offset in the lyrics sheet always wins.</string>
+    <string name="settings_lyrics_auto_sync_subtitle">Fixes lyrics that run early or late. Your offset wins.</string>
+    <string name="settings_lyrics_word_align_title">Word-by-word sync on this phone</string>
+    <string name="settings_lyrics_word_align_subtitle">Word-by-word timing for English lyrics. 95 MB download.</string>
 
     <!-- Excluded Directories flow -->
     <string name="file_explorer_cd_refresh">Refresh</string>
@@ -186,15 +188,15 @@
     <string name="settings_language_turkish">Türkçe</string>
     <string name="settings_app_theme_title">App Theme</string>
     <string name="settings_app_theme_subtitle">Switch between light, dark, or follow system appearance.</string>
-    <string name="settings_theme_light">Light Theme</string>
-    <string name="settings_theme_dark">Dark Theme</string>
-    <string name="settings_theme_follow_system">Follow System</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_theme_follow_system">Follow</string>
     <string name="settings_smooth_corners_title">Rounded UI</string>
-    <string name="settings_smooth_corners_subtitle">Use complex shaped corners effectively improving aesthetics but may affect performance on low-end devices</string>
+    <string name="settings_smooth_corners_subtitle">Rounder, smoother corners. Slower on older phones.</string>
     <string name="settings_mini_player_song_transition_title">Mini player song transition</string>
-    <string name="settings_mini_player_song_transition_subtitle">Sweep the new song\'s colour, cover and title across the mini player from left to right</string>
+    <string name="settings_mini_player_song_transition_subtitle">New song sweeps across the mini player.</string>
     <string name="settings_disable_blur_all_over_title">Blur Effects</string>
-    <string name="settings_disable_blur_all_over_subtitle">Turn off blur effects across the app to save battery and resources.</string>
+    <string name="settings_disable_blur_all_over_subtitle">Flat surfaces instead of blur. Saves battery.</string>
     <string name="settings_show_scrollbar_title">Show Scrollbar</string>
     <string name="settings_show_scrollbar_subtitle">Display lateral scrollbar on music lists for quick scrolling</string>
     <string name="settings_now_playing_section">Now Playing</string>
@@ -203,7 +205,7 @@
     <string name="settings_player_theme_album_art">Album Art</string>
     <string name="settings_player_theme_dynamic">System Dynamic</string>
     <string name="settings_show_player_file_info_title">Show player file info</string>
-    <string name="settings_show_player_file_info_subtitle">Show codec, bitrate, and sample rate in the player progress section.</string>
+    <string name="settings_show_player_file_info_subtitle">Show codec, bitrate and sample rate under the seek bar.</string>
     <string name="settings_album_art_palette_title">Album Art Palette Style</string>
     <string name="settings_album_art_palette_subtitle">Current: %1$s. Open live preview and choose style.</string>
     <string name="settings_carousel_style_title">Album Carousel</string>
@@ -226,9 +228,9 @@
     <string name="settings_navbar_corner_subtitle">Adjust the corner radius of the navigation bar.</string>
     <string name="settings_lyrics_screen_section">Lyrics Screen</string>
     <string name="settings_immersive_lyrics_title">Immersive Lyrics</string>
-    <string name="settings_immersive_lyrics_subtitle">Hides the bottom controls and enlarges the text. Swipe down to hide, swipe up to bring them back.</string>
+    <string name="settings_immersive_lyrics_subtitle">Hide controls and enlarge lyrics. Swipe up to show.</string>
     <string name="settings_hide_bars_in_lyrics_title">Hide status &amp; gesture bars in lyrics</string>
-    <string name="settings_hide_bars_in_lyrics_subtitle">Lyrics use the full screen in portrait, landscape and face-to-face. The bars come back when you leave lyrics. Swipe in from an edge to see them</string>
+    <string name="settings_hide_bars_in_lyrics_subtitle">Lyrics go full screen. Swipe from an edge for the bars.</string>
     <string name="settings_auto_hide_delay_title">Auto-hide Delay</string>
     <string name="settings_auto_hide_delay_subtitle">Time before controls hide.</string>
     <string name="settings_auto_hide_delay_3s">3s</string>
@@ -244,6 +246,8 @@
     <string name="settings_library_navigation_subtitle">Choose how to move between Library tabs.</string>
     <string name="settings_library_nav_tab_row">Tab row (default)</string>
     <string name="settings_library_nav_compact_pill">Compact pill &amp; grid</string>
+    <string name="settings_practice_mode_title">Practice Mode</string>
+    <string name="settings_practice_mode_subtitle">Show the Practice card in Library and enable song practice features</string>
 
     <!-- Palette style -->
     <string name="settings_palette_screen_title">Colors</string>
@@ -277,12 +281,12 @@
     <string name="settings_keep_playing_title">Keep playing after closing</string>
     <string name="settings_keep_playing_subtitle">If off, removing the app from recents will stop playback.</string>
     <string name="settings_battery_optimization_title">Battery Optimization</string>
-    <string name="settings_battery_optimization_subtitle">Disable battery optimization to prevent playback interruptions.</string>
+    <string name="settings_battery_optimization_subtitle">Stop Android pausing playback to save battery.</string>
     <string name="settings_toast_battery_already_disabled">Battery optimization is already disabled</string>
     <string name="settings_toast_battery_settings_unavailable">Could not open battery settings</string>
     <string name="settings_replaygain_section">Volume Normalization (ReplayGain)</string>
     <string name="settings_replaygain_enable_title">Enable ReplayGain</string>
-    <string name="settings_replaygain_enable_subtitle">Normalize volume levels using ReplayGain metadata from audio files.</string>
+    <string name="settings_replaygain_enable_subtitle">Even out loudness between songs using ReplayGain.</string>
     <string name="settings_gain_mode_title">Gain Mode</string>
     <string name="settings_gain_mode_subtitle">Track: normalize each song. Album: normalize per album.</string>
     <string name="settings_gain_mode_track">Track</string>
@@ -293,14 +297,14 @@
     <string name="settings_cast_autoplay_subtitle">Start playing immediately after switching cast connections.</string>
     <string name="settings_headphones_section">Headphones</string>
     <string name="settings_headphones_resume_title">Resume when headphones reconnect</string>
-    <string name="settings_headphones_resume_subtitle">If playback paused because headphones were removed, resume automatically when they connect again.</string>
+    <string name="settings_headphones_resume_subtitle">Resume when headphones reconnect.</string>
     <string name="settings_queue_transitions_section">Queue and Transitions</string>
     <string name="settings_crossfade_title">Crossfade</string>
     <string name="settings_crossfade_subtitle">Enable smooth transition between songs.</string>
     <string name="settings_crossfade_duration_title">Crossfade Duration</string>
     <string name="settings_hifi_mode_title">Hi-Fi Mode</string>
-    <string name="settings_hifi_mode_supported_subtitle">Float 32-bit audio output. Disable if playback stutters on your device.</string>
-    <string name="settings_hifi_mode_unsupported_subtitle">Not supported on this device (PCM_FLOAT AudioTrack unavailable).</string>
+    <string name="settings_hifi_mode_supported_subtitle">32-bit float output. Turn off if audio stutters.</string>
+    <string name="settings_hifi_mode_unsupported_subtitle">Not supported on this phone.</string>
     <string name="settings_persistent_shuffle_title">Persistent Shuffle</string>
     <string name="settings_persistent_shuffle_subtitle">Remember shuffle setting even after closing the app.</string>
     <string name="settings_show_queue_history_title">History in queue</string>
@@ -321,7 +325,7 @@
     <!-- AI Integration category -->
     <string name="settings_ai_network_section">Network</string>
     <string name="settings_offline_mode_title">Offline Mode</string>
-    <string name="settings_offline_mode_subtitle">Completely disable network-dependent features and outgoing external requests.</string>
+    <string name="settings_offline_mode_subtitle">Block every online feature and request.</string>
     <string name="settings_safe_token_title">Safe Token Mode</string>
     <string name="settings_safe_token_on">ON — Fast &amp; cheap. Sends minimal data (~1K tokens) to AI.</string>
     <string name="settings_safe_token_off">OFF — Deep context. Sends full listening profile (~8K tokens) for richer results.</string>
@@ -344,7 +348,7 @@
     <string name="settings_preset_energy_catalyst_prompt">You are a high-momentum rhythm generator. Your philosophy centers on driving basslines, percussive intensity, and infectious grooves. Prioritize high-BPM club compatibility, syncopated energy, and continuous rhythmic tension to keep the listener\'s heart rate and motivation peak-level.</string>
     <string name="settings_ai_usage_report_section">AI Usage Report</string>
     <string name="settings_total_consumption_title">Total Consumption</string>
-    <string name="settings_ai_usage_tokens_subtitle">%1$s tokens tracking\nPrompt: %2$s | Output: %3$s | Thought: %4$s</string>
+    <string name="settings_ai_usage_tokens_subtitle">%1$s tokens\nIn %2$s · Out %3$s · Thinking %4$s</string>
     <string name="settings_ai_clear_logs">Clear Logs</string>
     <string name="settings_ai_activity_log_title">AI Activity Log (%1$d)</string>
     <string name="settings_ai_usage_provier_model">%1$s · %2$s</string>
@@ -364,7 +368,7 @@
     <string name="settings_restore_backup_section">Restore Backup</string>
     <string name="settings_import_backup_title">Import Backup</string>
     <string name="settings_action_select_restore">Select &amp; Restore</string>
-    <string name="settings_import_backup_subtitle">Browse or pick from recent backups. Selected data will replace current data.</string>
+    <string name="settings_import_backup_subtitle">Restore a backup. Replaces what you pick.</string>
 
     <!-- Backup & Restore category (Export & Restore Backup Flow) -->
     <string name="settings_export_backup_hint">Choose exactly what you want to include in the backup package.</string>
@@ -442,7 +446,7 @@
     <string name="settings_dialog_regenerate_stats_body">This will clear the statistics cache and force a recalculation from the database history.</string>
     <string name="settings_toast_stats_regeneration_started">Stats regeneration started</string>
     <string name="settings_force_palette_title">Force Album Palette Regeneration</string>
-    <string name="settings_force_palette_subtitle">Rebuild all cached palette variants for every album art, or pick a single one to refresh.</string>
+    <string name="settings_force_palette_subtitle">Rebuild cover colours for all albums or just one.</string>
     <string name="settings_action_regenerate_all">Regenerate All</string>
     <string name="settings_dialog_regenerate_palettes_title">Regenerate all album palettes?</string>
     <string name="settings_dialog_regenerate_palettes_body">This will clear cached theme data and rebuild all palette styles for %1$d unique album arts.</string>
@@ -691,9 +695,9 @@
 
     <!-- Lyrics display: cover lyrics, font and size (shared by the album cover and the lyrics sheet) -->
     <string name="settings_cover_lyrics_title">Lyrics on album cover</string>
-    <string name="settings_cover_lyrics_subtitle">Show synced lyrics over the artwork in the player. Tap the cover to open the full lyrics</string>
+    <string name="settings_cover_lyrics_subtitle">Synced lyrics over the cover. Tap for full lyrics.</string>
     <string name="settings_lyrics_font_title">Lyrics font</string>
-    <string name="settings_lyrics_font_subtitle">Used on the album cover and in the full lyrics view. Songs with characters the font can\'t show use the system font</string>
+    <string name="settings_lyrics_font_subtitle">Font for lyrics on the cover and full screen.</string>
     <string name="settings_lyrics_font_system">System</string>
     <string name="settings_lyrics_font_google_sans_rounded">Google Sans Rounded</string>
     <string name="settings_lyrics_font_google_sans_flex">Google Sans Flex</string>
@@ -705,9 +709,9 @@
     <string name="settings_lyrics_expressive_typography_title">Expressive typography</string>
     <string name="settings_lyrics_expressive_typography_subtitle">Choose the lyrics font, size, weight and line spacing</string>
     <string name="settings_lyrics_adaptive_typography_title">Adapt to each song</string>
-    <string name="settings_lyrics_adaptive_typography_subtitle">Energy, mood, loudness and held notes shape every word</string>
+    <string name="settings_lyrics_adaptive_typography_subtitle">Words react to each song\'s energy and mood.</string>
     <string name="settings_lyrics_weight_title">Lyrics weight</string>
-    <string name="settings_lyrics_weight_subtitle">How heavy the lyrics are. The current line is always drawn bolder</string>
+    <string name="settings_lyrics_weight_subtitle">How bold lyrics are. The current line is bolder.</string>
     <string name="settings_lyrics_weight_light">Light</string>
     <string name="settings_lyrics_weight_regular">Regular</string>
     <string name="settings_lyrics_weight_medium">Medium</string>
@@ -739,23 +743,23 @@
     <string name="settings_ai_system_prompt_chip">System Prompt Behavior</string>
     <string name="settings_ai_edit_system_prompt_title">Edit System Prompt</string>
     <string name="settings_ai_advanced_title">Advanced AI Configuration</string>
-    <string name="settings_ai_advanced_subtitle">Tap to configure generation parameters and song data sampling</string>
+    <string name="settings_ai_advanced_subtitle">Creativity, length and how many songs are sent.</string>
     <string name="settings_ai_generation_params_section">Generation Parameters</string>
     <string name="settings_ai_temperature_label">Temperature</string>
-    <string name="settings_ai_temperature_desc">Controls randomness. Lower = more deterministic, higher = more creative.</string>
+    <string name="settings_ai_temperature_desc">Lower is predictable, higher is creative.</string>
     <string name="settings_ai_top_p_label">Top P</string>
     <string name="settings_ai_top_p_desc">Nucleus sampling. Higher = more diverse tokens considered.</string>
     <string name="settings_ai_top_k_label">Top K</string>
     <string name="settings_ai_top_k_desc">Limits token selection to the K most likely candidates.</string>
     <string name="settings_ai_max_tokens_label">Max Output Tokens</string>
-    <string name="settings_ai_max_tokens_desc">Maximum length of the AI response. Higher = longer but more expensive.</string>
+    <string name="settings_ai_max_tokens_desc">Longest reply allowed. Longer costs more.</string>
     <string name="settings_ai_presence_penalty_label">Presence Penalty</string>
     <string name="settings_ai_presence_penalty_desc">Penalizes repeated topics. Positive = more diverse topics.</string>
     <string name="settings_ai_frequency_penalty_label">Frequency Penalty</string>
-    <string name="settings_ai_frequency_penalty_desc">Penalizes repeated phrases. Positive = more natural language.</string>
+    <string name="settings_ai_frequency_penalty_desc">Higher avoids repeated phrases.</string>
     <string name="settings_ai_song_data_section">Song Data Configuration</string>
     <string name="settings_ai_sample_size_label">Sample Size</string>
-    <string name="settings_ai_sample_size_desc">Number of songs sent to the AI for playlist generation. More = better context but higher cost.</string>
+    <string name="settings_ai_sample_size_desc">Songs sent per request. More is better but costs more.</string>
     <string name="settings_ai_digest_detail_label">Digest Detail</string>
     <string name="settings_ai_digest_detail_desc">Controls how much listening history data is included</string>
     <string name="settings_ai_digest_concise">Concise (faster)</string>
@@ -779,7 +783,7 @@
     <!-- Ambient Song Suggestions -->
     <string name="settings_ambient_suggestions_section">Ambient Voice Suggestions</string>
     <string name="settings_ambient_suggestions_title">Ambient Song Suggestions</string>
-    <string name="settings_ambient_suggestions_subtitle">Listen for song mentions in the background until you turn this off. On-device speech recognition is required; song searches may use the internet. Review suggestions in the queue, or stop from the notification.</string>
+    <string name="settings_ambient_suggestions_subtitle">Listens for songs mentioned nearby and suggests them.</string>
     <string name="settings_ambient_chime_title">Chime on Detection</string>
     <string name="settings_ambient_chime_subtitle">Play a subtle audio tone when a suggestion is recognized.</string>
 
@@ -791,7 +795,6 @@
     <string name="settings_category_general_subtitle">Language, starting screen, gestures and full screen.</string>
     <string name="settings_category_player_lyrics_title">Player &amp; Lyrics</string>
     <string name="settings_category_player_lyrics_subtitle">Player look, lyrics sources and lyrics display.</string>
-    <string name="settings_category_widgets_island_title">Widgets</string>
     <string name="settings_category_services_title">Accounts &amp; Services</string>
     <string name="settings_category_services_subtitle">Linked accounts and scrobbling.</string>
     <string name="settings_language_section">Language</string>
@@ -809,32 +812,33 @@
     <!-- App Lock (Lock App to Screen) -->
     <string name="settings_app_lock_section">Group &amp; security</string>
     <string name="settings_app_lock_title">Lock App to Screen</string>
-    <string name="settings_app_lock_subtitle">Require fingerprint or device authentication before leaving the app.</string>
+    <string name="settings_app_lock_subtitle">Need your fingerprint or PIN to leave the app.</string>
     <string name="settings_app_lock_active_title">🔒 App locked</string>
-    <string name="settings_app_lock_active_subtitle">Unlock / End locked session. Needs your fingerprint or screen lock</string>
+    <string name="settings_app_lock_active_subtitle">Unlock to end the locked session.</string>
     <string name="settings_app_lock_paused_title">App lock paused</string>
-    <string name="settings_app_lock_paused_subtitle">Tap to lock PixelPlayer to the screen now. If Android doesn\'t offer to pin the app, turn on App pinning below</string>
+    <string name="settings_app_lock_paused_subtitle">Tap to lock the app to the screen now.</string>
     <string name="settings_app_lock_pinning_title">Android app pinning</string>
-    <string name="settings_app_lock_pinning_subtitle">Turn on App pinning and \"Ask for PIN before unpinning\" so Android\'s own unpin gesture needs your PIN too</string>
+    <string name="settings_app_lock_pinning_subtitle">Make Android ask for your PIN to unpin too.</string>
 
     <!-- Full screen -->
+    <string name="settings_motion_scrolling_section">Motion &amp; scrolling</string>
     <string name="settings_full_screen_section">Full screen</string>
     <string name="settings_hide_status_bar_title">Hide status bar</string>
-    <string name="settings_hide_status_bar_subtitle">Hide the time, battery and notification icons while the app is open. Swipe down from the top to see them</string>
+    <string name="settings_hide_status_bar_subtitle">Hide the top bar. Swipe down to see it.</string>
     <string name="settings_hide_gesture_bar_title">Hide gesture bar</string>
-    <string name="settings_hide_gesture_bar_subtitle">Hide the navigation bar at the bottom while the app is open. Swipe up from the bottom to use it</string>
+    <string name="settings_hide_gesture_bar_subtitle">Hide the bottom bar. Swipe up to use it.</string>
 
     <!-- Face-to-face lyrics -->
     <string name="settings_lyrics_split_face_title">Face-to-face lyrics</string>
-    <string name="settings_lyrics_split_face_subtitle">In full-screen lyrics, split the screen so people on both sides can read along</string>
+    <string name="settings_lyrics_split_face_subtitle">Split full-screen lyrics so both sides can read.</string>
     <string name="settings_lyrics_landscape_lyrics_left_title">Landscape: lyrics on the left</string>
-    <string name="settings_lyrics_landscape_lyrics_left_subtitle">Sideways, the song and controls sit on one half and the lyrics on the other. Turn on to put the lyrics on the left</string>
+    <string name="settings_lyrics_landscape_lyrics_left_subtitle">Sideways, put lyrics on the left half.</string>
     <string name="settings_lyrics_split_face_needs_immersive">Needs immersive lyrics</string>
 
     <!-- Camera island -->
     <string name="settings_camera_island_section">Camera island</string>
     <string name="settings_camera_island_title">Camera hole island</string>
-    <string name="settings_camera_island_subtitle">Floating lyrics and song info around your front camera hole, across all apps</string>
+    <string name="settings_camera_island_subtitle">Lyrics and song info around your camera, in any app.</string>
     <string name="settings_camera_island_tap_title">Tap the camera hole</string>
     <string name="settings_camera_island_tap_on">On - the island responds to taps and holds on the camera cutout</string>
     <string name="settings_camera_island_tap_off">Off - Android puts the island under the status bar, so it can\'t be pressed. Tap to turn on \"PixelPlayer Dynamic Island\" in Accessibility settings</string>
@@ -883,4 +887,120 @@
     <!-- Lyrics animation style -->
     <string name="settings_lyrics_animation_style_title">Animation style</string>
     <string name="settings_lyrics_animation_style_subtitle">Choose how synced lyrics move and highlight</string>
+    <!-- Accounts page: service rows, friends, hidden lists -->
+    <string name="accounts_connect_title">Connect a music account</string>
+    <string name="accounts_playlist_counts">%1$d yours · %2$d friends\'</string>
+    <string name="accounts_no_own_playlists">No playlists yet</string>
+    <string name="accounts_refresh_mine">Mine</string>
+    <string name="accounts_refresh_friends">Friends</string>
+    <string name="accounts_refresh_all">All</string>
+    <string name="accounts_refresh_mine_cd">Refresh your %1$s playlists</string>
+    <string name="accounts_refresh_friends_cd">Refresh friends\' %1$s playlists</string>
+    <string name="accounts_refresh_all_cd">Refresh all %1$s playlists</string>
+    <string name="accounts_friends_title">Friends</string>
+    <string name="accounts_refresh_all_friends">Refresh all</string>
+    <string name="accounts_refresh_all_friends_cd">Refresh every friend\'s playlists</string>
+    <string name="accounts_refresh_friend_cd">Refresh %1$s\'s playlists</string>
+    <string name="accounts_hide_friend_cd">Hide %1$s</string>
+    <string name="accounts_friend_unnamed">Friend</string>
+    <plurals name="accounts_friend_playlist_count">
+        <item quantity="one">%d playlist</item>
+        <item quantity="other">%d playlists</item>
+    </plurals>
+    <string name="accounts_friend_updated">Updated %1$s</string>
+    <string name="accounts_friend_never_updated">Not updated yet</string>
+    <plurals name="accounts_refresh_failed">
+        <item quantity="one">%d playlist couldn\'t be updated</item>
+        <item quantity="other">%d playlists couldn\'t be updated</item>
+    </plurals>
+    <string name="accounts_hidden_playlists_title">Hidden playlists</string>
+    <string name="accounts_hidden_playlist_remote">%1$s · deleted from account</string>
+    <string name="accounts_hidden_playlist_local">%1$s · hidden on this device</string>
+    <string name="accounts_hidden_friends_title">Hidden friends</string>
+    <string name="accounts_restore">Restore</string>
+    <string name="accounts_restore_friend_cd">Restore %1$s</string>
+    <string name="accounts_not_connected">Not connected</string>
+    <string name="accounts_logout_service_cd">Log out of %1$s</string>
+    <string name="accounts_stage_checking">Checking sign-in…</string>
+    <string name="accounts_stage_profile">Reading profile…</string>
+    <string name="accounts_stage_syncing">Syncing playlists…</string>
+    <string name="accounts_stage_done">Connected</string>
+    <string name="accounts_panel_expanded">Expanded</string>
+    <string name="accounts_panel_collapsed">Collapsed</string>
+    <string name="accounts_hidden_empty">Nothing hidden</string>
+    <string name="accounts_friends_empty">No friends\' playlists saved yet</string>
+    <string name="accounts_friend_show_playlists_cd">Show %1$s\'s playlists</string>
+    <!-- Discord status (Discord Social SDK; the Application ID is typed in the app) -->
+    <string name="discord_status_subtitle_on">On · shown through the Discord app</string>
+    <string name="discord_status_subtitle_off">Off</string>
+    <string name="discord_status_no_sdk">This version of PixelPlayer was built without Discord support.</string>
+    <string name="discord_status_install">Install Discord and sign in on this phone. PixelPlayer shows your status through the Discord app.</string>
+    <string name="discord_status_install_short">Needs the Discord app on this phone</string>
+    <string name="discord_status_need_id">Paste your Discord Application ID (Discord Developer Portal → your app → General Information). It stays on this phone only.</string>
+    <string name="discord_status_need_id_short">Add your Discord Application ID</string>
+    <string name="discord_status_ready_body">Songs you play show as your status on Discord, through the Discord app on this phone. It clears 30 seconds after you pause.</string>
+    <string name="discord_status_switch">Show what I\'m playing</string>
+    <string name="discord_status_change_id">Change Application ID</string>
+    <string name="discord_status_id_label">Application ID</string>
+    <string name="discord_status_id_help">Kept on this phone only, never built into the app.</string>
+    <string name="discord_status_get_discord">Get Discord</string>
+    <string name="discord_status_forget_id">Remove ID</string>
+    <string name="settings_up_next_notification_title">Up next notification</string>
+    <string name="settings_up_next_notification_subtitle">Show the next 3 songs in a notification</string>
+    <string name="settings_up_next_notification_denied">Notifications are off for PixelPlayer</string>
+    <string name="settings_mini_player_swipe_title">Swipe to change song</string>
+    <string name="settings_mini_player_swipe_subtitle">Swipe the mini player left for the next song, right for the previous one. Off: swiping closes the player</string>
+    <!-- Service bottom sheets (Spotify, YouTube Music, Apple Music, ListenBrainz, Discord) -->
+    <string name="service_sheet_more_options">More options</string>
+    <string name="service_sheet_sign_in">Sign in</string>
+    <string name="service_sheet_connect">Connect</string>
+    <string name="service_sheet_setup_guide">Setup guide</string>
+    <string name="service_sheet_spotify">Spotify</string>
+    <string name="service_sheet_spotify_status">Playlists, likes and friends\' activity</string>
+    <string name="service_sheet_spotify_cookie">sp_dc cookie</string>
+    <string name="service_sheet_youtube_music">YouTube Music</string>
+    <string name="service_sheet_youtube_music_status">Playlists and liked songs</string>
+    <string name="service_sheet_youtube_credential">Cookie or request headers</string>
+    <string name="service_sheet_youtube_account">Google account index</string>
+    <string name="service_sheet_apple_music">Apple Music</string>
+    <string name="service_sheet_apple_music_status">Playlists and favourites</string>
+    <string name="service_sheet_apple_token">media-user-token cookie</string>
+    <string name="service_sheet_listenbrainz_on">Scrobbling on</string>
+    <string name="service_sheet_listenbrainz_off">Log what you listen to</string>
+    <string name="service_sheet_listenbrainz_get_token">Get your token</string>
+    <!-- On-device AI (Gemini Nano / Gemma 4) -->
+    <string name="ai_hero_title">On-device AI</string>
+    <string name="ai_hero_body">Runs on your phone, private and offline. Nothing you ask leaves the device.</string>
+    <string name="ai_use_artist">Ask about artists</string>
+    <string name="ai_use_lyrics">Lyrics translation</string>
+    <string name="ai_use_mix">Mix prompts</string>
+    <string name="ai_status_nano_ready">Gemini Nano · ready</string>
+    <string name="ai_status_nano_downloading">Gemini Nano · downloading</string>
+    <string name="ai_status_nano_download">Gemini Nano · needs a download</string>
+    <string name="ai_status_nano_unavailable">Gemini Nano isn\'t available. Try Gemma 4</string>
+    <string name="ai_status_gemma_ready">%1$s · ready</string>
+    <string name="ai_status_gemma_downloading">%1$s · downloading</string>
+    <string name="ai_status_gemma_download">%1$s · download to use</string>
+    <string name="ai_engine_nano">Gemini Nano</string>
+    <string name="ai_engine_nano_sub">Built into Pixel (AICore)</string>
+    <string name="ai_engine_gemma">Gemma 4</string>
+    <string name="ai_engine_gemma_sub">Download to your phone. Can look things up</string>
+    <string name="ai_gemma_e2b_body">Quick and light. Best for most phones.</string>
+    <string name="ai_gemma_e4b_body">Smarter answers. For phones with 12 GB of RAM.</string>
+    <string name="ai_gemma_recommended">For this phone</string>
+    <string name="ai_gemma_ram">%1$s RAM</string>
+    <string name="ai_gemma_fits">Fits this phone</string>
+    <string name="ai_gemma_may_not_fit">May not fit</string>
+    <string name="ai_gemma_progress">%1$s of %2$s · %3$d%%</string>
+    <string name="ai_gemma_download">Download</string>
+    <string name="ai_gemma_resume">Resume</string>
+    <string name="ai_gemma_pause">Pause</string>
+    <string name="ai_gemma_use">Use</string>
+    <string name="ai_gemma_in_use">In use</string>
+    <string name="ai_gemma_delete">Delete %1$s</string>
+    <string name="ai_gemma_wifi_only">Download on Wi-Fi only</string>
+    <string name="ai_gemma_wifi_only_body">Pauses on mobile data and carries on when you\'re back on Wi-Fi</string>
+    <string name="ai_gemma_credit">Gemma 4 by Google DeepMind · Apache 2.0 · from Hugging Face (litert-community)</string>
+    <string name="ai_playlists_section">AI playlists</string>
+    <string name="ai_system_prompt_subtitle">How the AI picks songs for generated playlists</string>
 </resources>

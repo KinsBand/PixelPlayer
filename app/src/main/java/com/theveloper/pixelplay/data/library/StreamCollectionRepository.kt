@@ -144,8 +144,11 @@ class StreamCollectionRepository @Inject constructor(
         val artist: String,
         val artUri: String?,
         val year: Int,
-        /** The song that was playing; shown on the page even if the tracklist can't be found. */
-        val seedSong: Song
+        /**
+         * The song that was playing; shown on the page even if the tracklist can't be found.
+         * Null when the album was opened by name only.
+         */
+        val seedSong: Song?
     )
 
     private val onlineAlbumHints = java.util.concurrent.ConcurrentHashMap<Long, OnlineAlbumHint>()
@@ -163,6 +166,19 @@ class StreamCollectionRepository @Inject constructor(
         _albumIdByKey.value[key]?.let { return it }
         val id = CollectionKeys.streamAlbumId(key)
         onlineAlbumHints[id] = OnlineAlbumHint(title, artist, song.albumArtUriString, song.year, song.copy(albumId = id))
+        return id
+    }
+
+    /**
+     * Album page id for an album known only by name (opened from a song's info sheet): the library
+     * or stream album it already shows on, or a new stream album id remembered with a hint.
+     */
+    fun albumIdForName(title: String, artist: String?, artUri: String? = null, year: Int = 0): Long {
+        val albumArtist = artist?.trim()?.takeIf { it.isNotBlank() } ?: "Unknown artist"
+        val key = CollectionKeys.albumKey(albumArtist, title.trim())
+        _albumIdByKey.value[key]?.let { return it }
+        val id = CollectionKeys.streamAlbumId(key)
+        onlineAlbumHints.putIfAbsent(id, OnlineAlbumHint(title.trim(), albumArtist, artUri, year, null))
         return id
     }
 

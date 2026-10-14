@@ -1,0 +1,2587 @@
+--- a/presentation/screens/radio/RadioScreen.kt
++++ b/presentation/screens/radio/RadioScreen.kt
+@@ -308,22 +308,15 @@
+             isFavorite = favorites.any { it.uuid == station.uuid },
+             isCurrent = station.uuid == playingUuid,
+             isPlaying = isPlaying,
+-            onPlay = { play(station); optionsFor = null },
++            // The sheet slides itself away before running these (then calls onDismiss).
++            onPlay = { play(station) },
+             onToggleFavorite = { viewModel.store.toggleFavorite(station) },
+             onSetPreset = { slot ->
+                 viewModel.store.setPreset(slot, station)
+                 Toast.makeText(context, "Saved to preset ${slot + 1}", Toast.LENGTH_SHORT).show()
+             },
+-            onOpenHomepage = station.homepage?.let {
+-                {
+-                    openStationHomepage(context, station)
+-                    optionsFor = null
+-                }
+-            },
+-            onShowOnMap = {
+-                optionsFor = null
+-                viewModel.showOnMap(station)
+-            },
++            onOpenHomepage = station.homepage?.let { { openStationHomepage(context, station) } },
++            onShowOnMap = { viewModel.showOnMap(station) },
+             onDismiss = { optionsFor = null },
+         )
+     }
+@@ -897,10 +890,13 @@
+     onMore: (() -> Unit)? = null,
+ ) {
+     Surface(
+-        onClick = onClick,
+         shape = RoundedCornerShape(18.dp),
+         color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+-        modifier = Modifier.fillMaxWidth()
++        // No ⋮ button: hold the station for its options.
++        modifier = Modifier
++            .fillMaxWidth()
++            .clip(RoundedCornerShape(18.dp))
++            .combinedClickable(onClick = onClick, onLongClick = onMore, onLongClickLabel = "Station options")
+     ) {
+         Row(Modifier.padding(start = 10.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+             Box(contentAlignment = Alignment.Center) {
+@@ -964,11 +960,7 @@
+                     tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                 )
+             }
+-            if (onMore != null) {
+-                IconButton(onClick = onMore) { Icon(Icons.Rounded.MoreVert, contentDescription = "More") }
+-            } else {
+-                Spacer(Modifier.width(8.dp))
+-            }
++            Spacer(Modifier.width(8.dp))
+         }
+     }
+ }
+--- a/presentation/components/RecentTracksList.kt
++++ b/presentation/components/RecentTracksList.kt
+@@ -10,6 +10,7 @@
+ import androidx.compose.foundation.background
+ import androidx.compose.foundation.border
+ import androidx.compose.foundation.clickable
++import androidx.compose.foundation.combinedClickable
+ import androidx.compose.foundation.layout.*
+ import androidx.compose.foundation.shape.CircleShape
+ import androidx.compose.foundation.shape.RoundedCornerShape
+@@ -233,8 +234,9 @@
+             .height(46.dp)
+             .clip(RoundedCornerShape(50))
+             .background(if (isCurrentSong) OliveAccentYellow.copy(alpha = 0.25f) else bgColor)
+-            .clickable(onClick = onClick)
+-            .padding(horizontal = 8.dp),
++            // No ⋮ button: hold the row for the song's options.
++            .combinedClickable(onClick = onClick, onLongClick = onMoreClick, onLongClickLabel = "Song options")
++            .padding(horizontal = 12.dp),
+         verticalAlignment = Alignment.CenterVertically
+     ) {
+         // Thumbnail image
+@@ -268,18 +270,5 @@
+                 overflow = TextOverflow.Ellipsis
+             )
+         }
+-
+-        // More actions button
+-        IconButton(
+-            onClick = onMoreClick,
+-            modifier = Modifier.size(32.dp)
+-        ) {
+-            Icon(
+-                imageVector = Icons.Rounded.MoreVert,
+-                contentDescription = "More actions",
+-                tint = (if (isCurrentSong) OliveAccentYellow else OliveCream).copy(alpha = 0.8f),
+-                modifier = Modifier.size(18.dp)
+-            )
+-        }
+     }
+ }
+--- a/presentation/screens/GenreDetailScreen.kt
++++ b/presentation/screens/GenreDetailScreen.kt
+@@ -584,6 +584,7 @@
+                     shapes = MaterialTheme.shapes
+                 ) {
+                     SongInfoBottomSheet(
++                        onSelect = { multiSelectionState.toggleSelection(song) },
+                         onStartSongRadio = { seedSong -> playerViewModel.startSongRadio(seedSong) },
+                         song = song,
+                         isFavorite = isFavorite,
+--- a/presentation/screens/YourMusicScreen.kt
++++ b/presentation/screens/YourMusicScreen.kt
+@@ -39,6 +39,7 @@
+ import androidx.compose.animation.fadeOut
+ import androidx.compose.animation.shrinkVertically
+ import androidx.compose.foundation.clickable
++import androidx.compose.foundation.combinedClickable
+ import androidx.compose.foundation.layout.Arrangement
+ import androidx.compose.foundation.layout.Box
+ import androidx.compose.foundation.layout.Column
+@@ -847,14 +848,17 @@
+     val colors = MaterialTheme.colorScheme
+     val label = remember(song.title) { com.theveloper.pixelplay.data.library.SongUnifier.versionLabel(song) ?: "Version" }
+     Surface(
+-        onClick = onClick,
+-        modifier = modifier.semantics(mergeDescendants = true) { contentDescription = "$label version, ${song.title}" },
++        // No ⋮ button: hold the row for its options.
++        modifier = modifier
++            .clip(MaterialTheme.shapes.large)
++            .combinedClickable(onClick = onClick, onLongClick = onOptions, onLongClickLabel = "Song options")
++            .semantics(mergeDescendants = true) { contentDescription = "$label version, ${song.title}" },
+         shape = MaterialTheme.shapes.large,
+         color = if (isCurrent) colors.primaryContainer else colors.surfaceContainerLow,
+         contentColor = if (isCurrent) colors.onPrimaryContainer else colors.onSurface
+     ) {
+         Row(
+-            Modifier.padding(start = 10.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
++            Modifier.padding(start = 10.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
+             verticalAlignment = Alignment.CenterVertically
+         ) {
+             SmartImage(
+@@ -886,9 +890,6 @@
+                     overflow = TextOverflow.Ellipsis
+                 )
+             }
+-            IconButton(onClick = onOptions) {
+-                Icon(Icons.Rounded.MoreVert, contentDescription = "More options for ${song.title}")
+-            }
+         }
+     }
+ }
+--- a/presentation/screens/radio/RadioStationOptions.kt
++++ b/presentation/screens/radio/RadioStationOptions.kt
+@@ -9,6 +9,15 @@
+ import androidx.compose.animation.core.animateDpAsState
+ import androidx.compose.animation.core.tween
+ import androidx.compose.foundation.background
++import androidx.compose.foundation.pager.HorizontalPager
++import androidx.compose.foundation.pager.rememberPagerState
++import androidx.compose.foundation.shape.CircleShape
++import androidx.compose.material.icons.rounded.Info
++import androidx.compose.material.icons.rounded.Menu
++import androidx.compose.runtime.rememberCoroutineScope
++import androidx.compose.ui.graphics.TransformOrigin
++import com.theveloper.pixelplay.presentation.screens.TabAnimation
++import kotlinx.coroutines.launch
+ import androidx.compose.foundation.border
+ import androidx.compose.foundation.clickable
+ import androidx.compose.foundation.layout.Arrangement
+@@ -83,8 +92,10 @@
+ )
+ 
+ /**
+- * The station menu on the Radio screen, laid out like the player's song menu: a big cover and
+- * title, the Like | Play | Share row, then cards — presets, website, map, details.
++ * The station menu on the Radio screen (hold a station). Same layout as the player's menu for a
++ * station (SongInfoBottomSheet): cover + title, then two pages switched by the OPTIONS / INFO bar
++ * at the bottom. Options: presets, Website (+ Map), then Like | Play | Share. Info: the details.
++ * Every action slides the sheet down first, then runs.
+  */
+ @OptIn(ExperimentalMaterial3Api::class)
+ @Composable
+@@ -102,56 +113,155 @@
+     onDismiss: () -> Unit,
+ ) {
+     val context = LocalContext.current
++    val scope = rememberCoroutineScope()
++    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
++    val pagerState = rememberPagerState(pageCount = { 2 })
++    /** Slide the sheet away, then run [action] (the sheet is gone by then). */
++    val closeThen: (() -> Unit) -> Unit = { action ->
++        scope.launch { sheetState.hide() }.invokeOnCompletion {
++            onDismiss()
++            action()
++        }
++    }
+     ModalBottomSheet(
+         onDismissRequest = onDismiss,
+-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
++        sheetState = sheetState,
+     ) {
+         com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
+-        Column(
+-            Modifier
+-                .fillMaxWidth()
+-                .verticalScroll(rememberScrollState())
+-                .padding(horizontal = 16.dp)
+-                .navigationBarsPadding()
+-                .padding(bottom = 16.dp),
+-            verticalArrangement = Arrangement.spacedBy(10.dp)
+-        ) {
+-            RadioStationHeader(station)
+-            Spacer(Modifier.height(6.dp))
+-            RadioActionsRow(
+-                isFavorite = isFavorite,
+-                playLabel = when {
+-                    isCurrent && isPlaying -> "Pause"
+-                    isCurrent -> "Resume"
+-                    else -> "Play"
+-                },
+-                playIcon = if (isCurrent && isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+-                onPlay = onPlay,
+-                onToggleFavorite = onToggleFavorite,
+-                onShare = { shareStation(context, station) },
++        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
++            Column(Modifier.fillMaxWidth()) {
++                Box(Modifier.padding(horizontal = 16.dp)) { RadioStationHeader(station) }
++                Spacer(Modifier.height(16.dp))
++                HorizontalPager(
++                    state = pagerState,
++                    modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp),
++                    verticalAlignment = Alignment.Top
++                ) { page ->
++                    Column(
++                        Modifier
++                            .fillMaxWidth()
++                            .verticalScroll(rememberScrollState())
++                            .padding(horizontal = 16.dp),
++                        verticalArrangement = Arrangement.spacedBy(10.dp)
++                    ) {
++                        if (page == 0) {
++                            RadioPresetPicker(station = station, presets = presets, onSetPreset = onSetPreset)
++                            RadioWebsiteMapRow(
++                                station = station,
++                                onWebsite = onOpenHomepage?.let { open -> { closeThen(open) } },
++                                onMap = onShowOnMap?.let { show -> { closeThen(show) } },
++                            )
++                            RadioActionsRow(
++                                isFavorite = isFavorite,
++                                playLabel = when {
++                                    isCurrent && isPlaying -> "Pause"
++                                    isCurrent -> "Resume"
++                                    else -> "Play"
++                                },
++                                playIcon = if (isCurrent && isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
++                                onPlay = { closeThen(onPlay) },
++                                onToggleFavorite = onToggleFavorite,
++                                onShare = { shareStation(context, station) },
++                            )
++                            // Room for the OPTIONS / INFO bar that floats over the bottom.
++                            Spacer(Modifier.height(80.dp))
++                        } else {
++                            RadioStationDetails(station)
++                            Spacer(Modifier.height(88.dp))
++                        }
++                    }
++                }
++            }
++            RadioSheetTabBar(
++                selectedPage = pagerState.currentPage,
++                onSelect = { page -> scope.launch { pagerState.animateScrollToPage(page) } },
++                modifier = Modifier.align(Alignment.BottomCenter)
+             )
+-            RadioPresetPicker(station = station, presets = presets, onSetPreset = onSetPreset)
+-            if (onOpenHomepage != null) {
+-                RadioOptionCard(
+-                    icon = Icons.Rounded.Language,
+-                    title = "Open station website",
+-                    subtitle = station.homepage?.removePrefix("https://")?.removePrefix("http://")?.trimEnd('/') ?: "",
+-                    onClick = onOpenHomepage,
+-                )
++        }
++    }
++}
++
++/** OPTIONS | INFO, the same bar as the player's song menu. */
++@Composable
++private fun RadioSheetTabBar(selectedPage: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
++    Row(
++        modifier = modifier
++            .fillMaxWidth()
++            .navigationBarsPadding()
++            .padding(horizontal = 16.dp, vertical = 8.dp)
++            .clip(CircleShape)
++            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
++            .padding(5.dp),
++        horizontalArrangement = Arrangement.SpaceBetween,
++        verticalAlignment = Alignment.CenterVertically
++    ) {
++        listOf(
++            Triple("Options", Icons.Rounded.Menu, TransformOrigin(0f, 0.5f)),
++            Triple("Info", Icons.Rounded.Info, TransformOrigin(1f, 0.5f)),
++        ).forEachIndexed { index, (label, icon, origin) ->
++            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
++                TabAnimation(
++                    index = index,
++                    title = label,
++                    selectedIndex = selectedPage,
++                    onClick = { onSelect(index) },
++                    transformOrigin = origin
++                ) {
++                    Row(verticalAlignment = Alignment.CenterVertically) {
++                        Icon(icon, contentDescription = label, modifier = Modifier.padding(horizontal = 4.dp))
++                        Spacer(Modifier.width(4.dp))
++                        Text(label.uppercase(), fontFamily = GoogleSansRounded, fontWeight = FontWeight.Bold)
++                    }
++                }
+             }
+-            if (onShowOnMap != null && station.hasGeo) {
+-                RadioOptionCard(
+-                    icon = Icons.Rounded.Map,
+-                    title = "Show on map",
+-                    subtitle = listOfNotNull(station.state, station.country).joinToString(", ").ifBlank { "Where the station is" },
+-                    onClick = onShowOnMap,
+-                )
++        }
++    }
++}
++
++/**
++ * "Website" with a map button to its right (both menus: Radio screen and player). With only one
++ * of the two, that one fills the row; with neither, nothing is shown.
++ */
++@Composable
++fun RadioWebsiteMapRow(
++    station: RadioStation,
++    onWebsite: (() -> Unit)?,
++    onMap: (() -> Unit)?,
++) {
++    val website = station.homepage?.takeIf { onWebsite != null }
++    val map = onMap?.takeIf { station.hasGeo }
++    val place = listOfNotNull(station.state, station.country).joinToString(", ")
++    when {
++        website != null && map != null -> Row(
++            Modifier.fillMaxWidth().height(IntrinsicSize.Min),
++            horizontalArrangement = Arrangement.spacedBy(10.dp)
++        ) {
++            RadioOptionCard(
++                icon = Icons.Rounded.Language,
++                title = "Website",
++                subtitle = displayHost(website),
++                onClick = onWebsite,
++                modifier = Modifier.weight(1f)
++            )
++            FilledTonalIconButton(
++                onClick = map,
++                shape = RoundedCornerShape(18.dp),
++                colors = IconButtonDefaults.filledTonalIconButtonColors(
++                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
++                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
++                ),
++                modifier = Modifier.fillMaxHeight().width(72.dp)
++            ) {
++                Icon(Icons.Rounded.Map, contentDescription = "Show ${station.name} on map", modifier = Modifier.size(26.dp))
+             }
+-            RadioStationDetails(station)
+         }
++        website != null -> RadioOptionCard(Icons.Rounded.Language, "Website", displayHost(website), onWebsite)
++        map != null -> RadioOptionCard(Icons.Rounded.Map, "Map", place.ifBlank { "Where the station is" }, map)
+     }
+ }
+ 
++private fun displayHost(url: String) = url.removePrefix("https://").removePrefix("http://").trimEnd('/')
++
+ /** Cover, name and "NSW · Comm · 128 kbps", sized like the song menu's header. */
+ @Composable
+ fun RadioStationHeader(station: RadioStation) {
+@@ -321,9 +431,10 @@
+     title: String,
+     subtitle: String,
+     onClick: (() -> Unit)? = null,
++    modifier: Modifier = Modifier,
+ ) {
+     Surface(
+-        modifier = Modifier
++        modifier = modifier
+             .fillMaxWidth()
+             .clip(RoundedCornerShape(18.dp))
+             .let { if (onClick != null) it.clickable(onClick = onClick) else it },
+--- a/presentation/viewmodel/PlaylistViewModel.kt
++++ b/presentation/viewmodel/PlaylistViewModel.kt
+@@ -1262,6 +1262,38 @@
+         }
+     }
+ 
++    /**
++     * Saves a playlist's whole song order at once (Edit mode: single drags, multi-song drags and
++     * the Move up/down accessibility actions all end here). Same backends as
++     * [reorderSongsInPlaylist]; switches the playlist to manual order.
++     */
++    fun setPlaylistOrder(playlistId: String, orderedSongs: List<Song>) {
++        if (isFolderPlaylistId(playlistId)) return
++        viewModelScope.launch {
++            val newSongOrderIds = orderedSongs.map { it.id }
++            if (isEditableConnected(playlistId)) {
++                try {
++                    connectedLibraryRepository.reorder(playlistId, newSongOrderIds)
++                } catch (e: kotlinx.coroutines.CancellationException) {
++                    throw e
++                } catch (e: Exception) {
++                    Log.e("PlaylistVM", "Could not reorder $playlistId", e)
++                }
++            } else {
++                playlistPreferencesRepository.reorderSongsInPlaylist(playlistId, newSongOrderIds)
++            }
++            playlistPreferencesRepository.setPlaylistSongOrderMode(playlistId, MANUAL_ORDER_MODE)
++            _uiState.update {
++                val updatedModes = it.playlistOrderModes + (playlistId to PlaylistSongsOrderMode.Manual)
++                it.copy(
++                    currentPlaylistSongs = orderedSongs,
++                    playlistSongsOrderMode = PlaylistSongsOrderMode.Manual,
++                    playlistOrderModes = updatedModes
++                )
++            }
++        }
++    }
++
+     fun reorderSongsInPlaylist(playlistId: String, fromIndex: Int, toIndex: Int) {
+         if (isFolderPlaylistId(playlistId)) return
+         viewModelScope.launch {
+--- a/presentation/components/QuickPicksSection.kt
++++ b/presentation/components/QuickPicksSection.kt
+@@ -33,6 +33,9 @@
+ import androidx.compose.animation.togetherWith
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
++import androidx.compose.ui.semantics.CustomAccessibilityAction
++import androidx.compose.ui.semantics.customActions
++import androidx.compose.ui.semantics.semantics
+ import androidx.compose.ui.draw.clip
+ import androidx.compose.ui.text.font.FontWeight
+ import androidx.compose.ui.text.style.TextOverflow
+@@ -174,8 +177,8 @@
+     subtitle: String? = null,
+     /** Small round picture over the cover's corner (e.g. the friend who played it). */
+     badgeImageUrl: String? = null,
+-    onLongClick: (() -> Unit)? = null,
+-    onLongClickLabel: String? = null
++    /** Extra action reachable from TalkBack (e.g. "Not for me"); hold always opens the options. */
++    secondaryAction: Pair<String, () -> Unit>? = null,
+ ) {
+     val colors = MaterialTheme.colorScheme
+ 
+@@ -186,10 +189,16 @@
+             .background(
+                 if (isCurrent) colors.primaryContainer.copy(alpha = 0.45f) else colors.surface
+             )
++            // No ⋮ button: hold the row for the song's options.
+             .combinedClickable(
+                 onClick = onClick,
+-                onLongClick = onLongClick,
+-                onLongClickLabel = onLongClickLabel
++                onLongClick = onMoreClick,
++                onLongClickLabel = "Song options"
++            )
++            .then(
++                if (secondaryAction != null) Modifier.semantics {
++                    customActions = listOf(CustomAccessibilityAction(secondaryAction.first) { secondaryAction.second(); true })
++                } else Modifier
+             )
+             .padding(horizontal = 6.dp, vertical = 6.dp),
+         verticalAlignment = Alignment.CenterVertically,
+@@ -245,18 +254,6 @@
+                 overflow = TextOverflow.Ellipsis
+             )
+         }
+-
+-        IconButton(
+-            onClick = onMoreClick,
+-            modifier = Modifier.size(36.dp)
+-        ) {
+-            Icon(
+-                imageVector = Icons.Rounded.MoreVert,
+-                contentDescription = "More actions for ${song.title}",
+-                tint = colors.onSurfaceVariant,
+-                modifier = Modifier.size(20.dp)
+-            )
+-        }
+     }
+ }
+ 
+--- a/presentation/screens/PracticeScreen.kt
++++ b/presentation/screens/PracticeScreen.kt
+@@ -23,6 +23,7 @@
+ import com.theveloper.pixelplay.ui.theme.MotionTokens
+ import androidx.compose.foundation.background
+ import androidx.compose.foundation.clickable
++import androidx.compose.foundation.combinedClickable
+ import androidx.compose.foundation.layout.Arrangement
+ import androidx.compose.foundation.layout.Box
+ import androidx.compose.foundation.layout.Column
+@@ -538,7 +539,8 @@
+                 if (isCurrent) MaterialTheme.colorScheme.secondaryContainer
+                 else MaterialTheme.colorScheme.surfaceContainerLow
+             )
+-            .clickable(enabled = song != null, onClick = onPlay)
++            // No ⋮ button: hold the row for its menu.
++            .combinedClickable(onClick = { if (song != null) onPlay() }, onLongClick = { menuOpen = true }, onLongClickLabel = "Song options")
+             .padding(start = 8.dp, top = 8.dp, bottom = 8.dp, end = 2.dp),
+         verticalAlignment = Alignment.CenterVertically
+     ) {
+@@ -618,9 +620,6 @@
+             }
+         }
+         Box {
+-            IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(40.dp)) {
+-                Icon(Icons.Rounded.MoreVert, contentDescription = "More", modifier = Modifier.size(20.dp))
+-            }
+             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                 if (song != null) {
+                     DropdownMenuItem(
+--- a/presentation/components/LyricsSheet.kt
++++ b/presentation/components/LyricsSheet.kt
+@@ -185,6 +185,8 @@
+ 
+ /** DataStore key: Instruments page shows live lyrics above the tab ("Lyrics + Tab"). */
+ private const val LYRICS_WITH_TAB_KEY = "lyrics_tab_combined_view"
++/** DataStore key: Instruments page colours: "follow" (app), "light" or "dark". */
++private const val TAB_APPEARANCE_KEY = "tab_page_appearance"
+ /** Share of the Lyrics + Tab page given to lyrics (0.2–0.8, default half). */
+ private const val LYRICS_TAB_SPLIT_RATIO_KEY = "lyrics_tab_split_ratio"
+ 
+@@ -220,6 +222,33 @@
+     val toastContent: Color = accentContent
+ )
+ 
++/** Every colour of [from] blended toward [to] by [t] (0..1). */
++internal fun lerpLyricsSheetColors(from: LyricsSheetColors, to: LyricsSheetColors, t: Float): LyricsSheetColors {
++    if (t <= 0f) return from
++    if (t >= 1f) return to
++    fun c(a: Color, b: Color) = androidx.compose.ui.graphics.lerp(a, b, t)
++    return LyricsSheetColors(
++        container = c(from.container, to.container),
++        content = c(from.content, to.content),
++        controlContainer = c(from.controlContainer, to.controlContainer),
++        controlContent = c(from.controlContent, to.controlContent),
++        accent = c(from.accent, to.accent),
++        accentContent = c(from.accentContent, to.accentContent),
++        lyricHighlight = c(from.lyricHighlight, to.lyricHighlight),
++        warmHighlight = c(from.warmHighlight, to.warmHighlight),
++        playPauseContainer = c(from.playPauseContainer, to.playPauseContainer),
++        playPauseContent = c(from.playPauseContent, to.playPauseContent),
++        syncButtonContainer = c(from.syncButtonContainer, to.syncButtonContainer),
++        syncButtonContent = c(from.syncButtonContent, to.syncButtonContent),
++        surfaceSecondary = c(from.surfaceSecondary, to.surfaceSecondary),
++        onSurfaceSecondary = c(from.onSurfaceSecondary, to.onSurfaceSecondary),
++        reactionPositive = c(from.reactionPositive, to.reactionPositive),
++        reactionNegative = c(from.reactionNegative, to.reactionNegative),
++        toastContainer = c(from.toastContainer, to.toastContainer),
++        toastContent = c(from.toastContent, to.toastContent),
++    )
++}
++
+ internal fun lyricsSheetColors(colorScheme: ColorScheme): LyricsSheetColors {
+     val container = colorScheme.primaryContainer
+     val content = colorScheme.onPrimaryContainer
+@@ -376,6 +405,8 @@
+     onLyricsSyncOffsetResetToAutomatic: (() -> Unit)? = null,
+     lyricsTextStyle: TextStyle,
+     colorScheme: ColorScheme,
++    /** Light + dark versions of [colorScheme]; lets the Instruments page be forced light or dark. */
++    colorSchemePair: com.theveloper.pixelplay.presentation.viewmodel.ColorSchemePair? = null,
+     onBackClick: () -> Unit,
+     /** False while the host is animating the sheet out; true while it is (or is coming back) on screen. */
+     isShown: Boolean = true,
+@@ -450,7 +481,42 @@
+     )
+ 
+     val stablePlayerState by stablePlayerStateFlow.collectAsStateWithLifecycle()
+-    val sheetColors = remember(colorScheme) { lyricsSheetColors(colorScheme) }
++    // Lyrics or Instruments page (declared here because the Instruments page can have its own colours).
++    var performanceView by remember { mutableStateOf(PerformanceView.Lyrics) }
++    // Tab appearance (Instruments options): Follow app / Light / Dark, remembered. Only the
++    // Instruments page uses it; the Lyrics page always follows the app.
++    val tabAppearanceContext = LocalContext.current
++    val tabAppearanceFlow = remember(tabAppearanceContext) {
++        tabAppearanceContext.dataStore.data.map { com.theveloper.pixelplay.presentation.components.tabs.TabAppearance.fromKey(it[stringPreferencesKey(TAB_APPEARANCE_KEY)]) }
++    }
++    val tabAppearance by tabAppearanceFlow.collectAsStateWithLifecycle(initialValue = com.theveloper.pixelplay.presentation.components.tabs.TabAppearance.FollowApp)
++    val tabAppearanceScope = androidx.compose.runtime.rememberCoroutineScope()
++    val setTabAppearance: (com.theveloper.pixelplay.presentation.components.tabs.TabAppearance) -> Unit = { value ->
++        tabAppearanceScope.launch {
++            tabAppearanceContext.dataStore.edit { prefs -> prefs[stringPreferencesKey(TAB_APPEARANCE_KEY)] = value.key }
++        }
++    }
++    val forcedInstrumentsScheme = when (tabAppearance) {
++        com.theveloper.pixelplay.presentation.components.tabs.TabAppearance.Light -> colorSchemePair?.light
++        com.theveloper.pixelplay.presentation.components.tabs.TabAppearance.Dark -> colorSchemePair?.dark
++        else -> null
++    }
++    val baseSheetColors = remember(colorScheme) { lyricsSheetColors(colorScheme) }
++    val forcedSheetColors = remember(forcedInstrumentsScheme) { forcedInstrumentsScheme?.let { lyricsSheetColors(it) } }
++    // 0 = app colours, 1 = the forced light/dark colours; animated so switching recolours smoothly.
++    val tabAppearanceReducedMotion = com.theveloper.pixelplay.ui.theme.rememberSystemReducedMotion()
++    val forcedColorsFraction by animateFloatAsState(
++        targetValue = if (performanceView == PerformanceView.Instruments && forcedSheetColors != null) 1f else 0f,
++        animationSpec = if (tabAppearanceReducedMotion) snap<Float>() else
++            tween<Float>(MotionTokens.DurationMedium2, easing = MotionTokens.Emphasized),
++        label = "tabAppearanceFraction"
++    )
++    // Keep the last forced colours so the fade back to the app colours has a start point.
++    var lastForcedSheetColors by remember { mutableStateOf<LyricsSheetColors?>(null) }
++    if (forcedSheetColors != null && lastForcedSheetColors != forcedSheetColors) lastForcedSheetColors = forcedSheetColors
++    val sheetColors = lastForcedSheetColors?.takeIf { forcedColorsFraction > 0f }
++        ?.let { lerpLyricsSheetColors(baseSheetColors, it, forcedColorsFraction) }
++        ?: baseSheetColors
+     // Sideways: song + controls on one half, lyrics on the other (and face-to-face goes side by side).
+     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+@@ -636,7 +702,6 @@
+     var showCustomLyricsEditor by remember { mutableStateOf(false) }
+     var showSyncControls by remember { mutableStateOf(false) }
+     var previewSeekPositionMs by remember(currentSong?.id) { mutableStateOf<Long?>(null) }
+-    var performanceView by remember { mutableStateOf(PerformanceView.Lyrics) }
+     // The Instruments page shares one tab controller with the practice panel and options menu.
+     val tabPractice = if (performanceView == PerformanceView.Instruments) {
+         rememberTabPractice(
+@@ -2055,7 +2120,10 @@
+                                     contentColor = contentColor,
+                                     accentColor = accentColor,
+                                     itemBackgroundColor = contentColor.copy(alpha = 0.08f),
+-                                    onAccentColor = onAccentColor
++                                    onAccentColor = onAccentColor,
++                                    appearance = tabAppearance,
++                                    // Only offered when the light + dark colours are known.
++                                    onAppearanceChange = if (colorSchemePair != null) setTabAppearance else null
+                                 )
+                             }
+                         }
+--- a/presentation/components/subcomps/EnhancedSongListItem.kt
++++ b/presentation/components/subcomps/EnhancedSongListItem.kt
+@@ -42,6 +42,10 @@
+ import androidx.compose.ui.graphics.Color
+ import androidx.compose.ui.graphics.lerp as lerpColor
+ import androidx.compose.ui.input.pointer.pointerInput
++import androidx.compose.ui.hapticfeedback.HapticFeedbackType
++import androidx.compose.ui.platform.LocalHapticFeedback
++import androidx.compose.ui.semantics.onLongClick
++import androidx.compose.ui.semantics.semantics
+ import androidx.compose.ui.text.font.FontWeight
+ import androidx.compose.ui.text.style.TextOverflow
+ import androidx.compose.ui.platform.LocalDensity
+@@ -79,7 +83,7 @@
+  * @param isSelected Whether this item is selected in multi-selection mode
+  * @param isSelectionMode Whether multi-selection mode is active
+  * @param onLongPress Callback for long press gesture (activates selection)
+- * @param onMoreOptionsClick Callback for more options button
++ * @param onMoreOptionsClick Opens the song's options; called on long press (cards have no ⋮ button)
+  * @param onClick Callback for tap gesture
+  */
+ @OptIn(ExperimentalMaterial3Api::class)
+@@ -97,6 +101,7 @@
+     isSelected: Boolean = false,
+     selectionIndex: Int? = null,
+     isSelectionMode: Boolean = false,
++    /** False = this card has no options menu; hold then toggles selection instead. */
+     showMoreOptionsButton: Boolean = true,
+     onLongPress: () -> Unit = {},
+     /** Optional action shown just left of the options button (e.g. Versions). */
+@@ -104,6 +109,7 @@
+     onMoreOptionsClick: (Song) -> Unit,
+     onClick: () -> Unit
+ ) {
++    val haptic = LocalHapticFeedback.current
+     val albumArtTargetSizePx = with(LocalDensity.current) { albumArtSize.roundToPx() }
+     val isHighlighted = isCurrentSong && !isLoading
+     val transition = updateTransition(
+@@ -257,7 +263,12 @@
+                         Modifier
+                     }
+                 )
+-                .pointerInput(isSelectionMode) {
++                .semantics {
++                    if (!isSelectionMode && showMoreOptionsButton) {
++                        onLongClick(label = "Song options") { onMoreOptionsClick(song); true }
++                    }
++                }
++                .pointerInput(isSelectionMode, showMoreOptionsButton) {
+                     detectTapGestures(
+                         onTap = { 
+                             if (isSelectionMode) {
+@@ -268,8 +279,14 @@
+                             }
+                         },
+                         onLongPress = {
+-                            // Long press always activates/toggles selection
+-                            onLongPress()
++                            // Hold opens the song's options (no ⋮ button on the card any more).
++                            // In selection mode, or where a card has no options, hold toggles selection.
++                            if (!isSelectionMode && showMoreOptionsButton) {
++                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
++                                onMoreOptionsClick(song)
++                            } else {
++                                onLongPress()
++                            }
+                         }
+                     )
+                 },
+@@ -372,7 +389,7 @@
+                 }
+                 
+                 val showPlayingIndicator = isCurrentSong && !isSelectionMode
+-                val showTrailingAction = showMoreOptionsButton && !isSelectionMode
++                val showTrailingAction = extraTrailing != null && !isSelectionMode
+ 
+                 if (showPlayingIndicator) {
+                      PlayingEqIcon(
+@@ -393,24 +410,6 @@
+                     Spacer(modifier = Modifier.width(8.dp))
+                 }
+ 
+-                if (showTrailingAction) {
+-                    FilledIconButton(
+-                        onClick = { onMoreOptionsClick(song) },
+-                        colors = IconButtonDefaults.filledIconButtonColors(
+-                            containerColor = mvContentColor,
+-                            contentColor = mvContainerColor
+-                        ),
+-                        modifier = Modifier
+-                            .size(36.dp)
+-                            .padding(end = 4.dp)
+-                    ) {
+-                        Icon(
+-                            imageVector = Icons.Rounded.MoreVert,
+-                            contentDescription = stringResource(R.string.common_more_options_for, song.title),
+-                            modifier = Modifier.size(24.dp)
+-                        )
+-                    }
+-                }
+             }
+         }
+     }
+--- a/presentation/components/player/RadioHistorySheet.kt
++++ b/presentation/components/player/RadioHistorySheet.kt
+@@ -186,8 +186,8 @@
+                     var menuOpen by remember { mutableStateOf(false) }
+                     Row(
+                         Modifier.fillMaxWidth()
+-                            .combinedClickable(onClick = { onPlay(track) }, onLongClick = { menuOpen = true })
+-                            .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
++                            .combinedClickable(onClick = { onPlay(track) }, onLongClick = { menuOpen = true }, onLongClickLabel = "Song options")
++                            .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 8.dp),
+                         verticalAlignment = Alignment.CenterVertically
+                     ) {
+                         Box(contentAlignment = Alignment.Center) {
+@@ -222,10 +222,8 @@
+                                 color = MaterialTheme.colorScheme.onSurfaceVariant
+                             )
+                         }
++                        // No ⋮ button: hold the row; the menu opens at the row's end.
+                         Box {
+-                            IconButton(onClick = { menuOpen = true }) {
+-                                Icon(Icons.Rounded.MoreVert, "More options", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+-                            }
+                             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                 DropdownMenuItem(
+                                     text = { Text("Play song") },
+--- a/presentation/components/SongInfoBottomSheet.kt
++++ b/presentation/components/SongInfoBottomSheet.kt
+@@ -66,6 +66,7 @@
+ import androidx.compose.material.icons.rounded.Link
+ import androidx.compose.material.icons.rounded.Phone
+ import androidx.compose.material.icons.rounded.Edit
++import androidx.compose.material.icons.rounded.Checklist
+ import androidx.compose.material.icons.rounded.Info
+ import androidx.compose.material.icons.rounded.Menu
+ import androidx.compose.material.icons.rounded.Speed
+@@ -163,6 +164,13 @@
+     alwaysShowDelete: Boolean = false,
+     /** Starts a Song Radio seeded by this song (plays it, then queues similar songs). Null disables the button. */
+     onStartSongRadio: ((Song) -> Unit)? = null,
++    /**
++     * Starts multi-select on the list this menu was opened from, with this song ticked.
++     * Cards open this menu on hold, so this is how lists enter selection mode. Null hides it.
++     */
++    onSelect: (() -> Unit)? = null,
++    /** Radio: the Map button next to Website. Null hides it. */
++    onShowStationOnMap: ((com.theveloper.pixelplay.data.radio.RadioStation) -> Unit)? = null,
+     songInfoViewModel: SongInfoBottomSheetViewModel = hiltViewModel()
+ ) {
+     val context = LocalContext.current
+@@ -448,6 +456,29 @@
+                                         )
+                                 )
+                             }
++                            if (onSelect != null) {
++                                FilledTonalIconButton(
++                                    modifier = Modifier.size(46.dp),
++                                    shape = CircleShape,
++                                    colors = IconButtonDefaults.filledTonalIconButtonColors(
++                                        containerColor = MaterialTheme.colorScheme.surfaceBright,
++                                        contentColor = MaterialTheme.colorScheme.onSurface
++                                    ),
++                                    onClick = {
++                                        // Slide the menu away, then start selecting in the list.
++                                        scope.launch { sheetState.hide() }.invokeOnCompletion {
++                                            onDismiss()
++                                            onSelect()
++                                        }
++                                    },
++                                ) {
++                                    Icon(
++                                        modifier = Modifier.size(22.dp),
++                                        imageVector = Icons.Rounded.Checklist,
++                                        contentDescription = "Select songs"
++                                    )
++                                }
++                            }
+                             val isEditable = remember(song) { songInfoViewModel.isSongEditable(song) } && !isRadio
+                             if (isEditable) {
+                                 FilledTonalIconButton(
+@@ -543,16 +574,21 @@
+                                                     Toast.makeText(context, "Saved to preset ${slot + 1}", Toast.LENGTH_SHORT).show()
+                                                 }
+                                             )
+-                                            if (radioStation.homepage != null) {
+-                                                com.theveloper.pixelplay.presentation.screens.radio.RadioOptionCard(
+-                                                    icon = Icons.Rounded.Language,
+-                                                    title = "Open station website",
+-                                                    subtitle = radioStation.homepage.removePrefix("https://").removePrefix("http://").trimEnd('/'),
+-                                                    onClick = {
+-                                                        com.theveloper.pixelplay.presentation.screens.radio.openStationHomepage(context, radioStation)
++                                            // Website, with a map button to its right (opens the Radio map on the station).
++                                            com.theveloper.pixelplay.presentation.screens.radio.RadioWebsiteMapRow(
++                                                station = radioStation,
++                                                onWebsite = {
++                                                    com.theveloper.pixelplay.presentation.screens.radio.openStationHomepage(context, radioStation)
++                                                },
++                                                onMap = onShowStationOnMap?.let { show ->
++                                                    {
++                                                        scope.launch { sheetState.hide() }.invokeOnCompletion {
++                                                            onDismiss()
++                                                            show(radioStation)
++                                                        }
+                                                     }
+-                                                )
+-                                            }
++                                                }
++                                            )
+                                         } else {
+                                             val isCloudSong = remember(song) { songInfoViewModel.isCloudSong(song) }
+                                             val downloadStateMap by songInfoViewModel.downloadUiState.collectAsStateWithLifecycle()
+--- a/presentation/components/PlaylistsHub.kt
++++ b/presentation/components/PlaylistsHub.kt
+@@ -448,6 +448,7 @@
+         tween(MotionTokens.DurationShort4, easing = MotionTokens.Emphasized), label = "friendRowSelected"
+     )
+     LaunchedEffect(selectionMode) { if (selectionMode) showPlaylists = false }
++    LaunchedEffect(friend.playlists.isEmpty()) { if (friend.playlists.isEmpty()) showPlaylists = false }
+     Column(
+         modifier
+             .clip(MaterialTheme.shapes.large)
+@@ -488,9 +489,12 @@
+                 }
+             }
+             Spacer(Modifier.width(8.dp))
++            // No public playlists: no arrow and nothing to expand; history stays on the picture.
++            val canExpand = friend.playlists.isNotEmpty()
+             Row(
+                 Modifier.widthIn(max = 160.dp).clip(MaterialTheme.shapes.small)
+                     .combinedClickable(
++                        enabled = canExpand || selectionMode,
+                         onClick = {
+                             if (selectionMode) onToggleSelect()
+                             else {
+@@ -507,7 +511,7 @@
+             ) {
+                 Text(friend.name, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleSmall.copy(fontFamily = GoogleSansRounded),
+                     fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+-                Icon(Icons.Rounded.KeyboardArrowDown, null, Modifier.size(18.dp).rotate(chevron), tint = MaterialTheme.colorScheme.onSurfaceVariant)
++                if (canExpand) Icon(Icons.Rounded.KeyboardArrowDown, null, Modifier.size(18.dp).rotate(chevron), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+             }
+             Spacer(Modifier.width(10.dp))
+             FriendTrackLabel(friend, onTrackClick = { if (selectionMode) onToggleSelect() else onTrackClick(it) }, Modifier.weight(1f))
+@@ -858,8 +862,9 @@
+                         .combinedClickable(
+                             onClick = { if (playable) onPlay(track) else onMore(track) },
+                             onLongClick = { onMore(track) },
++                            onLongClickLabel = "Song options",
+                         )
+-                        .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
++                        .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 8.dp),
+                         verticalAlignment = Alignment.CenterVertically) {
+                         Box(contentAlignment = Alignment.Center) {
+                             SmartImage(model = track.coverUrl, contentDescription = null, modifier = Modifier.size(56.dp), shape = RoundedCornerShape(12.dp))
+@@ -879,9 +884,6 @@
+                                 style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+                         }
+-                        IconButton(onClick = { onMore(track) }) {
+-                            Icon(Icons.Rounded.MoreVert, "More options", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+-                        }
+                     }
+                 }
+             }
+@@ -908,13 +910,21 @@
+ 
+ // ---- Formatting --------------------------------------------------------------------------------
+ 
++/** Compact age for friend activity: 5m, 6H, 3D, 2M (months), 1Y. */
+ private fun agoLabel(at: Long, now: Long = System.currentTimeMillis()): String {
+     val minutes = ((now - at) / 60_000).coerceAtLeast(0)
+     return when {
+         minutes < 1 -> "just now"
+-        minutes < 60 -> "$minutes min ago"
+-        minutes < 24 * 60 -> (minutes / 60).let { if (it == 1L) "1 hr ago" else "$it hrs ago" }
+-        else -> (minutes / (24 * 60)).let { if (it == 1L) "1 day ago" else "$it days ago" }
++        minutes < 60 -> "${minutes}m"
++        minutes < 24 * 60 -> "${minutes / 60}H"
++        else -> {
++            val days = minutes / (24 * 60)
++            when {
++                days < 30 -> "${days}D"
++                days < 365 -> "${days / 30}M"
++                else -> "${days / 365}Y"
++            }
++        }
+     }
+ }
+ 
+--- a/presentation/components/DailyMixLauncher.kt
++++ b/presentation/components/DailyMixLauncher.kt
+@@ -1,6 +1,32 @@
+ package com.theveloper.pixelplay.presentation.components
+ 
+ import androidx.compose.animation.AnimatedContent
++import androidx.compose.animation.animateContentSize
++import androidx.compose.animation.core.Animatable
++import androidx.compose.foundation.layout.fillMaxHeight
++import androidx.compose.material.icons.automirrored.rounded.Backspace
++import androidx.compose.foundation.layout.BoxScope
++import androidx.compose.ui.unit.IntSize
++import androidx.compose.material.icons.rounded.ExpandMore
++import androidx.compose.material.icons.rounded.FilterAltOff
++import androidx.compose.material3.VerticalDivider
++import androidx.compose.runtime.mutableIntStateOf
++import androidx.compose.ui.focus.onFocusChanged
++import androidx.compose.ui.geometry.Offset
++import androidx.compose.ui.geometry.Rect
++import androidx.compose.ui.layout.boundsInParent
++import androidx.compose.ui.layout.boundsInRoot
++import androidx.compose.ui.layout.onGloballyPositioned
++import androidx.compose.ui.layout.positionInParent
++import androidx.compose.ui.layout.positionInRoot
++import androidx.compose.ui.platform.LocalDensity
++import androidx.compose.ui.platform.LocalFocusManager
++import androidx.compose.ui.semantics.Role
++import androidx.compose.ui.semantics.paneTitle
++import androidx.compose.ui.semantics.role
++import androidx.compose.ui.semantics.selected
++import kotlinx.collections.immutable.persistentListOf
++import kotlinx.coroutines.launch
+ import androidx.compose.animation.EnterTransition
+ import androidx.compose.animation.ExitTransition
+ import androidx.compose.animation.core.animateFloatAsState
+@@ -253,6 +279,8 @@
+ fun DailyMixSheet(
+     model: DailyMixSheetModel,
+     selection: MixFilterSelection,
++    /** Online songs that fit the filters are being fetched (the progress bar shows). */
++    isFetchingOnline: Boolean = false,
+     dailyMixSongs: ImmutableList<Song>,
+     currentSongId: String?,
+     artistImageFor: (String) -> String?,
+@@ -265,6 +293,17 @@
+ ) {
+     // The model lags a moment behind a new pick while it's rebuilt off the main thread.
+     val building = model.selection != selection
++    // Mix | Artist tabs over the results row.
++    var resultsTab by rememberSaveable { mutableIntStateOf(0) }
++    // The open filter (its picker overlays the sheet) and where its chip sits, for the move.
++    var picking by rememberSaveable { mutableStateOf<String?>(null) }
++    var pickerOrigin by remember { mutableStateOf<Rect?>(null) }
++    var sheetOrigin by remember { mutableStateOf(Offset.Zero) }
++    Box(
++        modifier = Modifier
++            .fillMaxWidth()
++            .onGloballyPositioned { sheetOrigin = it.positionInRoot() }
++    ) {
+     Column(
+         modifier = Modifier
+             .fillMaxWidth()
+@@ -292,13 +331,12 @@
+                     .padding(horizontal = 20.dp),
+                 verticalAlignment = Alignment.CenterVertically
+             ) {
+-                Text(
+-                    text = if (selection.isEmpty) "Mixes for you" else "Made from your filters",
+-                    style = MaterialTheme.typography.titleMedium,
+-                    fontWeight = FontWeight.SemiBold,
+-                    modifier = Modifier.weight(1f)
++                MixArtistTabs(
++                    selected = resultsTab,
++                    onSelect = { resultsTab = it },
+                 )
+-                val count = model.artistMixes.size + model.generatedMixes.size
++                Spacer(Modifier.weight(1f))
++                val count = if (resultsTab == 0) model.generatedMixes.size else model.artistMixes.size
+                 if (count > 0 && !building) {
+                     Text(
+                         text = "$count",
+@@ -307,7 +345,7 @@
+                     )
+                 }
+             }
+-            val progressAlpha by animateFloatAsState(if (building) 1f else 0f, label = "dailyMixBuilding")
++            val progressAlpha by animateFloatAsState(if (building || isFetchingOnline) 1f else 0f, label = "dailyMixBuilding")
+             LinearProgressIndicator(
+                 modifier = Modifier
+                     .fillMaxWidth()
+@@ -318,8 +356,9 @@
+             )
+             Spacer(Modifier.height(6.dp))
+             MixResultsRow(
+-                artistMixes = model.artistMixes,
+-                generatedMixes = model.generatedMixes,
++                artistMixes = if (resultsTab == 1) model.artistMixes else persistentListOf(),
++                generatedMixes = if (resultsTab == 0) model.generatedMixes else persistentListOf(),
++                emptyText = if (resultsTab == 0) "No mixes for these filters yet." else "No artist mixes for these filters.",
+                 currentSongId = currentSongId,
+                 artistImageFor = artistImageFor,
+                 onPlayMix = onPlayGeneratedMix,
+@@ -337,9 +376,68 @@
+         MixFilterChipRow(
+             options = model.options,
+             selection = selection,
+-            onSelectionChange = onSelectionChange
++            onSelectionChange = onSelectionChange,
++            onOpenField = { field, chipBounds ->
++                pickerOrigin = chipBounds
++                picking = field.name
++            }
+         )
+     }
++    MixFilterPickerOverlay(
++        field = picking?.let { name -> MixFilterField.entries.firstOrNull { it.name == name } },
++        options = model.options,
++        selection = selection,
++        chipBounds = pickerOrigin,
++        sheetOrigin = sheetOrigin,
++        onPick = { field, value ->
++            picking = null
++            onSelectionChange(selection.with(field, value))
++        },
++        onClear = { field -> onSelectionChange(selection.with(field, null)) },
++        onClose = { picking = null },
++    )
++    }
++}
++
++/** Mix | Artist: general mixes and artist mixes, one at a time. */
++@Composable
++private fun MixArtistTabs(selected: Int, onSelect: (Int) -> Unit) {
++    val colors = MaterialTheme.colorScheme
++    val reducedMotion = rememberSystemReducedMotion()
++    Row(
++        modifier = Modifier
++            .clip(CircleShape)
++            .background(colors.surfaceContainerHigh)
++            .padding(3.dp),
++        horizontalArrangement = Arrangement.spacedBy(2.dp)
++    ) {
++        listOf("Mix", "Artist").forEachIndexed { index, label ->
++            val isSelected = index == selected
++            val spec = if (reducedMotion) androidx.compose.animation.core.snap<androidx.compose.ui.graphics.Color>()
++                else tween<androidx.compose.ui.graphics.Color>(MotionTokens.DurationMedium1, easing = MotionTokens.Emphasized)
++            val bg by androidx.compose.animation.animateColorAsState(
++                if (isSelected) colors.secondaryContainer else colors.surfaceContainerHigh, spec, label = "mixTabBg"
++            )
++            val fg by androidx.compose.animation.animateColorAsState(
++                if (isSelected) colors.onSecondaryContainer else colors.onSurfaceVariant, spec, label = "mixTabFg"
++            )
++            Box(
++                modifier = Modifier
++                    .heightIn(min = 40.dp)
++                    .clip(CircleShape)
++                    .background(bg)
++                    .semantics {
++                        role = Role.Tab
++                        this.selected = isSelected
++                    }
++                    .clickable { onSelect(index) }
++                    .padding(horizontal = 18.dp),
++                contentAlignment = Alignment.Center
++            ) {
++                Text(label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = fg)
++            }
++        }
++    }
+ }
+ 
+ /** Top of the sheet: the whole Daily Mix (or what the filters leave), with Play. */
+@@ -418,250 +516,362 @@
+     MixFilterField.Artist, MixFilterField.Genre, MixFilterField.Era, MixFilterField.Mood, MixFilterField.Activity
+ )
+ 
+-/** The sheet's bottom row: one chip per filter, plus Clear when anything is set. */
++/**
++ * The sheet's bottom row: a clear-all icon pinned at the start (disabled when nothing is set, so
++ * the row never jumps), a divider, then one scrolling chip per filter.
++ */
+ @Composable
+ private fun MixFilterChipRow(
+     options: MixFilterOptions,
+     selection: MixFilterSelection,
+-    onSelectionChange: (MixFilterSelection) -> Unit
++    onSelectionChange: (MixFilterSelection) -> Unit,
++    /** A chip was tapped; [chipBounds] is where it sits (root coordinates) so the picker can start there. */
++    onOpenField: (MixFilterField, Rect) -> Unit,
+ ) {
+     val fields = remember(options, selection) {
+         MixFilterField.entries.filter {
+             it in AlwaysShownFields || options.optionsFor(it).isNotEmpty() || selection.valueOf(it) != null
+         }
+     }
+-    var picking by rememberSaveable { mutableStateOf<String?>(null) }
++    val chipBounds = remember { mutableMapOf<String, Rect>() }
+ 
+-    LazyRow(
+-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+-        contentPadding = PaddingValues(horizontal = 16.dp),
+-        modifier = Modifier.fillMaxWidth()
++    Row(
++        modifier = Modifier.fillMaxWidth().padding(start = 8.dp),
++        verticalAlignment = Alignment.CenterVertically
+     ) {
+-        if (!selection.isEmpty) {
+-            item(key = "clear") {
+-                AssistChip(
+-                    onClick = { onSelectionChange(MixFilterSelection()) },
+-                    label = { Text("Clear") },
++        IconButton(
++            onClick = { onSelectionChange(MixFilterSelection()) },
++            enabled = !selection.isEmpty,
++            modifier = Modifier.semantics { contentDescription = "Clear all mix filters" }
++        ) {
++            Icon(Icons.Rounded.FilterAltOff, contentDescription = null)
++        }
++        VerticalDivider(
++            modifier = Modifier
++                .height(24.dp)
++                .padding(horizontal = 4.dp),
++            color = MaterialTheme.colorScheme.outlineVariant
++        )
++        LazyRow(
++            horizontalArrangement = Arrangement.spacedBy(8.dp),
++            contentPadding = PaddingValues(start = 8.dp, end = 16.dp),
++            modifier = Modifier.weight(1f)
++        ) {
++            items(fields, key = { it.name }) { field ->
++                val selected = selection.valueOf(field)
++                FilterChip(
++                    selected = selected != null,
++                    onClick = { chipBounds[field.name]?.let { onOpenField(field, it) } },
++                    label = {
++                        Text(
++                            text = selected ?: field.label,
++                            maxLines = 1,
++                            overflow = TextOverflow.Ellipsis,
++                            modifier = Modifier.widthIn(max = 160.dp)
++                        )
++                    },
+                     leadingIcon = {
+                         Icon(
+-                            imageVector = Icons.Rounded.Close,
++                            imageVector = fieldIcon(field),
+                             contentDescription = null,
+                             modifier = Modifier.size(FilterChipDefaults.IconSize)
+                         )
+                     },
+-                    modifier = Modifier.semantics { contentDescription = "Clear all mix filters" }
++                    trailingIcon = {
++                        Icon(
++                            imageVector = Icons.Rounded.KeyboardArrowUp,
++                            contentDescription = null,
++                            modifier = Modifier.size(FilterChipDefaults.IconSize)
++                        )
++                    },
++                    modifier = Modifier
++                        .onGloballyPositioned { chipBounds[field.name] = it.boundsInRoot() }
++                        .semantics {
++                            contentDescription = "Filter by ${field.label}"
++                            stateDescription = selected ?: "Any"
++                        }
+                 )
+             }
+         }
+-        items(fields, key = { it.name }) { field ->
+-            val selected = selection.valueOf(field)
+-            FilterChip(
+-                selected = selected != null,
+-                onClick = { picking = field.name },
+-                label = {
+-                    Text(
+-                        text = selected ?: field.label,
+-                        maxLines = 1,
+-                        overflow = TextOverflow.Ellipsis,
+-                        modifier = Modifier.widthIn(max = 160.dp)
+-                    )
+-                },
+-                leadingIcon = {
+-                    Icon(
+-                        imageVector = fieldIcon(field),
+-                        contentDescription = null,
+-                        modifier = Modifier.size(FilterChipDefaults.IconSize)
+-                    )
+-                },
+-                trailingIcon = {
+-                    Icon(
+-                        imageVector = Icons.Rounded.ArrowDropDown,
+-                        contentDescription = null,
+-                        modifier = Modifier.size(FilterChipDefaults.IconSize)
+-                    )
+-                },
+-                modifier = Modifier.semantics {
+-                    contentDescription = "Filter by ${field.label}"
+-                    stateDescription = selected ?: "Any"
+-                }
+-            )
+-        }
+-    }
+-
+-    val field = picking?.let { name -> MixFilterField.entries.firstOrNull { it.name == name } }
+-    if (field != null) {
+-        MixFilterPickerDialog(
+-            field = field,
+-            options = options.optionsFor(field),
+-            selected = selection.valueOf(field),
+-            onPick = { value ->
+-                picking = null
+-                onSelectionChange(selection.with(field, value))
+-            },
+-            onDismiss = { picking = null }
+-        )
+     }
+ }
+ 
+ /**
+- * A chip's picker: a search box on top, then "Use “what you typed”" (for fields that take free
+- * text), "Any", and the library's options with how many songs each covers.
++ * A filter's picker, laid over the sheet. Opening moves a search pill from the tapped chip to the
++ * middle of the row, with Clear on its left and Close on its right; the choices rise above it,
++ * "Any" first (nearest the pill), and drag down to see the rest. The pill is the search box: it
++ * isn't focused on open; tap it to type (it widens), and it narrows again when it loses focus.
++ * Close / Back / tapping outside move it back to the chip.
+  */
++@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+ @Composable
+-private fun MixFilterPickerDialog(
+-    field: MixFilterField,
+-    options: ImmutableList<MixFilterOption>,
+-    selected: String?,
+-    onPick: (String?) -> Unit,
+-    onDismiss: () -> Unit,
++private fun BoxScope.MixFilterPickerOverlay(
++    field: MixFilterField?,
++    options: MixFilterOptions,
++    selection: MixFilterSelection,
++    /** The tapped chip, in root coordinates. */
++    chipBounds: Rect?,
++    /** The sheet's top-left, in root coordinates. */
++    sheetOrigin: Offset,
++    onPick: (MixFilterField, String?) -> Unit,
++    onClear: (MixFilterField) -> Unit,
++    onClose: () -> Unit,
+ ) {
+-    var query by rememberSaveable(field) { mutableStateOf("") }
++    val reducedMotion = rememberSystemReducedMotion()
++    val motionScheme = MaterialTheme.motionScheme
++    // What's drawn: stays set while closing so the exit can play.
++    var shownField by remember { mutableStateOf(field) }
++    if (field != null && field != shownField) shownField = field
++    val open = field != null
++    // 0 = sitting on the chip, 1 = centred. Spatial spring (it's a moving, morphing element);
++    // a reopen/close mid-way retargets from wherever it is.
++    val move = remember { Animatable(0f) }
++    // Choices list: grows up out of the pill.
++    val list = remember { Animatable(0f) }
++    LaunchedEffect(open) {
++        if (reducedMotion) {
++            move.snapTo(if (open) 1f else 0f)
++            list.snapTo(if (open) 1f else 0f)
++        } else if (open) {
++            launch { move.animateTo(1f, motionScheme.defaultSpatialSpec<Float>()) }
++            list.animateTo(1f, tween(MotionTokens.DurationMedium2, easing = MotionTokens.EmphasizedDecelerate))
++        } else {
++            launch { list.animateTo(0f, tween(MotionTokens.DurationShort4, easing = MotionTokens.EmphasizedAccelerate)) }
++            move.animateTo(0f, motionScheme.fastSpatialSpec<Float>())
++        }
++        if (!open) shownField = null
++    }
++    androidx.activity.compose.BackHandler(enabled = open) { onClose() }
++    val current = shownField ?: return
++    val bounds = chipBounds ?: return
++    val colors = MaterialTheme.colorScheme
++    val density = LocalDensity.current
++    val fieldOptions = options.optionsFor(current)
++    val selected = selection.valueOf(current)
++
++    var query by rememberSaveable(current) { mutableStateOf("") }
++    var searching by remember(current) { mutableStateOf(false) }
++    var hadFocus by remember(current) { mutableStateOf(false) }
++    val focusRequester = remember { FocusRequester() }
++    val focusManager = LocalFocusManager.current
++    LaunchedEffect(searching) { if (searching) runCatching { focusRequester.requestFocus() } }
+     val trimmed = query.trim()
+-    val shown = remember(options, trimmed) {
+-        if (trimmed.isEmpty()) options
++    val shown = remember(fieldOptions, trimmed) {
++        if (trimmed.isEmpty()) fieldOptions
+         else {
+             val q = trimmed.lowercase(Locale.ROOT)
+-            options.filter { it.value.lowercase(Locale.ROOT).contains(q) }
++            fieldOptions.filter { it.value.lowercase(Locale.ROOT).contains(q) }
+                 .sortedBy { if (it.value.lowercase(Locale.ROOT).startsWith(q)) 0 else 1 }
+         }
+     }
+-    val offerCustom = field.allowsCustom && trimmed.isNotEmpty() &&
+-        options.none { it.value.equals(trimmed, ignoreCase = true) }
+-    val colors = MaterialTheme.colorScheme
+-    val focusRequester = remember { FocusRequester() }
+-    LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
++    val offerCustom = current.allowsCustom && trimmed.isNotEmpty() &&
++        fieldOptions.none { it.value.equals(trimmed, ignoreCase = true) }
++
++    // Clear / Close: fade in after the move starts, out faster than in.
++    val sideAlpha by animateFloatAsState(
++        targetValue = if (open) 1f else 0f,
++        animationSpec = if (reducedMotion) androidx.compose.animation.core.snap<Float>() else if (open)
++            tween<Float>(MotionTokens.DurationShort4, easing = MotionTokens.EmphasizedDecelerate)
++        else tween<Float>(MotionTokens.DurationShort3, easing = MotionTokens.EmphasizedAccelerate),
++        label = "pickerSideButtons"
++    )
+ 
+-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+-        com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
+-        Surface(
+-            shape = RoundedCornerShape(28.dp),
+-            color = colors.surfaceContainerHigh,
+-            tonalElevation = 6.dp,
++    Box(Modifier.matchParentSize()) {
++        // Scrim: dims the sheet; tap to close.
++        Box(
++            Modifier
++                .matchParentSize()
++                .graphicsLayer { alpha = move.value.coerceIn(0f, 1f) }
++                .background(colors.scrim.copy(alpha = 0.32f))
++                .clickable(
++                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
++                    indication = null,
++                    onClick = onClose
++                )
++        )
++        // Everything above the chip row's bottom edge: the choices, then the pill row.
++        val barBottom = with(density) { (bounds.bottom - sheetOrigin.y).coerceAtLeast(0f).toDp() }
++        Column(
+             modifier = Modifier
+-                .fillMaxWidth(0.92f)
+-                .heightIn(max = 560.dp)
++                .fillMaxWidth()
++                .height(barBottom)
++                .semantics { paneTitle = "${current.label} filter" },
++            verticalArrangement = Arrangement.Bottom
+         ) {
+-            Column(Modifier.padding(top = 16.dp, bottom = 8.dp)) {
+-                // Search first, as the picker's header.
+-                Surface(
+-                    shape = CircleShape,
+-                    color = colors.surfaceContainerHighest,
+-                    modifier = Modifier
+-                        .fillMaxWidth()
+-                        .padding(horizontal = 16.dp)
+-                        .height(48.dp)
+-                ) {
+-                    Row(Modifier.padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+-                        Icon(Icons.Rounded.Search, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(20.dp))
+-                        Spacer(Modifier.width(10.dp))
+-                        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+-                            if (query.isEmpty()) {
+-                                Text(
+-                                    field.searchHint,
+-                                    style = MaterialTheme.typography.bodyLarge,
+-                                    color = colors.onSurfaceVariant,
+-                                    maxLines = 1,
+-                                    overflow = TextOverflow.Ellipsis
+-                                )
+-                            }
+-                            BasicTextField(
+-                                value = query,
+-                                onValueChange = { query = it.take(60) },
+-                                singleLine = true,
+-                                textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.onSurface),
+-                                cursorBrush = SolidColor(colors.primary),
+-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+-                                keyboardActions = KeyboardActions(onDone = {
+-                                    when {
+-                                        offerCustom -> onPick(trimmed)
+-                                        shown.isNotEmpty() && trimmed.isNotEmpty() -> onPick(shown.first().value)
+-                                    }
+-                                }),
+-                                modifier = Modifier
+-                                    .fillMaxWidth()
+-                                    .focusRequester(focusRequester)
+-                            )
+-                        }
+-                        if (query.isNotEmpty()) {
+-                            IconButton(onClick = { query = "" }) {
+-                                Icon(Icons.Rounded.Close, contentDescription = "Clear search")
+-                            }
++            LazyColumn(
++                reverseLayout = true,
++                modifier = Modifier
++                    .fillMaxWidth()
++                    .weight(1f, fill = false)
++                    .padding(horizontal = 16.dp)
++                    .graphicsLayer {
++                        val p = list.value
++                        alpha = p
++                        scaleY = 0.85f + 0.15f * p
++                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 1f)
++                    }
++                    .clip(RoundedCornerShape(24.dp))
++                    .background(colors.surfaceContainerHigh),
++                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
++            ) {
++                // Item 0 sits right above the pill.
++                if (trimmed.isEmpty()) {
++                    item(key = "any") {
++                        PickerRow(
++                            label = "Any ${current.label.lowercase(Locale.ROOT)}",
++                            count = 0,
++                            isSelected = selected == null,
++                            onClick = { onPick(current, null) },
++                            modifier = Modifier.animateItem()
++                        )
++                    }
++                    if (selected != null && fieldOptions.none { it.value == selected }) {
++                        item(key = "current") {
++                            PickerRow(label = selected, count = 0, isSelected = true, icon = Icons.Rounded.Edit,
++                                onClick = { onPick(current, selected) }, modifier = Modifier.animateItem())
+                         }
+                     }
++                } else if (offerCustom) {
++                    item(key = "custom") {
++                        PickerRow(
++                            label = "Use “$trimmed”",
++                            count = 0,
++                            isSelected = false,
++                            icon = Icons.Rounded.Edit,
++                            emphasize = true,
++                            onClick = { onPick(current, trimmed) },
++                            modifier = Modifier.animateItem()
++                        )
++                    }
+                 }
+-                Text(
+-                    text = "${field.label} · " + when {
+-                        options.isEmpty() -> "type your own"
+-                        field.allowsCustom -> "${options.size} in your library, or type your own"
+-                        else -> "${options.size} options"
++                items(shown, key = { "o_" + it.value }) { option ->
++                    PickerRow(
++                        label = option.value,
++                        count = option.count,
++                        isSelected = option.value == selected,
++                        onClick = { onPick(current, if (option.value == selected) null else option.value) },
++                        modifier = Modifier.animateItem()
++                    )
++                }
++                if (shown.isEmpty() && !offerCustom && trimmed.isNotEmpty()) {
++                    item(key = "none") {
++                        Text(
++                            "Nothing called “$trimmed” here.",
++                            style = MaterialTheme.typography.bodyMedium,
++                            color = colors.onSurfaceVariant,
++                            modifier = Modifier.padding(16.dp)
++                        )
++                    }
++                }
++            }
++            Spacer(Modifier.height(8.dp))
++            // The pill row, centred on the chip row's height.
++            Row(
++                modifier = Modifier
++                    .fillMaxWidth()
++                    .height(with(density) { bounds.height.toDp() }.coerceAtLeast(48.dp))
++                    .padding(horizontal = 8.dp),
++                verticalAlignment = Alignment.CenterVertically
++            ) {
++                IconButton(
++                    onClick = {
++                        query = ""
++                        onClear(current)
+                     },
+-                    style = MaterialTheme.typography.labelMedium,
+-                    color = colors.onSurfaceVariant,
+-                    modifier = Modifier.padding(start = 28.dp, top = 10.dp, bottom = 4.dp)
+-                )
+-                LazyColumn(
++                    enabled = selected != null || query.isNotEmpty(),
++                    modifier = Modifier.graphicsLayer { alpha = sideAlpha }
++                ) {
++                    Icon(Icons.AutoMirrored.Rounded.Backspace, contentDescription = "Clear ${current.label}")
++                }
++                // Where the pill rests (the centre of this slot), in root coordinates.
++                var restCenterX by remember { mutableStateOf(bounds.center.x) }
++                Box(
+                     modifier = Modifier
+-                        .fillMaxWidth()
+-                        .weight(1f, fill = false),
+-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
++                        .weight(1f)
++                        .onGloballyPositioned { restCenterX = it.boundsInRoot().center.x },
++                    contentAlignment = Alignment.Center
+                 ) {
+-                    if (offerCustom) {
+-                        item(key = "custom") {
+-                            PickerRow(
+-                                label = "Use “$trimmed”",
+-                                count = 0,
+-                                isSelected = false,
+-                                icon = Icons.Rounded.Edit,
+-                                emphasize = true,
+-                                onClick = { onPick(trimmed) }
+-                            )
+-                        }
+-                    }
+-                    if (trimmed.isEmpty()) {
+-                        item(key = "any") {
+-                            PickerRow(
+-                                label = "Any ${field.label.lowercase(Locale.ROOT)}",
+-                                count = 0,
+-                                isSelected = selected == null,
+-                                onClick = { onPick(null) }
+-                            )
+-                        }
+-                        // A typed value picked earlier isn't in the library list; keep it visible.
+-                        if (selected != null && options.none { it.value == selected }) {
+-                            item(key = "current") {
+-                                PickerRow(label = selected, count = 0, isSelected = true, icon = Icons.Rounded.Edit, onClick = { onPick(selected) })
++                    Row(
++                        modifier = Modifier
++                            .graphicsLayer {
++                                // Starts over the chip, travels to the centre.
++                                translationX = (1f - move.value) * (bounds.center.x - restCenterX)
+                             }
+-                        }
+-                    }
+-                    items(shown, key = { "o_" + it.value }) { option ->
+-                        PickerRow(
+-                            label = option.value,
+-                            count = option.count,
+-                            isSelected = option.value == selected,
+-                            onClick = { onPick(if (option.value == selected) null else option.value) }
++                            .animateContentSize(
++                                if (reducedMotion) androidx.compose.animation.core.snap<IntSize>()
++                                else motionScheme.defaultSpatialSpec<IntSize>()
++                            )
++                            .then(if (searching) Modifier.fillMaxWidth() else Modifier)
++                            .height(48.dp)
++                            .clip(CircleShape)
++                            .background(colors.surfaceContainerHighest)
++                            .clickable(enabled = !searching) { searching = true }
++                            .padding(horizontal = 14.dp),
++                        verticalAlignment = Alignment.CenterVertically
++                    ) {
++                        Icon(
++                            imageVector = if (searching) Icons.Rounded.Search else fieldIcon(current),
++                            contentDescription = null,
++                            tint = colors.onSurfaceVariant,
++                            modifier = Modifier.size(20.dp)
+                         )
+-                    }
+-                    if (shown.isEmpty() && !offerCustom && trimmed.isNotEmpty()) {
+-                        item(key = "none") {
++                        Spacer(Modifier.width(10.dp))
++                        if (searching) {
++                            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
++                                if (query.isEmpty()) {
++                                    Text(
++                                        current.searchHint,
++                                        style = MaterialTheme.typography.bodyLarge,
++                                        color = colors.onSurfaceVariant,
++                                        maxLines = 1,
++                                        overflow = TextOverflow.Ellipsis
++                                    )
++                                }
++                                BasicTextField(
++                                    value = query,
++                                    onValueChange = { query = it.take(60) },
++                                    singleLine = true,
++                                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.onSurface),
++                                    cursorBrush = SolidColor(colors.primary),
++                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
++                                    keyboardActions = KeyboardActions(onDone = {
++                                        when {
++                                            offerCustom -> onPick(current, trimmed)
++                                            shown.isNotEmpty() && trimmed.isNotEmpty() -> onPick(current, shown.first().value)
++                                            else -> focusManager.clearFocus()
++                                        }
++                                    }),
++                                    modifier = Modifier
++                                        .fillMaxWidth()
++                                        .focusRequester(focusRequester)
++                                        .onFocusChanged { state ->
++                                            // Narrow back once the box loses focus (the typed text stays).
++                                            if (state.isFocused) hadFocus = true
++                                            else if (hadFocus) {
++                                                hadFocus = false
++                                                searching = false
++                                            }
++                                        }
++                                )
++                            }
++                        } else {
+                             Text(
+-                                "Nothing called “$trimmed” here.",
+-                                style = MaterialTheme.typography.bodyMedium,
+-                                color = colors.onSurfaceVariant,
+-                                modifier = Modifier.padding(16.dp)
++                                text = if (query.isNotEmpty()) query else selected ?: current.label,
++                                style = MaterialTheme.typography.labelLarge,
++                                fontWeight = FontWeight.SemiBold,
++                                color = colors.onSurface,
++                                maxLines = 1,
++                                overflow = TextOverflow.Ellipsis,
++                                modifier = Modifier.widthIn(max = 180.dp)
+                             )
+                         }
+                     }
+                 }
+-                Row(
+-                    modifier = Modifier
+-                        .fillMaxWidth()
+-                        .padding(horizontal = 12.dp),
+-                    horizontalArrangement = Arrangement.End
++                IconButton(
++                    onClick = onClose,
++                    modifier = Modifier.graphicsLayer { alpha = sideAlpha }
+                 ) {
+-                    if (selected != null) {
+-                        TextButton(onClick = { onPick(null) }) { Text("Clear") }
+-                    }
+-                    TextButton(onClick = onDismiss) { Text("Close") }
++                    Icon(Icons.Rounded.ExpandMore, contentDescription = "Close filter")
+                 }
+             }
+         }
+@@ -676,11 +886,13 @@
+     onClick: () -> Unit,
+     icon: ImageVector? = null,
+     emphasize: Boolean = false,
++    modifier: Modifier = Modifier,
+ ) {
+     val colors = MaterialTheme.colorScheme
+     Row(
+-        modifier = Modifier
++        modifier = modifier
+             .fillMaxWidth()
++            .heightIn(min = 48.dp)
+             .clip(RoundedCornerShape(16.dp))
+             .background(if (isSelected) colors.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent)
+             .clickable(onClick = onClick)
+@@ -725,7 +937,8 @@
+     onPlayMix: (GeneratedMix) -> Unit,
+     onOpenMix: (GeneratedMix) -> Unit,
+     onOpenArtist: (String) -> Unit,
+-    onClearFilters: () -> Unit
++    onClearFilters: () -> Unit,
++    emptyText: String = "Nothing in your library matches those filters yet."
+ ) {
+     val reducedMotion = rememberSystemReducedMotion()
+     val itemFadeIn = if (reducedMotion) null else
+@@ -758,7 +971,7 @@
+                 horizontalAlignment = Alignment.Start
+             ) {
+                 Text(
+-                    text = "Nothing in your library matches those filters yet.",
++                    text = emptyText,
+                     style = MaterialTheme.typography.bodyMedium,
+                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                 )
+--- a/presentation/components/player/FullPlayerContent.kt
++++ b/presentation/components/player/FullPlayerContent.kt
+@@ -1316,6 +1316,7 @@
+             animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)
+         ) + fadeOut(animationSpec = tween(durationMillis = 120))
+     ) {
++        val lyricsColorSchemePair by playerViewModel.activePlayerColorSchemePair.collectAsStateWithLifecycle()
+         LyricsSheet(
+             stablePlayerStateFlow = playerViewModel.stablePlayerState,
+             playbackPositionFlow = playerViewModel.currentPlaybackPosition,
+@@ -1351,6 +1352,7 @@
+                 )
+             },
+             colorScheme = LocalMaterialTheme.current,
++            colorSchemePair = lyricsColorSchemePair,
+             onBackClick = { showLyricsSheet = false },
+             isShown = transition.targetState == androidx.compose.animation.EnterExitState.Visible,
+             onSaveLyricsToFile = playerViewModel::saveLyricsToFile,
+--- a/presentation/screens/SearchScreen.kt
++++ b/presentation/screens/SearchScreen.kt
+@@ -666,6 +666,7 @@
+ 
+         if (currentSong != null) {
+             SongInfoBottomSheet(
++                onSelect = { multiSelectionState.toggleSelection(currentSong) },
+                 onStartSongRadio = { seedSong -> playerViewModel.startSongRadio(seedSong) },
+                 song = currentSong,
+                 isFavorite = isFavorite,
+--- a/presentation/viewmodel/PlayerViewModel.kt
++++ b/presentation/viewmodel/PlayerViewModel.kt
+@@ -710,6 +710,30 @@
+     private val _radioMapNavigationRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+     val radioMapNavigationRequests = _radioMapNavigationRequests.asSharedFlow()
+ 
++    /**
++     * Online songs that fit [seeds] (the Daily Mix sheet's filtered songs), for the sheet to mix in
++     * alongside the library. Skips anything in [excludedIdentities] and songs you've disliked.
++     * Empty on timeout or when offline: the sheet then just keeps the library results.
++     */
++    suspend fun onlineMixPicks(seeds: List<Song>, excludedIdentities: Set<String>, limit: Int = 24): List<Song> {
++        if (seeds.isEmpty()) return emptyList()
++        return try {
++            val batch = withTimeoutOrNull(8_000) {
++                dailyMixStateHolder.nextMixBatch(
++                    com.theveloper.pixelplay.data.MixFlavor.SMART,
++                    seeds,
++                    excludedIdentities,
++                    limit
++                )
++            }.orEmpty()
++            dailyMixStateHolder.analysed(batch.filterNot(dailyMixStateHolder::isDisliked))
++        } catch (cancelled: kotlinx.coroutines.CancellationException) {
++            throw cancelled
++        } catch (_: Exception) {
++            emptyList()
++        }
++    }
++
+     /** Collapses the player and opens the radio map on [station]. */
+     fun openRadioMapForStation(station: com.theveloper.pixelplay.data.radio.RadioStation) {
+         com.theveloper.pixelplay.data.radio.RadioMapFocus.request(station)
+--- a/presentation/components/tabs/TabPracticePanel.kt
++++ b/presentation/components/tabs/TabPracticePanel.kt
+@@ -1181,6 +1181,9 @@
+     itemBackgroundColor: Color,
+     /** Text colour on [accentColor] (the timing buttons). */
+     onAccentColor: Color = Color.White,
++    /** Tab appearance (Follow app / Light / Dark). Hidden when [onAppearanceChange] is null. */
++    appearance: TabAppearance = TabAppearance.FollowApp,
++    onAppearanceChange: ((TabAppearance) -> Unit)? = null,
+ ) {
+     // Practice tools open from the Tabs button; Lyrics + Tab is toggled on the page itself
+     // (immersive shortcut), so neither lives in this menu any more.
+@@ -1192,6 +1195,9 @@
+             fontWeight = FontWeight.SemiBold,
+             modifier = Modifier.padding(start = 6.dp, bottom = 2.dp),
+         )
++        if (onAppearanceChange != null) {
++            TabAppearanceOption(appearance, onAppearanceChange, contentColor, accentColor, onAccentColor, itemBackgroundColor)
++        }
+         if (controller.pdfUri != null) {
+             OptionPill("Back to tab", contentColor, itemBackgroundColor, Modifier.fillMaxWidth()) { controller.pdfUri = null }
+         }
+--- a/presentation/screens/PlaylistDetailScreen.kt
++++ b/presentation/screens/PlaylistDetailScreen.kt
+@@ -12,6 +12,15 @@
+ import androidx.compose.animation.animateContentSize
+ import androidx.compose.animation.core.animateDpAsState
+ import androidx.compose.animation.core.animateFloatAsState
++import androidx.compose.animation.core.snap
++import androidx.compose.animation.core.tween
++import androidx.compose.ui.semantics.CustomAccessibilityAction
++import androidx.compose.ui.semantics.customActions
++import androidx.compose.ui.semantics.semantics
++import androidx.compose.ui.semantics.contentDescription
++import androidx.compose.material.icons.rounded.Edit
++import com.theveloper.pixelplay.ui.theme.MotionTokens
++import com.theveloper.pixelplay.ui.theme.rememberSystemReducedMotion
+ import androidx.compose.foundation.ExperimentalFoundationApi
+ import androidx.compose.foundation.background
+ import androidx.compose.foundation.clickable
+@@ -262,7 +271,6 @@
+     }
+ 
+     var showAddSongsSheet by remember { mutableStateOf(false) }
+-    var isReorderModeEnabled by remember { mutableStateOf(false) }
+     var showSongInfoBottomSheet by remember { mutableStateOf(false) }
+     var showPlaylistOptionsSheet by remember { mutableStateOf(false) }
+     var showEditPlaylistDialog by remember { mutableStateOf(false) }
+@@ -271,7 +279,10 @@
+     var showDownloadConfirm by remember { mutableStateOf<List<Song>?>(null) }
+     var showDownloadedSheet by remember { mutableStateOf(false) }
+ 
+-    // ---- Multi-select (hold a song to start) ----
++    // ---- Edit mode (the header's Edit button): select + reorder in one ----
++    // Holding a song outside Edit opens its options. Inside Edit, tap/hold toggles a song and
++    // the handles drag; dragging a selected song moves every selected song with it.
++    // Selection is by row key (not song id) so duplicate YouTube Music entries select on their own.
+     var isSelectionMode by remember { mutableStateOf(false) }
+     var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+     var showSelectionPlaylistSheet by remember { mutableStateOf(false) }
+@@ -306,47 +317,68 @@
+     val navBarCompactMode by playerViewModel.navBarCompactMode.collectAsStateWithLifecycle()
+     val bottomBarHeightDp = resolveNavBarOccupiedHeight(systemNavBarInset, navBarCompactMode)
+     var showPlaylistBottomSheet by remember { mutableStateOf(false) }
+-    var localReorderableSongs by remember(songsInPlaylist) { mutableStateOf(songsInPlaylist) }
+-    val localSongKeys = remember(localReorderableSongs) { uniqueSongKeys(localReorderableSongs) }
+-    val selectedSongs = remember(selectedIds, localReorderableSongs) {
+-        localReorderableSongs.filter { it.id in selectedIds }.distinctBy { it.id }
++    // Rows keep the key they were given when the playlist loaded, so a key never changes while
++    // a song is being dragged (positional keys for duplicates would).
++    var playlistRows by remember(songsInPlaylist) {
++        mutableStateOf(uniqueSongKeys(songsInPlaylist).zip(songsInPlaylist) { key, song -> PlaylistRow(key, song) })
++    }
++    val localReorderableSongs = remember(playlistRows) { playlistRows.map { it.song } }
++    val localSongKeys = remember(playlistRows) { playlistRows.map { it.key } }
++    val selectedSongs = remember(selectedIds, playlistRows) {
++        playlistRows.filter { it.key in selectedIds }.map { it.song }.distinctBy { it.id }
+     }
+ 
+     val listState = rememberLazyListState()
++    val reducedMotion = rememberSystemReducedMotion()
+     val scope = rememberCoroutineScope()
+     val view = LocalView.current
+     val appHapticsConfig = LocalAppHapticsConfig.current
+-    var lastMovedFrom by remember { mutableStateOf<Int?>(null) }
+-    var lastMovedTo by remember { mutableStateOf<Int?>(null) }
+-
+-    // The header is list item 0, so song rows sit at index + HEADER_ITEM_COUNT.
++    // Set while a drag is in progress: the dragged row's key, and whether it carries the other
++    // selected rows with it (it does when it is selected and 2+ rows are).
++    var draggingKey by remember { mutableStateOf<String?>(null) }
++    var dragCarriesSelection by remember { mutableStateOf(false) }
++    var orderChanged by remember { mutableStateOf(false) }
++
++    // Moves are resolved by row KEY, never by LazyColumn index: the list has a header (and could
++    // gain other rows) above the songs, and an index offset was what made reordering move the
++    // wrong song.
+     val reorderableState = rememberReorderableLazyListState(
+         lazyListState = listState,
+         onMove = { from, to ->
+-            val fromIndex = from.index - HEADER_ITEM_COUNT
+-            val toIndex = to.index - HEADER_ITEM_COUNT
+-            if (fromIndex !in localReorderableSongs.indices || toIndex !in localReorderableSongs.indices) return@rememberReorderableLazyListState
+-            localReorderableSongs = localReorderableSongs.toMutableList().apply {
+-                add(toIndex, removeAt(fromIndex))
+-            }
+-            if (lastMovedFrom == null) {
+-                lastMovedFrom = fromIndex
+-            }
+-            lastMovedTo = toIndex
++            val fromIndex = playlistRows.indexOfFirst { it.key == from.key }
++            val toIndex = playlistRows.indexOfFirst { it.key == to.key }
++            if (fromIndex < 0 || toIndex < 0) return@rememberReorderableLazyListState
++            playlistRows = playlistRows.toMutableList().apply { add(toIndex, removeAt(fromIndex)) }
++            orderChanged = true
+         }
+     )
+ 
+-    LaunchedEffect(reorderableState.isAnyItemDragging, isReadOnlyPlaylist) {
+-        if (!isReadOnlyPlaylist && !reorderableState.isAnyItemDragging && lastMovedFrom != null && lastMovedTo != null) {
+-            currentPlaylist?.let {
+-                playlistViewModel.reorderSongsInPlaylist(it.id, lastMovedFrom!!, lastMovedTo!!)
+-            }
+-            lastMovedFrom = null
+-            lastMovedTo = null
+-        } else if (isReadOnlyPlaylist && !reorderableState.isAnyItemDragging) {
+-            lastMovedFrom = null
+-            lastMovedTo = null
++    fun commitOrder() {
++        val playlist = currentPlaylist ?: return
++        if (!isReadOnlyPlaylist) playlistViewModel.setPlaylistOrder(playlist.id, playlistRows.map { it.song })
++    }
++
++    // Drop: gather the carried selection around the dropped row (keeping their order), then save
++    // the whole order once.
++    LaunchedEffect(reorderableState.isAnyItemDragging) {
++        if (reorderableState.isAnyItemDragging) return@LaunchedEffect
++        val anchor = draggingKey
++        if (anchor != null && dragCarriesSelection) {
++            playlistRows = gatherSelectedRows(playlistRows, selectedIds, anchor)
++            orderChanged = true
+         }
++        if (orderChanged) commitOrder()
++        draggingKey = null
++        dragCarriesSelection = false
++        orderChanged = false
++    }
++
++    fun moveRowBy(key: String, delta: Int) {
++        val from = playlistRows.indexOfFirst { it.key == key }
++        val to = from + delta
++        if (from < 0 || to !in playlistRows.indices) return
++        playlistRows = playlistRows.toMutableList().apply { add(to, removeAt(from)) }
++        commitOrder()
+     }
+ 
+     // Collapsed top bar shows the playlist name once the big title has scrolled away.
+@@ -435,7 +467,7 @@
+                     enabled = isConnectedPlaylist,
+                     isRefreshing = isRefreshing,
+                     onRefresh = {
+-                        if (!isSelectionMode && !isReorderModeEnabled) playlistViewModel.syncConnectedPlaylist(currentPlaylist.id)
++                        if (!isSelectionMode) playlistViewModel.syncConnectedPlaylist(currentPlaylist.id)
+                     }
+                 ) {
+                     LazyColumn(
+@@ -477,50 +509,18 @@
+                                 onMoreClick = { showPlaylistOptionsSheet = true },
+                                 moreOptionsLabel = moreOptionsLabel,
+                                 canEditSongs = !isReadOnlyPlaylist,
+-                                canReorder = !isReadOnlyPlaylist && localReorderableSongs.size > 1,
++                                canEdit = localReorderableSongs.isNotEmpty(),
+                                 addLabel = addLabel,
+-                                reorderLabel = reorderLabel,
+                                 sortLabel = sortSongsLabel,
+                                 onAddClick = { showAddSongsSheet = true },
+-                                onReorderClick = {
+-                                    exitSelection()
+-                                    isReorderModeEnabled = true
++                                onEditClick = {
++                                    selectedIds = emptySet()
++                                    isSelectionMode = true
+                                 },
+                                 onSortClick = { playerViewModel.showSortingSheet() }
+                             )
+                         }
+ 
+-                        if (isReorderModeEnabled) {
+-                            item(key = "reorder_banner", contentType = "banner") {
+-                                Row(
+-                                    modifier = Modifier
+-                                        .fillMaxWidth()
+-                                        .padding(horizontal = 16.dp)
+-                                        .clip(RoundedCornerShape(18.dp))
+-                                        .background(MaterialTheme.colorScheme.tertiaryContainer)
+-                                        .padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+-                                    verticalAlignment = Alignment.CenterVertically
+-                                ) {
+-                                    Icon(
+-                                        painter = painterResource(R.drawable.drag_order_icon),
+-                                        contentDescription = null,
+-                                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
+-                                        modifier = Modifier.size(20.dp)
+-                                    )
+-                                    Spacer(Modifier.width(10.dp))
+-                                    Text(
+-                                        text = "Drag songs to reorder",
+-                                        style = MaterialTheme.typography.bodyMedium,
+-                                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+-                                        modifier = Modifier.weight(1f)
+-                                    )
+-                                    TextButton(onClick = { isReorderModeEnabled = false }) {
+-                                        Text("Done")
+-                                    }
+-                                }
+-                            }
+-                        }
+-
+                         if (localReorderableSongs.isEmpty()) {
+                             item(key = "empty_state", contentType = "empty") {
+                                 Column(
+@@ -562,21 +562,36 @@
+                         }
+ 
+                         itemsIndexed(
+-                            localReorderableSongs,
++                            playlistRows,
+                             // YouTube Music playlists can contain the same video more than once,
+                             // so the song id alone is not a unique LazyColumn key.
+-                            key = { index, _ -> localSongKeys.getOrElse(index) { "playlist_song_$index" } },
+-                            contentType = { _, _ -> "playlist_song" }) { index, song ->
++                            key = { _, row -> row.key },
++                            contentType = { _, _ -> "playlist_song" }) { index, row ->
++                            val song = row.song
++                            val canDrag = isSelectionMode && !isReadOnlyPlaylist && playlistRows.size > 1
+                             ReorderableItem(
+                                 state = reorderableState,
+-                                key = localSongKeys.getOrElse(index) { "playlist_song_$index" },
+-                                enabled = isReorderModeEnabled
++                                key = row.key,
++                                enabled = canDrag
+                             ) { isDragging ->
++                                val isSelected = row.key in selectedIds
++                                // While a selected song is dragged, the other selected songs dim:
++                                // they join it where it is dropped.
++                                val isCarried = dragCarriesSelection && isSelected && row.key != draggingKey
++                                val liftSpec = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
+                                 val scale by animateFloatAsState(
+-                                    targetValue = if (isDragging) 1.05f else 1f,
++                                    targetValue = if (isDragging) 1.04f else if (isCarried) 0.97f else 1f,
++                                    animationSpec = if (reducedMotion) snap<Float>() else liftSpec,
+                                     label = "dragScale"
+                                 )
+-                                val isSelected = song.id in selectedIds
++                                val carriedAlpha by animateFloatAsState(
++                                    targetValue = if (isCarried) 0.45f else 1f,
++                                    animationSpec = if (reducedMotion) snap<Float>() else MaterialTheme.motionScheme.fastEffectsSpec<Float>(),
++                                    label = "carriedAlpha"
++                                )
++                                fun toggle() {
++                                    selectedIds = if (isSelected) selectedIds - row.key else selectedIds + row.key
++                                }
+ 
+                                 QueuePlaylistSongItem(
+                                     modifier = Modifier
+@@ -584,11 +599,19 @@
+                                         .graphicsLayer {
+                                             scaleX = scale
+                                             scaleY = scale
+-                                        },
++                                            alpha = carriedAlpha
++                                        }
++                                        .then(
++                                            if (canDrag) Modifier.semantics {
++                                                customActions = listOfNotNull(
++                                                    if (index > 0) CustomAccessibilityAction("Move up") { moveRowBy(row.key, -1); true } else null,
++                                                    if (index < playlistRows.lastIndex) CustomAccessibilityAction("Move down") { moveRowBy(row.key, 1); true } else null,
++                                                )
++                                            } else Modifier
++                                        ),
+                                     onClick = {
+                                         if (isSelectionMode) {
+-                                            selectedIds = if (isSelected) selectedIds - song.id else selectedIds + song.id
+-                                            if (selectedIds.isEmpty()) isSelectionMode = false
++                                            toggle()
+                                         } else {
+                                             // Add Song from lyrics: opens the action sheet instead.
+                                             songTap.handle(song, localReorderableSongs, currentPlaylist.name) {
+@@ -601,18 +624,17 @@
+                                             }
+                                         }
+                                     },
+-                                    onLongClick = if (isReorderModeEnabled) null else {
++                                    // Outside Edit: null = hold opens the song's options.
++                                    onLongClick = if (isSelectionMode) {
+                                         {
+                                             performAppCompatHapticFeedback(
+                                                 view,
+                                                 appHapticsConfig,
+                                                 HapticFeedbackConstantsCompat.LONG_PRESS
+                                             )
+-                                            isSelectionMode = true
+-                                            selectedIds = if (isSelected) selectedIds - song.id else selectedIds + song.id
+-                                            if (selectedIds.isEmpty()) isSelectionMode = false
++                                            toggle()
+                                         }
+-                                    },
++                                    } else null,
+                                     isSelectionMode = isSelectionMode,
+                                     isSelected = isSelected,
+                                     song = song,
+@@ -626,8 +648,8 @@
+                                     },
+                                     isFromPlaylist = true,
+                                     showFriendAttribution = false,
+-                                    isReorderModeEnabled = isReorderModeEnabled,
+-                                    isDragHandleVisible = isReorderModeEnabled,
++                                    isReorderModeEnabled = canDrag,
++                                    isDragHandleVisible = canDrag,
+                                     isRemoveButtonVisible = false,
+                                     onMoreOptionsClick = stableOnMoreOptionsClick,
+                                     dragHandle = {
+@@ -636,6 +658,8 @@
+                                             modifier = Modifier
+                                                 .draggableHandle(
+                                                     onDragStarted = {
++                                                        draggingKey = row.key
++                                                        dragCarriesSelection = isSelected && selectedIds.size > 1
+                                                         performAppCompatHapticFeedback(
+                                                             view,
+                                                             appHapticsConfig,
+@@ -650,7 +674,7 @@
+                                                         )
+                                                     }
+                                                 )
+-                                                .size(40.dp)
++                                                .size(48.dp)
+                                         ) {
+                                             Icon(
+                                                 imageVector = Icons.Rounded.DragIndicator,
+@@ -688,21 +712,33 @@
+                 ) {
+                     if (isSelectionMode) {
+                         IconButton(onClick = { exitSelection() }) {
+-                            Icon(Icons.Filled.Clear, contentDescription = "Exit selection")
++                            Icon(Icons.Rounded.Check, contentDescription = "Done editing")
+                         }
+-                        Text(
+-                            text = "${selectedIds.size} selected",
+-                            style = MaterialTheme.typography.titleLarge.copy(fontFamily = GoogleSansRounded),
++                        Column(
+                             modifier = Modifier
+                                 .weight(1f)
+-                                .padding(start = 4.dp),
+-                            maxLines = 1
+-                        )
+-                        val allIds = remember(localReorderableSongs) { localReorderableSongs.mapTo(hashSetOf()) { it.id } }
++                                .padding(start = 4.dp)
++                        ) {
++                            Text(
++                                text = if (selectedIds.isEmpty()) "Select songs" else "${selectedIds.size} selected",
++                                style = MaterialTheme.typography.titleLarge.copy(fontFamily = GoogleSansRounded),
++                                maxLines = 1
++                            )
++                            if (!isReadOnlyPlaylist && playlistRows.size > 1) {
++                                Text(
++                                    text = if (selectedIds.size > 1) "Drag a selected song to move them all" else "Drag ⠿ to reorder",
++                                    style = MaterialTheme.typography.bodySmall,
++                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
++                                    maxLines = 1,
++                                    overflow = TextOverflow.Ellipsis
++                                )
++                            }
++                        }
++                        val allIds = remember(playlistRows) { playlistRows.mapTo(hashSetOf()) { it.key } }
+                         val allSelected = allIds.isNotEmpty() && selectedIds.containsAll(allIds)
+                         TextButton(
+                             onClick = {
+-                                if (allSelected) exitSelection() else selectedIds = allIds
++                                selectedIds = if (allSelected) emptySet() else allIds
+                             }
+                         ) {
+                             Text(if (allSelected) "Deselect all" else "Select all")
+@@ -777,8 +813,12 @@
+                 // ---- Selection action bar ----
+                 androidx.compose.animation.AnimatedVisibility(
+                     visible = isSelectionMode,
+-                    enter = androidx.compose.animation.slideInVertically { it } + androidx.compose.animation.fadeIn(),
+-                    exit = androidx.compose.animation.slideOutVertically { it } + androidx.compose.animation.fadeOut(),
++                    enter = if (reducedMotion) androidx.compose.animation.fadeIn(snap()) else
++                        androidx.compose.animation.slideInVertically(tween(MotionTokens.DurationMedium1, easing = MotionTokens.EmphasizedDecelerate)) { it } +
++                            androidx.compose.animation.fadeIn(tween(MotionTokens.DurationMedium1, easing = MotionTokens.EmphasizedDecelerate)),
++                    exit = if (reducedMotion) androidx.compose.animation.fadeOut(snap()) else
++                        androidx.compose.animation.slideOutVertically(tween(MotionTokens.DurationShort3, easing = MotionTokens.EmphasizedAccelerate)) { it } +
++                            androidx.compose.animation.fadeOut(tween(MotionTokens.DurationShort3, easing = MotionTokens.EmphasizedAccelerate)),
+                     modifier = Modifier
+                         .align(Alignment.BottomCenter)
+                         .padding(
+@@ -827,7 +867,7 @@
+                             exitSelection()
+                         },
+                         onRemove = {
+-                            playlistViewModel.removeSongsFromPlaylist(currentPlaylist.id, selectedIds)
++                            playlistViewModel.removeSongsFromPlaylist(currentPlaylist.id, selectedSongs.mapTo(hashSetOf()) { it.id })
+                             exitSelection()
+                         }
+                     )
+@@ -1196,6 +1236,12 @@
+         if (currentSong != null) {
+             SongInfoBottomSheet(
+                 onStartSongRadio = { seedSong -> playerViewModel.startSongRadio(seedSong) },
++                // Select: enter Edit with this song ticked.
++                onSelect = {
++                    val key = playlistRows.firstOrNull { it.song.id == currentSong.id }?.key
++                    selectedIds = setOfNotNull(key)
++                    isSelectionMode = true
++                },
+                 song = currentSong,
+                 isFavorite = isFavorite,
+                 onToggleFavorite = {
+@@ -1400,8 +1446,24 @@
+     }
+ }
+ 
+-/** Number of LazyColumn items above the first song row (the hero header). */
+-private const val HEADER_ITEM_COUNT = 1
++/** One playlist row: its stable LazyColumn key and the song. */
++@androidx.compose.runtime.Immutable
++internal data class PlaylistRow(val key: String, val song: Song)
++
++/**
++ * After a selected row is dropped: pulls every other selected row next to it, keeping the
++ * selection's relative order, with the block placed where the dropped row landed.
++ */
++internal fun gatherSelectedRows(rows: List<PlaylistRow>, selectedKeys: Set<String>, anchorKey: String): List<PlaylistRow> {
++    val group = rows.filter { it.key in selectedKeys }
++    if (group.size < 2 || group.none { it.key == anchorKey }) return rows
++    val rest = rows.filter { it.key !in selectedKeys || it.key == anchorKey }
++    val anchorAt = rest.indexOfFirst { it.key == anchorKey }
++    return rest.toMutableList().apply {
++        removeAt(anchorAt)
++        addAll(anchorAt, group)
++    }
++}
+ 
+ private val LikedGradientTop = Color(0xFF9B6BF2)
+ private val LikedGradientBottom = Color(0xFFFF5FAE)
+@@ -1466,12 +1528,12 @@
+     onMoreClick: () -> Unit,
+     moreOptionsLabel: String,
+     canEditSongs: Boolean,
+-    canReorder: Boolean,
++    /** Shows Edit (select + reorder) when the playlist has songs. */
++    canEdit: Boolean,
+     addLabel: String,
+-    reorderLabel: String,
+     sortLabel: String,
+     onAddClick: () -> Unit,
+-    onReorderClick: () -> Unit,
++    onEditClick: () -> Unit,
+     onSortClick: () -> Unit
+ ) {
+     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+@@ -1631,7 +1693,7 @@
+                 }
+             }
+ 
+-            // Second row: Add songs + Reorder side by side, and Sort as an icon.
++            // Second row: Add songs + Edit side by side, and Sort as an icon.
+             Spacer(Modifier.height(16.dp))
+             Row(
+                 modifier = Modifier.padding(horizontal = 24.dp),
+@@ -1644,12 +1706,16 @@
+                         Spacer(Modifier.width(6.dp))
+                         Text(addLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                     }
+-                    if (canReorder) {
+-                        FilledTonalButton(onClick = onReorderClick) {
+-                            Icon(painterResource(R.drawable.drag_order_icon), contentDescription = null, modifier = Modifier.size(18.dp))
+-                            Spacer(Modifier.width(6.dp))
+-                            Text(reorderLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+-                        }
++                }
++                // Edit: select songs and drag them into a new order, in one mode.
++                if (canEdit) {
++                    FilledTonalButton(
++                        onClick = onEditClick,
++                        modifier = Modifier.semantics { contentDescription = "Edit playlist songs" }
++                    ) {
++                        Icon(Icons.Rounded.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
++                        Spacer(Modifier.width(6.dp))
++                        Text("Edit", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                     }
+                 }
+                 FilledTonalIconButton(onClick = onSortClick) {
+--- a/presentation/screens/HomeScreen.kt
++++ b/presentation/screens/HomeScreen.kt
+@@ -140,6 +140,7 @@
+ import com.theveloper.pixelplay.presentation.components.DailyMixSheet
+ import com.theveloper.pixelplay.presentation.components.DailyMixSheetModel
+ import com.theveloper.pixelplay.presentation.components.buildDailyMixSheetModel
++import com.theveloper.pixelplay.presentation.components.applyMixFilters
+ import com.theveloper.pixelplay.presentation.components.buildMixFilterOptions
+ import com.theveloper.pixelplay.presentation.components.BottomDeckSheetSlot
+ import com.theveloper.pixelplay.presentation.components.CustomMoodPrefix
+@@ -379,21 +380,62 @@
+     // full Daily Mix, the mixes made from the filters, and the filter chips.
+     var dailyMixSheetOpen by remember { mutableStateOf(false) }
+     var mixSelection by rememberSaveable(saver = MixFilterSelectionSaver) { mutableStateOf(MixFilterSelection()) }
+-    // Chip options walk the whole library: built once per pool, off the main thread.
++    // The sheet's pool reaches past the device: the library plus everything in Your Music that's
++    // streamed (liked / saved online songs), following the mood like the rest of Home. Online
++    // copies of a song already on the device are left out (matched by ISRC or title + artist).
++    val dailyMixPool by androidx.compose.runtime.produceState(
++        initialValue = moodMixFilterPoolSongs,
++        moodMixFilterPoolSongs, likedSongs, moodScores
++    ) {
++        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
++            val libraryIds = moodMixFilterPoolSongs.mapTo(HashSet()) { it.id }
++            val libraryIdentities = moodMixFilterPoolSongs.mapTo(HashSet()) { com.theveloper.pixelplay.data.mixIdentity(it) }
++            val likedForMood = rankSongsByMood(likedSongs, moodScores).let { if (it.fellBack) emptyList() else it.items }
++            val streamed = likedForMood.filter { it.id !in libraryIds && libraryIdentities.add(com.theveloper.pixelplay.data.mixIdentity(it)) }
++            (moodMixFilterPoolSongs + streamed).toImmutableList()
++        }
++    }
++    // With a filter set, online songs that fit are fetched and mixed in (spinner meanwhile; offline
++    // or slow = just the library results).
++    var onlineMixPicks by remember { mutableStateOf<List<Song>>(emptyList()) }
++    var fetchingOnlineMix by remember { mutableStateOf(false) }
++    LaunchedEffect(mixSelection, dailyMixSheetOpen, dailyMixPool) {
++        if (!dailyMixSheetOpen || mixSelection.isEmpty) {
++            onlineMixPicks = emptyList()
++            fetchingOnlineMix = false
++            return@LaunchedEffect
++        }
++        kotlinx.coroutines.delay(350) // wait for the user to finish picking
++        fetchingOnlineMix = true
++        try {
++            val (seeds, excluded) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
++                applyMixFilters(dailyMixPool, mixSelection).take(5) to
++                    dailyMixPool.mapTo(HashSet()) { com.theveloper.pixelplay.data.mixIdentity(it) }
++            }
++            val picks = playerViewModel.onlineMixPicks(seeds, excluded)
++            onlineMixPicks = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
++                applyMixFilters(picks, mixSelection)
++            }
++        } finally {
++            fetchingOnlineMix = false
++        }
++    }
++    // Chip options walk the whole pool: built once per pool, off the main thread.
+     val mixFilterOptions by androidx.compose.runtime.produceState(
+         initialValue = MixFilterOptions(),
+-        moodMixFilterPoolSongs
++        dailyMixPool
+     ) {
+         value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+-            buildMixFilterOptions(moodMixFilterPoolSongs)
++            buildMixFilterOptions(dailyMixPool)
+         }
+     }
+     val dailyMixSheetModel by androidx.compose.runtime.produceState(
+         initialValue = DailyMixSheetModel.Empty,
+-        moodMixFilterPoolSongs, mixSelection, mixFilterOptions
++        dailyMixPool, onlineMixPicks, mixSelection, mixFilterOptions
+     ) {
+         value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+-            buildDailyMixSheetModel(moodMixFilterPoolSongs, mixSelection, mixFilterOptions)
++            val pool = if (onlineMixPicks.isEmpty()) dailyMixPool else (dailyMixPool + onlineMixPicks).distinctBy { it.id }
++            buildDailyMixSheetModel(pool, mixSelection, mixFilterOptions)
+         }
+     }
+ 
+@@ -658,6 +700,7 @@
+                                     DailyMixSheet(
+                                         model = dailyMixSheetModel,
+                                         selection = mixSelection,
++                                        isFetchingOnline = fetchingOnlineMix,
+                                         dailyMixSongs = moodDailyMixSongs,
+                                         currentSongId = currentSong?.id,
+                                         artistImageFor = { name -> artistImageByName[name.trim().lowercase()] },
+--- a/presentation/screens/LibraryScreen.kt
++++ b/presentation/screens/LibraryScreen.kt
+@@ -1706,6 +1706,7 @@
+ 
+         if (currentSong != null) {
+             SongInfoBottomSheet(
++                onSelect = { multiSelectionState.toggleSelection(currentSong) },
+                 onStartSongRadio = { seedSong -> playerViewModel.startSongRadio(seedSong) },
+                 song = currentSong,
+                 isFavorite = isFavorite,
+--- a/presentation/components/FreshFindsSection.kt
++++ b/presentation/components/FreshFindsSection.kt
+@@ -124,8 +124,7 @@
+                                 // Only a friend is worth a line; library finds just show the artist.
+                                 subtitle = find.why?.let { "${find.song.displayArtist} · $it" },
+                                 badgeImageUrl = find.friendAvatarUrl,
+-                                onLongClick = { onNotForMe(find.song) },
+-                                onLongClickLabel = "Not for me"
++                                secondaryAction = "Not for me" to { onNotForMe(find.song) }
+                             )
+                         }
+                     }
+--- a/presentation/screens/RecentlyHeardScreen.kt
++++ b/presentation/screens/RecentlyHeardScreen.kt
+@@ -11,6 +11,7 @@
+ import androidx.compose.animation.togetherWith
+ import androidx.compose.foundation.background
+ import androidx.compose.foundation.clickable
++import androidx.compose.foundation.combinedClickable
+ import androidx.compose.foundation.layout.Arrangement
+ import androidx.compose.foundation.layout.Box
+ import androidx.compose.foundation.layout.Column
+@@ -409,7 +410,8 @@
+         modifier = Modifier
+             .fillMaxWidth()
+             .clip(RoundedCornerShape(16.dp))
+-            .clickable(onClick = onClick)
++            // No ⋮ button: hold the row for its options.
++            .combinedClickable(onClick = onClick, onLongClick = onMoreOptions, onLongClickLabel = "Song options")
+             .padding(vertical = 8.dp),
+         verticalAlignment = Alignment.CenterVertically
+     ) {
+@@ -478,9 +480,6 @@
+                 tint = if (isFavorite) colors.primary else colors.onSurfaceVariant
+             )
+         }
+-        IconButton(onClick = onMoreOptions) {
+-            Icon(Icons.Rounded.MoreVert, contentDescription = "More options", tint = colors.onSurfaceVariant)
+-        }
+     }
+ }
+ 
+--- a/presentation/components/QueueBottomSheet.kt
++++ b/presentation/components/QueueBottomSheet.kt
+@@ -2729,7 +2729,7 @@
+     swipeStateIdentity: Long = 0L,
+     onDismissSong: () -> Unit = {},
+     isFromPlaylist: Boolean,
+-    /** Long-press handler (starts multi-select in playlists). Null = no long press. */
++    /** Long-press handler. Null = hold opens [onMoreOptionsClick] (when [isFromPlaylist]). */
+     onLongClick: (() -> Unit)? = null,
+     isSelectionMode: Boolean = false,
+     isSelected: Boolean = false,
+@@ -2862,10 +2862,15 @@
+                 }
+                 .padding(horizontal = 12.dp)
+                 .clip(itemShape)
++                // No ⋮ button: hold opens the song's options (or the caller's own long press,
++                // e.g. toggling selection in a playlist's Edit mode).
+                 .combinedClickable(
+                     enabled = currentOffsetPx == 0f,
+                     onClick = onClick,
+-                    onLongClick = onLongClick
++                    onLongClick = onLongClick ?: if (isFromPlaylist && !isSelectionMode) {
++                        { onMoreOptionsClick(song) }
++                    } else null,
++                    onLongClickLabel = if (onLongClick == null && isFromPlaylist && !isSelectionMode) "Song options" else null
+                 ),
+             shape = itemShape,
+             color = backgroundColor,
+@@ -3029,28 +3034,7 @@
+                     } else {
+                         Spacer(Modifier.width(8.dp))
+                     }
+-
+-                    if (isFromPlaylist && !isSelectionMode) {
+-                        FilledIconButton(
+-                            onClick = { onMoreOptionsClick(song) },
+-                            colors = IconButtonDefaults.filledIconButtonColors(
+-                                containerColor = mvContainerColor,
+-                                contentColor = mvContentColor
+-                            ),
+-                            modifier = Modifier
+-                                .size(36.dp)
+-                                .padding(end = 14.dp)
+-                        ) {
+-                            Icon(
+-                                imageVector = Icons.Rounded.MoreVert,
+-                                contentDescription = stringResource(
+-                                    R.string.queue_more_options_for_song,
+-                                    song.title
+-                                ),
+-                                modifier = Modifier.size(24.dp)
+-                            )
+-                        }
+-                    }
++                    Spacer(Modifier.width(6.dp))
+ 
+                     AnimatedVisibility(visible = isRemoveButtonVisible && !enableSwipeToDismiss) {
+                         FilledIconButton(
+--- a/presentation/screens/artist/ArtistPageSections.kt
++++ b/presentation/screens/artist/ArtistPageSections.kt
+@@ -5,6 +5,7 @@
+ import androidx.compose.animation.shrinkVertically
+ import androidx.compose.foundation.background
+ import androidx.compose.foundation.clickable
++import androidx.compose.foundation.combinedClickable
+ import androidx.compose.foundation.horizontalScroll
+ import androidx.compose.foundation.layout.Arrangement
+ import androidx.compose.foundation.layout.Box
+@@ -302,17 +303,21 @@
+ ) {
+     val song = item.track.song
+     Column {
++        val rowShape = AbsoluteSmoothCornerShape(16.dp, 60)
+         Surface(
+-            onClick = onClick,
+-            shape = AbsoluteSmoothCornerShape(16.dp, 60),
++            shape = rowShape,
+             color = if (isCurrentSong) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+             else MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.7f),
+-            modifier = Modifier.fillMaxWidth()
++            // No ⋮ button: hold the row for the song's options.
++            modifier = Modifier
++                .fillMaxWidth()
++                .clip(rowShape)
++                .combinedClickable(onClick = onClick, onLongClick = onMoreClick, onLongClickLabel = "Song options")
+         ) {
+             Row(
+                 modifier = Modifier
+                     .fillMaxWidth()
+-                    .padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
++                    .padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 12.dp),
+                 verticalAlignment = Alignment.CenterVertically,
+                 horizontalArrangement = Arrangement.spacedBy(12.dp)
+             ) {
+@@ -363,9 +368,6 @@
+                         )
+                     }
+                 }
+-                IconButton(onClick = onMoreClick) {
+-                    Icon(Icons.Rounded.MoreVert, contentDescription = "More options", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+-                }
+             }
+         }
+         AnimatedVisibility(visible = versionsExpanded, enter = expandVertically(), exit = shrinkVertically()) {
+--- /dev/null
++++ b/presentation/components/tabs/TabAppearance.kt
+@@ -0,0 +1,95 @@
++package com.theveloper.pixelplay.presentation.components.tabs
++
++import androidx.compose.foundation.background
++import androidx.compose.foundation.clickable
++import androidx.compose.foundation.layout.Arrangement
++import androidx.compose.foundation.layout.Box
++import androidx.compose.foundation.layout.Column
++import androidx.compose.foundation.layout.Row
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.heightIn
++import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.shape.RoundedCornerShape
++import androidx.compose.material3.MaterialTheme
++import androidx.compose.material3.Text
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.getValue
++import androidx.compose.animation.animateColorAsState
++import androidx.compose.animation.core.snap
++import androidx.compose.animation.core.tween
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.draw.clip
++import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.semantics.Role
++import androidx.compose.ui.semantics.role
++import androidx.compose.ui.semantics.selected
++import androidx.compose.ui.semantics.semantics
++import androidx.compose.ui.text.font.FontWeight
++import androidx.compose.ui.unit.dp
++import com.theveloper.pixelplay.ui.theme.MotionTokens
++import com.theveloper.pixelplay.ui.theme.rememberSystemReducedMotion
++
++/** How the Instruments (tab) page is coloured: like the rest of the app, or always light / dark. */
++enum class TabAppearance(val key: String, val label: String) {
++    FollowApp("follow", "Follow app"),
++    Light("light", "Light"),
++    Dark("dark", "Dark");
++
++    companion object {
++        fun fromKey(key: String?): TabAppearance = entries.firstOrNull { it.key == key } ?: FollowApp
++    }
++}
++
++/** "Tab appearance": Follow app · Light · Dark, in the Instruments options. */
++@Composable
++internal fun TabAppearanceOption(
++    appearance: TabAppearance,
++    onAppearanceChange: (TabAppearance) -> Unit,
++    contentColor: Color,
++    accentColor: Color,
++    onAccentColor: Color,
++    itemBackgroundColor: Color,
++) {
++    val reducedMotion = rememberSystemReducedMotion()
++    Column(
++        Modifier
++            .fillMaxWidth()
++            .clip(RoundedCornerShape(18.dp))
++            .background(itemBackgroundColor)
++            .padding(horizontal = 12.dp, vertical = 10.dp),
++        verticalArrangement = Arrangement.spacedBy(8.dp),
++    ) {
++        Column(Modifier.padding(horizontal = 4.dp)) {
++            Text("Tab appearance", color = contentColor, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
++            Text(
++                "Colours of this page only",
++                color = contentColor.copy(alpha = 0.6f),
++                style = MaterialTheme.typography.bodySmall,
++            )
++        }
++        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
++            TabAppearance.entries.forEach { option ->
++                val selected = option == appearance
++                val spec = if (reducedMotion) snap<Color>() else tween<Color>(MotionTokens.DurationMedium2, easing = MotionTokens.Emphasized)
++                val bg by animateColorAsState(if (selected) accentColor else contentColor.copy(alpha = 0.06f), spec, label = "tabAppearanceBg")
++                val fg by animateColorAsState(if (selected) onAccentColor else contentColor, spec, label = "tabAppearanceFg")
++                Box(
++                    Modifier
++                        .weight(1f)
++                        .heightIn(min = 48.dp)
++                        .clip(RoundedCornerShape(50))
++                        .background(bg)
++                        .semantics {
++                            role = Role.RadioButton
++                            this.selected = selected
++                        }
++                        .clickable { onAppearanceChange(option) },
++                    contentAlignment = Alignment.Center,
++                ) {
++                    Text(option.label, color = fg, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
++                }
++            }
++        }
++    }
++}

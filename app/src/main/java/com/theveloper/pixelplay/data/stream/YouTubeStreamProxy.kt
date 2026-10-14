@@ -159,6 +159,9 @@ class YouTubeStreamProxy @Inject constructor(
     /** True when [id] can start from cached bytes without waiting for its stream URL. */
     fun hasCachedHead(id: String): Boolean = cachedHeadFor(id.removePrefix("yt_")) != null
 
+    /** Every video id whose whole song is on disk (each plays offline). Disk read: call off main. */
+    fun fullyCachedIds(): Set<String> = bodyCache.completeIds()
+
     /** True when all of [id] is on disk, so it plays without the network (even offline). */
     fun hasCachedBody(id: String): Boolean = cachedBodyFor(id.removePrefix("yt_")) != null
 

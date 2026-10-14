@@ -319,31 +319,6 @@ fun ReorderPresetsSheet(
                                                 modifier = Modifier.padding(start = 12.dp, end = 8.dp, top = 14.dp, bottom = 14.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                // Drag Handle
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(32.dp)
-                                                        .clip(CircleShape)
-                                                        .background(
-                                                            if (item.isPinned)
-                                                                MaterialTheme.colorScheme.surfaceContainerHighest
-                                                            else
-                                                                MaterialTheme.colorScheme.surfaceContainerLow
-                                                        ),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Rounded.DragIndicator,
-                                                        contentDescription = stringResource(R.string.equalizer_cd_reorder),
-                                                        modifier = if (item.isPinned) Modifier.draggableHandle() else Modifier,
-                                                        tint = if (item.isPinned)
-                                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                                        else
-                                                            MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-                                                    )
-                                                }
-
-                                                Spacer(modifier = Modifier.width(14.dp))
 
                                                 Text(
                                                     text = item.preset.displayName,
@@ -373,6 +348,31 @@ fun ReorderPresetsSheet(
                                                             MaterialTheme.colorScheme.onSurfaceVariant
                                                     )
                                                 }
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                // Reorder handle on the right.
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(32.dp)
+                                                        .clip(CircleShape)
+                                                        .background(
+                                                            if (item.isPinned)
+                                                                MaterialTheme.colorScheme.surfaceContainerHighest
+                                                            else
+                                                                MaterialTheme.colorScheme.surfaceContainerLow
+                                                        ),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Rounded.DragIndicator,
+                                                        contentDescription = stringResource(R.string.equalizer_cd_reorder),
+                                                        modifier = if (item.isPinned) Modifier.draggableHandle() else Modifier,
+                                                        tint = if (item.isPinned)
+                                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                                        else
+                                                            MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                                                    )
+                                                }
+
                                             }
                                         }
                                     }

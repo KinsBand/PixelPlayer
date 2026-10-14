@@ -369,6 +369,7 @@ fun LibraryAlbumsTab(
                                         Box {
                                             AlbumListItem(
                                                 album = album,
+                                                dateLabel = albumDateLabel(album, currentAlbumSortOption),
                                                 albumColorSchemePairFlow = albumSpecificColorSchemeFlow,
                                                 onClick = rememberedOnClick,
                                                 isLoading = false,
@@ -455,6 +456,7 @@ fun LibraryAlbumsTab(
                                         Box {
                                             AlbumGridItemRedesigned(
                                                 album = album,
+                                                dateLabel = albumDateLabel(album, currentAlbumSortOption),
                                                 albumColorSchemePairFlow = albumSpecificColorSchemeFlow,
                                                 onClick = rememberedOnClick,
                                                 isLoading = false,
@@ -734,4 +736,18 @@ fun LibraryPlaylistsTab(
         onPlaylistLongPress = onPlaylistLongPress,
         onPlaylistSelectionToggle = onPlaylistSelectionToggle
     )
+}
+
+/**
+ * The extra after an album's song count, matching the active sort: release year when sorted by
+ * year, dd/MM/yy when sorted by date added; null otherwise (or when the value is unknown).
+ */
+internal fun albumDateLabel(album: Album, sortOption: SortOption): String? = when (sortOption) {
+    SortOption.AlbumReleaseYear, SortOption.AlbumReleaseYearAsc ->
+        com.theveloper.pixelplay.presentation.components.CompactMeta.yearLabel(album.year)
+    SortOption.AlbumDateAdded ->
+        com.theveloper.pixelplay.presentation.components.CompactMeta.dateLabel(
+            com.theveloper.pixelplay.presentation.components.CompactMeta.epochMsFromMaybeSeconds(album.dateAdded)
+        )
+    else -> null
 }

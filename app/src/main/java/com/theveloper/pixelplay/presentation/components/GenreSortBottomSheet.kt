@@ -1,5 +1,7 @@
 package com.theveloper.pixelplay.presentation.components
 
+import com.theveloper.pixelplay.presentation.components.subcomps.rememberShuffleSpin
+import com.theveloper.pixelplay.presentation.components.subcomps.shuffleSpin
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -90,8 +92,9 @@ fun GenreSortBottomSheet(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 // Shuffle Button (Prominent)
+                val shuffleSpin = rememberShuffleSpin()
                 Button(
-                    onClick = onShuffle,
+                    onClick = { shuffleSpin.play(); onShuffle() },
                     modifier = Modifier.weight(1f).heightIn(min = 56.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
@@ -99,7 +102,7 @@ fun GenreSortBottomSheet(
                     ),
                     shape = AbsoluteSmoothCornerShape(16.dp, 60)
                 ) {
-                    Icon(Icons.Rounded.Shuffle, contentDescription = null)
+                    Icon(Icons.Rounded.Shuffle, contentDescription = null, modifier = Modifier.shuffleSpin(shuffleSpin))
                     Spacer(modifier = Modifier.width(8.dp))
                     TightWrapText(
                         text = stringResource(R.string.genre_sort_action_shuffle),

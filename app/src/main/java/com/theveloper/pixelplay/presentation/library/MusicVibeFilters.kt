@@ -307,7 +307,7 @@ object MusicVibeFilters {
         // A custom filter that names (or means) a preset behaves like that preset, plus text matching.
         val preset = presets.firstOrNull { norm(it.label) == q }
             ?: aliases[q]?.let { presetById[it] }
-        val tokens = q.split(Regex("[\\s,;/]+")).filter { it.length >= 2 }
+        val tokens = q.split(CUSTOM_TOKEN_SPLIT).filter { it.length >= 2 }
         val tokenPresets = tokens.mapNotNull { t -> presets.firstOrNull { norm(it.label) == t } ?: aliases[t]?.let { presetById[it] } }
         val tags = song.tagText()
         val words = song.wordText()
@@ -323,7 +323,7 @@ object MusicVibeFilters {
             score += tokenPresets.maxOf { score(song, it) } * 0.8
         }
         // Decades, e.g. "80s" or "1990s".
-        Regex("(?:19|20)?(\\d)0s").find(q)?.let { m ->
+        DECADE.find(q)?.let { m ->
             val digit = m.groupValues[1].toInt()
             val century = if (m.value.startsWith("20") || digit <= 2) 2000 else 1900
             val decade = century + digit * 10
@@ -333,6 +333,10 @@ object MusicVibeFilters {
     }
 
     const val MATCH_THRESHOLD = 2.0
+
+    // Compiled once (custom filters score every song in the library).
+    private val CUSTOM_TOKEN_SPLIT = Regex("[\\s,;/]+")
+    private val DECADE = Regex("(?:19|20)?(\\d)0s")
 
     /** Listening history used to personalise a mix. */
     data class Listening(val playCount: Int = 0, val lastPlayedMs: Long = 0L)

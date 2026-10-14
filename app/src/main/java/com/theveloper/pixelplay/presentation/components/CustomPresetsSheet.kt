@@ -54,6 +54,7 @@ fun CustomPresetsSheet(
     @Suppress("DEPRECATION")
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
+    val dismissSheetAnimated = rememberAnimatedSheetDismiss(sheetState, onDismiss)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -94,7 +95,7 @@ fun CustomPresetsSheet(
                             isPinned = pinnedPresetsNames.contains(preset.name),
                             onClick = {
                                 onPresetSelected(preset)
-                                onDismiss()
+                                dismissSheetAnimated()
                             },
                             onPinClick = { onPinToggled(preset) },
                             onRenameClick = { onRename(preset) },

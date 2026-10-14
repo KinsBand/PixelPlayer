@@ -48,6 +48,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -67,6 +68,23 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
+import android.os.Build
+import androidx.compose.animation.core.Animatable
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.platform.LocalGraphicsContext
+import androidx.compose.ui.unit.IntSize
+import com.theveloper.pixelplay.presentation.components.tabs.TabFocusIndex
+import com.theveloper.pixelplay.presentation.components.tabs.tabFocusAlpha
+import com.theveloper.pixelplay.presentation.components.tabs.tabFocusBlurDp
+import kotlinx.coroutines.launch
+import kotlin.math.ceil
+import kotlin.math.floor
+import kotlin.math.round
 import com.theveloper.pixelplay.presentation.components.tabs.AndroidScorePainter
 import com.theveloper.pixelplay.presentation.components.tabs.CursorGlide
 import com.theveloper.pixelplay.presentation.components.tabs.DrumMarks
@@ -159,7 +177,7 @@ fun TabScoreView(
                     color = onBackgroundColor.copy(alpha = 0.6f), fontSize = 13.sp, textAlign = TextAlign.Center,
                 )
                 TextButton(onClick = controller::openPicker) {
-                    Text("Choose instrument", color = accentColor, fontWeight = FontWeight.SemiBold)
+                    Text("Instruments", color = accentColor, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -268,6 +286,22 @@ private fun TabScore(
                 }
         }
 
+        // Edit mode: keep the caret's line in view when the caret moves to another line.
+        LaunchedEffect(layout) {
+            snapshotFlow { controller.editor?.caret?.measure?.let { layout.placement[it]?.first } }
+                .distinctUntilChanged()
+                .collect { sys ->
+                    if (sys == null) return@collect
+                    val info = listState.layoutInfo
+                    val item = info.visibleItemsInfo.firstOrNull { it.index == sys }
+                    val fullyVisible = item != null && item.offset >= info.viewportStartOffset &&
+                        item.offset + item.size <= info.viewportEndOffset - with(density) { contentBottomInset.roundToPx() }
+                    if (!fullyVisible) {
+                        runCatching { listState.animateScrollToItem(sys, with(density) { -followAnchor.roundToPx() }) }
+                    }
+                }
+        }
+
         // The cursor: a smooth sweep through each bar (crossing into the next bar on the same
         // line), gliding to the next line or back to a loop's start.
         LaunchedEffect(layout, ready) {
@@ -319,6 +353,8 @@ private fun TabScore(
         var dragLocal by remember { mutableStateOf(Offset.Zero) }
         var edgeDir by remember { mutableStateOf(0) }
         var lastDragEnd by remember { mutableStateOf(0L) }
+        /** Edit mode: long-press + drag selects beats instead of setting a loop. */
+        var selectingDrag by remember { mutableStateOf(false) }
 
         /** Real bar under a point given relative to list item [itemIndex]. */
         fun barAt(itemIndex: Int, local: Offset): Int? {
@@ -335,7 +371,36 @@ private fun TabScore(
             return pm.realMeasures.first()
         }
 
+        /** Edit mode: the beat (real bar, tick) under a point given relative to list item [itemIndex]. */
+        fun beatPosAt(itemIndex: Int, local: Offset): Pair<Int, Long>? {
+            val info = listState.layoutInfo
+            val items = info.visibleItemsInfo
+            val me = items.firstOrNull { it.index == itemIndex } ?: return null
+            val y = me.offset + local.y
+            val target = items.firstOrNull { y >= it.offset && y < it.offset + it.size }
+                ?: if (y < (items.firstOrNull()?.offset ?: 0)) items.firstOrNull() else items.lastOrNull()
+            val sys = target?.let { layout.systems.getOrNull(it.index) } ?: return null
+            if (sys.isCollapsed || sys.measures.isEmpty()) return null
+            val pm = sys.measures.firstOrNull { local.x >= it.x && local.x < it.right }
+                ?: if (local.x < sys.left) sys.measures.first() else sys.measures.last()
+            val slot = pm.slots.minByOrNull { kotlin.math.abs(it.x - local.x) }
+            return pm.realMeasures.first() to (slot?.slot?.onsetTicks ?: 0L)
+        }
+
+        fun selectionUpdate() {
+            val ed = controller.editor ?: return
+            beatPosAt(dragItem, dragLocal)?.let { (m, t) -> ed.extendSelection(m, t) }
+            val me = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == dragItem }
+            val y = (me?.offset ?: 0) - listState.layoutInfo.viewportStartOffset + dragLocal.y
+            edgeDir = when {
+                y < edgePx -> -1
+                y > viewportH - edgePx -> 1
+                else -> 0
+            }
+        }
+
         fun dragUpdate() {
+            if (selectingDrag) { selectionUpdate(); return }
             val anchor = dragAnchor ?: return
             val bar = barAt(dragItem, dragLocal) ?: return
             controller.setLoop(anchor, bar, commit = false)
@@ -349,6 +414,12 @@ private fun TabScore(
         }
 
         fun finishDrag() {
+            if (selectingDrag) {
+                selectingDrag = false
+                edgeDir = 0
+                lastDragEnd = SystemClock.uptimeMillis()
+                return
+            }
             val a = dragAnchor
             if (a != null) {
                 val b = barAt(dragItem, dragLocal) ?: controller.loopTo ?: a
@@ -360,7 +431,7 @@ private fun TabScore(
         }
 
         LaunchedEffect(edgeDir) {
-            while (edgeDir != 0 && dragAnchor != null) {
+            while (edgeDir != 0 && (dragAnchor != null || selectingDrag)) {
                 runCatching { listState.scrollBy(edgeDir * 14f) }
                 // The line the drag started on scrolled away (its gesture ends with it): keep the loop.
                 if (listState.layoutInfo.visibleItemsInfo.none { it.index == dragItem }) {
@@ -375,7 +446,18 @@ private fun TabScore(
         val loopDrag = remember(layout) {
             LoopDragHandler(
                 onStart = { item, local ->
-                    val bar = barAt(item, local)
+                    val ed = controller.editor
+                    // Edit mode: start selecting beats from the one under the finger.
+                    val editPos = if (ed != null) beatPosAt(item, local) else null
+                    if (ed != null && editPos != null) {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        ed.selectMode = false
+                        ed.startSelection(editPos.first, editPos.second)
+                        selectingDrag = true
+                        dragItem = item
+                        dragLocal = local
+                    }
+                    val bar = if (ed == null) barAt(item, local) else null
                     if (bar != null) {
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                         dragAnchor = bar
@@ -447,6 +529,53 @@ private fun SystemCanvas(
     drumMarks: DrumMarks,
 ) {
     val density = LocalDensity.current
+    val editCaret = MaterialTheme.colorScheme.primary.toArgb()
+    val editTint = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.13f).toArgb()
+    val editSelection = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f).toArgb()
+
+    // ── Focus fade: bars fade and blur by distance from the bar playing, like animated lyrics ──
+    val lyricsPrefs by rememberLyricsDisplayPrefs()
+    val blurOn = lyricsPrefs.animatedLyricsBlurEnabled && !lyricsPrefs.disableBlurAllOver &&
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    val blurStrength = lyricsPrefs.animatedLyricsBlurStrength
+    val timeline = controller.activeTimeline
+    val focusIndex = remember(timeline) { timeline?.let { TabFocusIndex(it) } }
+    val barCount = s.measures.size
+    // Recomputed on cursor frames, but only changes (and restarts the animations) when a bar's
+    // whole-number distance changes. All 0 when off, paused or editing, so bars ease back sharp.
+    val distances by remember(s, focusIndex) {
+        derivedStateOf {
+            val pos = controller.cursor
+            if (!controller.focusFade || !controller.isPlaying || controller.isEditing || pos == null || focusIndex == null) {
+                List(barCount) { 0 }
+            } else {
+                s.measures.map { focusIndex.distance(it.realMeasures, pos) }
+            }
+        }
+    }
+    val barAlpha = remember(s) { List(barCount) { Animatable(1f) } }
+    val barBlurDp = remember(s) { List(barCount) { Animatable(0f) } }
+    LaunchedEffect(distances, blurOn, blurStrength) {
+        distances.forEachIndexed { i, d ->
+            val a = tabFocusAlpha(d)
+            val b = tabFocusBlurDp(d, blurOn, blurStrength)
+            // Same specs as lyric lines: soft spring for ink, 400 ms tween for blur.
+            if (barAlpha[i].targetValue != a || barAlpha[i].value != a) launch {
+                barAlpha[i].animateTo(a, spring(stiffness = Spring.StiffnessLow, dampingRatio = Spring.DampingRatioNoBouncy))
+            }
+            if (barBlurDp[i].targetValue != b || barBlurDp[i].value != b) launch {
+                barBlurDp[i].animateTo(b, tween(durationMillis = 400))
+            }
+        }
+    }
+    val graphicsContext = LocalGraphicsContext.current
+    val rowLayer = rememberGraphicsLayer()
+    val barLayers = remember(s, graphicsContext) { List(barCount) { graphicsContext.createGraphicsLayer() } }
+    DisposableEffect(barLayers) {
+        onDispose { barLayers.forEach { graphicsContext.releaseGraphicsLayer(it) } }
+    }
+    val blurCaches = remember(s) { List(barCount) { LyricLineBlurCache() } }
+
     Canvas(
         modifier = Modifier
             .fillMaxWidth()
@@ -467,6 +596,16 @@ private fun SystemCanvas(
             }
             .pointerInput(s) {
                 detectTapGestures { offset ->
+                    // Edit mode: a tap puts the caret on the nearest beat instead of seeking.
+                    controller.editor?.let { ed ->
+                        val pm = s.measures.firstOrNull { offset.x >= it.x && offset.x < it.right }
+                            ?: if (offset.x < s.left) s.measures.firstOrNull() else s.measures.lastOrNull()
+                        if (pm != null) {
+                            val slot = pm.slots.minByOrNull { kotlin.math.abs(it.x - offset.x) }
+                            ed.tapAt(pm.realMeasures.first(), slot?.slot?.onsetTicks ?: 0L)
+                        }
+                        return@detectTapGestures
+                    }
                     if (loopDrag.recentlyDragged()) return@detectTapGestures
                     if (onUserInteraction()) return@detectTapGestures
                     val pm = s.measures.firstOrNull { offset.x >= it.x && offset.x < it.right } ?: return@detectTapGestures
@@ -476,7 +615,8 @@ private fun SystemCanvas(
                 }
             },
     ) {
-        drawIntoCanvas { canvas ->
+        // Everything but the cursor (the cursor is drawn on top at full strength).
+        val drawRow: DrawScope.() -> Unit = { drawIntoCanvas { canvas ->
             painter.canvas = canvas.nativeCanvas
             val from = controller.loopFrom
             val to = controller.loopTo ?: if (controller.loopSelecting) from else null
@@ -488,7 +628,76 @@ private fun SystemCanvas(
             val drums = controller.drums
             // Reading the version redraws this line when a hit lands.
             val showMarks = drums.version >= 0 && drums.hasScore
+            val ed = controller.editor
+            if (ed != null) renderer.drawChangedBars(painter, s, ed.changedBars, editTint)
             renderer.draw(painter, s, live, if (showMarks) drumMarks else null)
+            if (ed != null) {
+                ed.selection?.let { (first, last) ->
+                    val endTick = ed.selectionEndTick()
+                    for (pm in s.measures) {
+                        val r = pm.realMeasures.first()
+                        if (r < first.measure || r > last.measure) continue
+                        val x0 = if (r == first.measure) pm.xAt(first.tick, r) - 10 * density.density else pm.x
+                        val x1 = if (r == last.measure) {
+                            if (endTick >= pm.measure.lengthTicks) pm.contentRight else pm.xAt(endTick, r) - 10 * density.density
+                        } else pm.right
+                        renderer.drawSelection(painter, s, x0, x1, editSelection)
+                    }
+                }
+                val caret = ed.caret
+                s.measures.firstOrNull { caret.measure in it.realMeasures }?.let { pm ->
+                    renderer.drawEditCaret(painter, s, pm.xAt(caret.tick, caret.measure), editCaret)
+                }
+            }
+            painter.canvas = null
+        } }
+
+        // Animated values are read here (draw phase), so a fade redraws without recomposing.
+        var faded = false
+        for (i in 0 until barCount) {
+            if (barAlpha[i].value < 0.999f || barBlurDp[i].value.dp.toPx() >= 1f) { faded = true; break }
+        }
+        if (!faded) {
+            drawRow()
+        } else {
+            rowLayer.record { drawRow() }
+            val h = size.height
+            val measures = s.measures
+            // Margins outside the bars (clef, tuning) stay sharp.
+            val firstX = measures.firstOrNull()?.x ?: size.width
+            val lastRight = measures.lastOrNull()?.right ?: size.width
+            if (firstX > 0f) clipRect(0f, 0f, firstX, h) { drawLayer(rowLayer) }
+            if (lastRight < size.width) clipRect(lastRight, 0f, size.width, h) { drawLayer(rowLayer) }
+            for (i in measures.indices) {
+                val pm = measures[i]
+                val a = barAlpha[i].value.coerceIn(0f, 1f)
+                val radiusPx = round(barBlurDp[i].value.dp.toPx())
+                if (a >= 0.999f && radiusPx < 1f) {
+                    clipRect(pm.x, 0f, pm.right, h) { drawLayer(rowLayer) }
+                    continue
+                }
+                // One layer per bar, sized to its strip, so the blur stays inside the bar.
+                val x0 = floor(pm.x)
+                val w = (ceil(pm.right) - x0).toInt().coerceAtLeast(1)
+                val layer = barLayers[i]
+                layer.alpha = a
+                if (radiusPx >= 1f) {
+                    layer.renderEffect = blurCaches[i].effectFor(radiusPx)
+                    layer.clip = true
+                } else {
+                    layer.renderEffect = null
+                    layer.clip = false
+                }
+                layer.record(size = IntSize(w, ceil(h).toInt().coerceAtLeast(1))) {
+                    clipRect(pm.x - x0, 0f, pm.right - x0, h) {
+                        translate(-x0, 0f) { drawLayer(rowLayer) }
+                    }
+                }
+                translate(x0, 0f) { drawLayer(layer) }
+            }
+        }
+        drawIntoCanvas { canvas ->
+            painter.canvas = canvas.nativeCanvas
             for (m in cursorMarks()) {
                 if (m.system == s.index) renderer.drawCursor(painter, s, m.x, m.alpha)
             }

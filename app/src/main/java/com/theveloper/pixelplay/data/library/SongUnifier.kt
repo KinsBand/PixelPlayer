@@ -124,6 +124,9 @@ object SongUnifier {
     private val nonAlnum = Regex("""[^\p{L}\p{N}]+""")
     private val bracketed = Regex("""\s*[(\[][^)\]]*[)\]]""")
     private val dashSuffix = Regex("""\s+[-–—]\s+.*$""")
+    // Compiled once: the unifier runs over every song in the library.
+    private val featuring = Regex("""\b(feat|ft)\.?\s.*$""", RegexOption.IGNORE_CASE)
+    private val whitespace = Regex("\\s+")
 
     private val labels = listOf(
         "Live" to Regex("""\blive\b|\bin concert\b|\bunplugged\b""", RegexOption.IGNORE_CASE),
@@ -152,8 +155,8 @@ object SongUnifier {
         var t = runCatching { LyricsLookupMetadata.cleanTitle(title) }.getOrDefault(title)
         t = bracketed.replace(t, "")
         t = dashSuffix.replace(t, "")
-        t = Regex("""\b(feat|ft)\.?\s.*$""", RegexOption.IGNORE_CASE).replace(t, "")
-        return nonAlnum.replace(t.lowercase(Locale.ROOT), " ").trim().replace(Regex("\\s+"), " ")
+        t = featuring.replace(t, "")
+        return nonAlnum.replace(t.lowercase(Locale.ROOT), " ").trim().replace(whitespace, " ")
     }
 
     /**

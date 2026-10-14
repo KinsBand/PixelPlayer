@@ -19,9 +19,32 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.random.Random
 
+/** How friends in the room join the music. */
+enum class FriendsRoomMode {
+    /** Default: their songs join the mix's pool and are picked when they fit, at the chosen share. */
+    MIX_IN,
+    /** The old rotation: 1–2 of your songs, then one from each friend. */
+    TAKE_TURNS,
+}
+
+/** How much of the mix friends get in [FriendsRoomMode.MIX_IN]. */
+enum class FriendsShare(val label: String, val share: Double) {
+    SPRINKLE("Sprinkle", 0.15),
+    EVEN("Even", 0.30),
+    LOTS("Lots", 0.50),
+}
+
 /**
  * "Friends in the room": the friends who are here in person, picked from the queue's options
- * menu. While any are picked, the queue goes: one or two of your songs (random), then one song
+ * menu.
+ *
+ * In [FriendsRoomMode.MIX_IN] (the default) their songs (playlists + last 7 days) join the
+ * mix's candidate pool ([mixPool]) and the planner picks them when they fit the feel, tempo and
+ * mood, at the share chosen in the sheet, taking turns fairly between friends. Their public
+ * playlists are fetched into a 24-hour cache for this, not saved to your library.
+ *
+ * In [FriendsRoomMode.TAKE_TURNS] (and in MIX_IN whenever no mix is running) the queue goes:
+ * one or two of your songs (random), then one song
  * from *each* friend in a random order, then back to you. Every friend song is the one from
  * their playlists + last 7 days that best fits what's playing ([AdaptiveMix.vibeFitNow]: feel,
  * transition, a locked vibe, queue removals / skips / hand-queued songs, More like this,
@@ -47,6 +70,119 @@ class FriendsInRoomController @Inject constructor(
     /** Friend ids checked as being in the room. Empty = off. */
     val selected: StateFlow<Set<String>> = _selected.asStateFlow()
 
+    private val _mode = MutableStateFlow(
+        prefs.getString(KEY_MODE, null)?.let { runCatching { FriendsRoomMode.valueOf(it) }.getOrNull() } ?: FriendsRoomMode.MIX_IN
+    )
+    /** Mix it in (default) or Take turns. */
+    val mode: StateFlow<FriendsRoomMode> = _mode.asStateFlow()
+
+    private val _share = MutableStateFlow(
+        prefs.getString(KEY_SHARE, null)?.let { runCatching { FriendsShare.valueOf(it) }.getOrNull() } ?: FriendsShare.EVEN
+    )
+    /** Friends' share of the mix in Mix it in (default Even, 30 %). */
+    val share: StateFlow<FriendsShare> = _share.asStateFlow()
+
+    fun setMode(mode: FriendsRoomMode) {
+        _mode.value = mode
+        prefs.edit().putString(KEY_MODE, mode.name).apply()
+        if (mode == FriendsRoomMode.MIX_IN) synchronized(this) { pending = null; pendingReinserts = 0 }
+    }
+
+    fun setShare(share: FriendsShare) {
+        _share.value = share
+        prefs.edit().putString(KEY_SHARE, share.name).apply()
+    }
+
+    /**
+     * Friends' public playlists that aren't saved in your library, fetched for the room and kept
+     * for [ROOM_CACHE_MS] (in memory). Saved playlists come from the library snapshot as before.
+     */
+    private class Fetched(val at: Long, val songs: List<Song>)
+    private val roomCache = java.util.concurrent.ConcurrentHashMap<String, Fetched>()
+    private val _roomCacheVersion = MutableStateFlow(0)
+    /** Bumps when room-fetched playlists arrive, so a waiting plan can use them. */
+    val roomCacheVersion: StateFlow<Int> = _roomCacheVersion.asStateFlow()
+
+    /**
+     * Each in-room friend's songs for the mix's pool, by friend id: their last 7 days, saved
+     * playlists and room-fetched public playlists. Empty unless Mix it in is on and someone is
+     * in the room. Excludes nothing: the mix applies your exclusions itself.
+     */
+    fun mixPool(): Map<String, List<Song>> {
+        val ids = _selected.value
+        if (ids.isEmpty() || _mode.value != FriendsRoomMode.MIX_IN) return emptyMap()
+        val now = System.currentTimeMillis()
+        // A day old (or never fetched): fetch again in the background, at most every 10 minutes.
+        val stale = ids.filter { id -> roomCache[id]?.let { now - it.at >= ROOM_CACHE_MS } ?: true }
+        if (stale.isNotEmpty() && now - lastRefreshAttempt > REFRESH_RETRY_MS) {
+            lastRefreshAttempt = now
+            prefetchRoomPlaylists(stale.toSet())
+        }
+        return ids.associateWith { friendId ->
+            val fetched = roomCache[friendId]?.takeIf { now - it.at < ROOM_CACHE_MS }?.songs.orEmpty()
+            poolSongs(friendId, fetched)
+        }.filterValues { it.isNotEmpty() }
+    }
+
+    @Volatile private var lastRefreshAttempt = 0L
+
+    /** Fraction of the mix that should be friends' songs right now (0 = off). */
+    fun mixShare(): Double =
+        if (_selected.value.isEmpty() || _mode.value != FriendsRoomMode.MIX_IN) 0.0 else _share.value.share
+
+    /** Display name and picture for a friend (alias first). */
+    fun displayOf(friendId: String): Pair<String, String?> {
+        val snapshot = library.snapshot.value
+        val profile = activity.profiles.value[friendId]
+        val name = snapshot.aliases[friendId]
+            ?: profile?.displayName?.takeIf { it.isNotBlank() }
+            ?: snapshot.playlists.firstOrNull { it.friendId == friendId }?.ownerName?.takeIf { it.isNotBlank() }
+            ?: "Friend"
+        return name to profile?.avatarUrl
+    }
+
+    /** Their last 7 days and all their playlists (saved + [extra]), playable, in an interleaved order. */
+    private fun poolSongs(friendId: String, extra: List<Song> = emptyList()): List<Song> {
+        val snapshot = library.snapshot.value
+        val history = activity.history.value
+        val fromHistory = history[friendId].orEmpty().mapNotNull { it.toPlayableSong() }
+        val saved = snapshot.playlists.filter { it.friendId == friendId }.map { it.songs }
+        return interleaveSongLists(listOf(fromHistory, interleaveSongLists(saved + listOf(extra))))
+            .filter { it.contentUriString.isNotBlank() || it.youtubeId != null }
+            .distinctBy { it.id }
+    }
+
+    /**
+     * Fetches the in-room friends' unsaved public playlists into the room cache (nothing is
+     * saved to your library). Saved playlists are already in the snapshot.
+     */
+    fun prefetchRoomPlaylists(ids: Set<String> = _selected.value, force: Boolean = false) {
+        if (ids.isEmpty()) return
+        scope.launch {
+            val now = System.currentTimeMillis()
+            val saved = library.snapshot.value.playlists.mapTo(hashSetOf()) { it.source + ":" + it.remoteId }
+            var changed = false
+            for (id in ids) {
+                if (!force && roomCache[id]?.let { now - it.at < ROOM_CACHE_MS } == true) continue
+                val profile = activity.profiles.value[id] ?: continue
+                val songs = ArrayList<Song>()
+                for (playlist in profile.publicPlaylists.orEmpty()) {
+                    if (playlist.source + ":" + playlist.remoteId in saved) continue
+                    try {
+                        songs += library.fetchPublicPlaylistSongs(playlist.source, playlist.remoteId)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        // Skipped; tried again next time.
+                    }
+                }
+                roomCache[id] = Fetched(now, songs.distinctBy { it.id })
+                changed = true
+            }
+            if (changed) _roomCacheVersion.value = _roomCacheVersion.value + 1
+        }
+    }
+
     /** Changes when friends' playlists load or change, so a waiting turn can be filled. */
     val poolChanges: StateFlow<*> get() = library.snapshot
 
@@ -70,7 +206,10 @@ class FriendsInRoomController @Inject constructor(
     /** Up next as last seen, to tell a rebuild apart from the user removing or skipping past a song. */
     private var lastUpcoming: List<Song> = emptyList()
 
-    /** Saves who's in the room; their unsaved public playlists are saved so their songs join the pool. */
+    /**
+     * Saves who's in the room. Their unsaved public playlists are fetched into a 24-hour cache so
+     * their songs join the pool (not saved to your library any more).
+     */
     @Synchronized
     fun setSelection(ids: Set<String>) {
         val wasEmpty = _selected.value.isEmpty()
@@ -83,9 +222,11 @@ class FriendsInRoomController @Inject constructor(
             // Just switched on: the first round of friends starts straight away.
             wasEmpty -> mySongsSinceFriend = myTurnLength
         }
-        gatherPublicPlaylists(ids)
+        roomCache.keys.retainAll(ids)
+        prefetchRoomPlaylists(ids)
     }
 
+    /** Saves friends' public playlists to the library (used by Custom Blend, not by the room). */
     fun gatherPublicPlaylists(ids: Set<String>) {
         if (ids.isEmpty()) return
         scope.launch {
@@ -111,12 +252,13 @@ class FriendsInRoomController @Inject constructor(
     /**
      * Call on every current-song change and every queue change with the songs after the
      * playing one. Returns a friend song to put next (already tagged with its friend), or null
-     * when nothing needs to change.
+     * when nothing needs to change. With Mix it in and a mix running ([mixRunning]), the mix
+     * picks friend songs itself, so this only keeps its bookkeeping and returns null.
      */
     @Synchronized
-    fun sync(current: Song?, upcoming: List<Song>): Song? {
+    fun sync(current: Song?, upcoming: List<Song>, mixRunning: Boolean = false): Song? {
         if (current == null) return null
-        val ids = _selected.value
+        val ids = if (_mode.value == FriendsRoomMode.MIX_IN && mixRunning) emptySet() else _selected.value
         val previousUpcoming = lastUpcoming
         lastUpcoming = upcoming
         if (current.id != lastSongId) {
@@ -208,15 +350,11 @@ class FriendsInRoomController @Inject constructor(
      */
     private fun pickNext(current: Song, ids: Set<String>): Pair<Song, String>? {
         val snapshot = library.snapshot.value
-        val history = activity.history.value
         val recentSet = recent.toHashSet()
+        val now = System.currentTimeMillis()
         fun poolOf(friendId: String): List<Song> {
-            // Their last 7 days of listening and all their playlists, together.
-            val fromHistory = history[friendId].orEmpty().mapNotNull { it.toPlayableSong() }
-            val songs = interleaveSongLists(listOf(fromHistory, interleaveSongLists(
-                snapshot.playlists.filter { it.friendId == friendId }.map { it.songs })))
-                .filter { it.contentUriString.isNotBlank() || it.youtubeId != null }
-                .distinctBy { it.id }
+            // Their last 7 days of listening and all their playlists (saved + room-fetched), together.
+            val songs = poolSongs(friendId, roomCache[friendId]?.takeIf { now - it.at < ROOM_CACHE_MS }?.songs.orEmpty())
             return songs.filter { it.id !in used && RecordingKeys.of(it) !in used }
                 // Everything of theirs has played this session: start over, skipping recent plays.
                 .ifEmpty { songs.filter { it.id !in recentSet && RecordingKeys.of(it) !in recentSet } }
@@ -261,6 +399,11 @@ class FriendsInRoomController @Inject constructor(
 
     private companion object {
         const val KEY_SELECTED = "selected"
+        const val KEY_MODE = "mode"
+        const val KEY_SHARE = "share"
+        /** Room-fetched public playlists are kept this long. */
+        const val ROOM_CACHE_MS = 24L * 60 * 60 * 1000
+        const val REFRESH_RETRY_MS = 10L * 60 * 1000
         /** Songs of context a friend pick has to fit (the current one counts most). */
         const val CONTEXT_SONGS = 3
         const val MAX_REINSERTS = 3

@@ -100,6 +100,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.shareIn
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -234,7 +236,8 @@ class PlayerViewModel @Inject constructor(
     private val castTokenStore: com.theveloper.pixelplay.data.service.cast.CastTokenStore,
     private val genreCategorizerEngine: com.theveloper.pixelplay.data.analysis.GenreCategorizerEngine,
     private val heardSongsRepository: HeardSongsRepository,
-    private val songReactions: com.theveloper.pixelplay.data.SongReactions
+    private val songReactions: com.theveloper.pixelplay.data.SongReactions,
+    private val heardSongResolver: com.theveloper.pixelplay.data.recognition.ambient.HeardSongResolver
 ) : ViewModel() {
 
     val heardSongs: StateFlow<List<HeardSongItem>> = heardSongsRepository.heardSongs
@@ -243,14 +246,39 @@ class PlayerViewModel @Inject constructor(
     val ambientSuggestionsEnabled: StateFlow<Boolean> =
         com.theveloper.pixelplay.data.recognition.ambient.AmbientListeningService.isRunning
 
-    fun approveHeardSong(item: HeardSongItem) {
-        addSelectedToQueue(listOf(item.song))
-        heardSongsRepository.dismiss(item.id)
+    fun approveHeardSong(item: HeardSongItem) = withPlayableHeardSong(item) { song ->
+        addSelectedToQueue(listOf(song))
     }
 
-    fun playNextHeardSong(item: HeardSongItem) {
-        addSelectedAsNext(listOf(item.song))
-        heardSongsRepository.dismiss(item.id)
+    fun playNextHeardSong(item: HeardSongItem) = withPlayableHeardSong(item) { song ->
+        addSelectedAsNext(listOf(song))
+    }
+
+    /** Tap on a Heard row: plays it now, right after the current song (like a History row). */
+    fun playHeardSongNow(item: HeardSongItem) = withPlayableHeardSong(item) { song ->
+        playFromHistory(song)
+    }
+
+    /**
+     * Heard entries are queued only once they're playable. Older entries (or anything that
+     * slipped through) are resolved here first; nothing empty ever reaches the queue.
+     */
+    private fun withPlayableHeardSong(item: HeardSongItem, action: (Song) -> Unit) {
+        val song = item.song
+        if (com.theveloper.pixelplay.data.recognition.ambient.HeardSongResolver.isPlayable(song)) {
+            action(song)
+            heardSongsRepository.dismiss(item.id)
+            return
+        }
+        viewModelScope.launch {
+            val resolved = heardSongResolver.resolve(song.title, song.artist)
+            if (resolved == null) {
+                _toastEvents.emit("Couldn't find \"${song.title}\"")
+                return@launch
+            }
+            action(resolved.song)
+            heardSongsRepository.dismiss(item.id)
+        }
     }
 
     fun dismissHeardSong(id: String) {
@@ -275,6 +303,19 @@ class PlayerViewModel @Inject constructor(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,
             initialValue = persistentListOf()
+        )
+
+    /**
+     * The song card that was just tapped (starting / failed to start). Its own narrow flow, so
+     * song lists only recompose the affected card when it changes.
+     */
+    val songStart: StateFlow<SongStartRequest?> = _playerUiState
+        .map { it.songStart }
+        .distinctUntilChanged()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = null
         )
 
     private val _showNoInternetDialog = MutableSharedFlow<Unit>(
@@ -326,7 +367,7 @@ class PlayerViewModel @Inject constructor(
 
 
 
-    private val _playlistPickerStorageFilter = MutableStateFlow(com.theveloper.pixelplay.data.model.StorageFilter.OFFLINE)
+    private val _playlistPickerStorageFilter = MutableStateFlow(com.theveloper.pixelplay.data.model.StorageFilter.ALL)
     val playlistPickerStorageFilter: StateFlow<com.theveloper.pixelplay.data.model.StorageFilter> = _playlistPickerStorageFilter.asStateFlow()
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -361,8 +402,9 @@ class PlayerViewModel @Inject constructor(
 
     private val offlinePlaybackObserverJob = viewModelScope.launch {
         connectivityStateHolder.offlinePlaybackBlocked.collect {
-            Timber.w("Received offline blocked event. Showing dialog.")
-            _showNoInternetDialog.emit(Unit)
+            // No dialog any more: offline-only songs are veiled on their cards, and a queued
+            // one that can't play is skipped by the player's error handling.
+            Timber.w("Playback blocked offline (no dialog).")
         }
     }
 
@@ -617,6 +659,14 @@ class PlayerViewModel @Inject constructor(
     /** Mini player left→right song-change wave (Appearance → Mini player song transition). */
     private val miniPlayerSongTransition: Flow<Boolean> = userPreferencesRepository.miniPlayerSongTransitionFlow
 
+    /** "PixelPlayer Song Search Reader": Search reads pasted Spotify / YouTube Music links. */
+    val songSearchReaderEnabled: StateFlow<Boolean> = userPreferencesRepository.songSearchReaderEnabledFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
+    /** Sideways swipe on the mini player: change song (default) or dismiss the player. */
+    val miniPlayerSwipeChangesSong: StateFlow<Boolean> = userPreferencesRepository.miniPlayerSwipeChangesSongFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
     val disableBlurAllOver: StateFlow<Boolean> = userPreferencesRepository.disableBlurAllOverFlow
         .stateIn(
             scope = viewModelScope,
@@ -706,9 +756,86 @@ class PlayerViewModel @Inject constructor(
     private val _artistNavigationRequests = MutableSharedFlow<Long>(extraBufferCapacity = 1)
     val artistNavigationRequests = _artistNavigationRequests.asSharedFlow()
 
+    /** Radio: the player's map button. Collected by the navigation effect (opens the Radio tab). */
+    private val _radioMapNavigationRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val radioMapNavigationRequests = _radioMapNavigationRequests.asSharedFlow()
+
+    /**
+     * Online songs that fit [seeds] (the Daily Mix sheet's filtered songs), for the sheet to mix in
+     * alongside the library. Skips anything in [excludedIdentities] and songs you've disliked.
+     * Empty on timeout or when offline: the sheet then just keeps the library results.
+     */
+    suspend fun onlineMixPicks(seeds: List<Song>, excludedIdentities: Set<String>, limit: Int = 24): List<Song> {
+        if (seeds.isEmpty()) return emptyList()
+        return try {
+            val batch = withTimeoutOrNull(8_000) {
+                dailyMixStateHolder.nextMixBatch(
+                    com.theveloper.pixelplay.data.MixFlavor.SMART,
+                    seeds,
+                    excludedIdentities,
+                    limit
+                )
+            }.orEmpty()
+            dailyMixStateHolder.analysed(batch.filterNot(dailyMixStateHolder::isDisliked))
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /** Online songs found for a Daily Mix filter value: analysed, minus dislikes (as onlineMixPicks). */
+    suspend fun filterOnlinePicks(batch: List<Song>): List<Song> = try {
+        dailyMixStateHolder.analysed(batch.filterNot(dailyMixStateHolder::isDisliked))
+    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        batch
+    }
+
+    /** Collapses the player and opens the radio map on [station]. */
+    /**
+     * The radio player's "Radio" button: collapse the player and open the Radio tab with the
+     * filters [station] was found with (picked up by the Radio screen; see RadioOpenRequest).
+     */
+    fun openRadioForStation(station: com.theveloper.pixelplay.data.radio.RadioStation) {
+        com.theveloper.pixelplay.data.radio.RadioOpenRequest.request(station)
+        viewModelScope.launch {
+            collapsePlayerSheet()
+            withTimeoutOrNull(900) {
+                awaitSheetState(PlayerSheetState.COLLAPSED)
+                awaitPlayerCollapse()
+            }
+            _radioMapNavigationRequests.emit(Unit)
+        }
+    }
+
+    fun openRadioMapForStation(station: com.theveloper.pixelplay.data.radio.RadioStation) {
+        com.theveloper.pixelplay.data.radio.RadioMapFocus.request(station)
+        viewModelScope.launch {
+            collapsePlayerSheet()
+            withTimeoutOrNull(900) {
+                awaitSheetState(PlayerSheetState.COLLAPSED)
+                awaitPlayerCollapse()
+            }
+            _radioMapNavigationRequests.emit(Unit)
+        }
+    }
+
     /** Artist profile requests by *name*, for online artists that have no local library id. */
     private val _artistNameNavigationRequests = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val artistNameNavigationRequests = _artistNameNavigationRequests.asSharedFlow()
+    private val _queueOpenRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    /** Emitted to open the full player with its queue showing (collected by the player sheet). */
+    val queueOpenRequests = _queueOpenRequests.asSharedFlow()
+
+    /** Expands the full player and slides its queue up. */
+    fun showQueue() {
+        showPlayer()
+        expandPlayerSheet()
+        _queueOpenRequests.tryEmit(Unit)
+    }
+
     private val _lyricsOpenRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val lyricsOpenRequests = _lyricsOpenRequests.asSharedFlow()
     /**
@@ -823,8 +950,8 @@ class PlayerViewModel @Inject constructor(
     }
 
     /**
-     * A lyrics-screen reaction. Recorded as its own signal (never a like). Only 😐 and 👎 act
-     * right away: the upcoming automatic mix picks are re-planned.
+     * A lyrics-screen reaction. Recorded as its own signal (never a like), and fed to the mix:
+     * every reaction re-plans the upcoming automatic picks.
      */
     fun reactToCurrentSong(reaction: com.theveloper.pixelplay.data.SongReaction) {
         val song = stablePlayerState.value.currentSong ?: return
@@ -832,11 +959,10 @@ class PlayerViewModel @Inject constructor(
             com.theveloper.pixelplay.data.model.QueueEntryMetadata.read(it).recordingId
         }
         songReactions.record(song, reaction, currentPlaybackPosition.value, recordingId)
-        if (reaction == com.theveloper.pixelplay.data.SongReaction.NOT_THE_VIBE ||
-            reaction == com.theveloper.pixelplay.data.SongReaction.DISLIKE
-        ) {
-            refreshAutomaticMixFuture()
-        }
+        // Every reaction steers the mix: pulls toward / pushes away from this song's feel now,
+        // and ❤️ 👌 👎 change how the song ranks later. Upcoming picks are re-planned.
+        dailyMixStateHolder.onSongReaction(song, reaction)
+        refreshAutomaticMixFuture("reaction ${reaction.emoji}")
     }
     private val _searchNavDoubleTapEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val searchNavDoubleTapEvents = _searchNavDoubleTapEvents.asSharedFlow()
@@ -950,6 +1076,18 @@ class PlayerViewModel @Inject constructor(
     val isRefreshingRoutes: StateFlow<Boolean> = castStateHolder.isRefreshingRoutes
 
     // Connectivity state delegated to ConnectivityStateHolder
+    /** True while the device has a network with internet (Wi-Fi or mobile data). */
+    val isOnline: StateFlow<Boolean> = connectivityStateHolder.isOnline
+    /**
+     * Emits only when the device really goes offline or comes back (debounced so a Wi-Fi to
+     * data hand-off doesn't flash, silent at app start). Drives the red/green outline traces.
+     */
+    @OptIn(kotlinx.coroutines.FlowPreview::class)
+    val connectivityFlips: SharedFlow<Boolean> = connectivityStateHolder.isOnline
+        .debounce(com.theveloper.pixelplay.ui.theme.MotionTokens.DurationLong2.toLong())
+        .distinctUntilChanged()
+        .drop(1)
+        .shareIn(viewModelScope, SharingStarted.Eagerly)
     val isWifiEnabled: StateFlow<Boolean> = connectivityStateHolder.isWifiEnabled
     val isWifiRadioOn: StateFlow<Boolean> = connectivityStateHolder.isWifiRadioOn
     val wifiName: StateFlow<String?> = connectivityStateHolder.wifiName
@@ -957,6 +1095,16 @@ class PlayerViewModel @Inject constructor(
     val bluetoothName: StateFlow<String?> = connectivityStateHolder.bluetoothName
     /** Battery (0–100) of the connected Bluetooth device, or null; drawn as the Bluetooth button's outline. */
     val bluetoothBattery: StateFlow<Int?> = connectivityStateHolder.activeBluetoothBattery
+
+    init {
+        // Play/pause state for the "now playing" badges on playlist, blend and mix cards.
+        viewModelScope.launch {
+            stablePlayerState
+                .map { it.isPlaying }
+                .distinctUntilChanged()
+                .collect { com.theveloper.pixelplay.data.playback.NowPlayingPlaylist.setPlaying(it) }
+        }
+    }
 
     init {
         // While a Bluetooth device is connected, check its battery straight away and then every
@@ -1419,6 +1567,24 @@ class PlayerViewModel @Inject constructor(
 
     fun updateSearchQuery(query: String) {
         searchQuery = query
+    }
+
+    /**
+     * The search the user actually entered (keyboard Search, a suggestion, a history item or a
+     * voice result). While the typed text differs from it, Search shows live suggestions; when
+     * they match, it shows the full results (artists, albums, songs…).
+     */
+    var submittedSearchQuery by mutableStateOf("")
+        private set
+
+    fun submitSearch(query: String = searchQuery) {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) return
+        if (searchQuery.trim() != trimmed) searchQuery = query
+        // A different search starts from All; re-submitting the same one keeps the filter.
+        if (trimmed != submittedSearchQuery) searchStateHolder.resetFilterForNewQuery()
+        submittedSearchQuery = trimmed
+        onSearchQuerySubmitted(trimmed)
     }
 
     private var mediaController: MediaController? = null
@@ -2441,6 +2607,8 @@ class PlayerViewModel @Inject constructor(
 
     fun triggerArtistNavigationFromPlayer(artistId: Long, artistName: String? = null) {
         val songForArtist = playbackStateHolder.stablePlayerState.value.currentSong
+        // A radio station has no artist page (its "artist" line is the station / now-playing text).
+        if (com.theveloper.pixelplay.data.radio.RadioPlayback.isRadio(songForArtist)) return
         // Catalogue songs (Spotify / Apple Music, e.g. friends' playlists) look local until matched
         // to audio but have no library row either: a non-numeric id means no library artist.
         if (songForArtist != null && (!songForArtist.isLocal || songForArtist.id.toLongOrNull() == null)) {
@@ -3023,6 +3191,173 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    // ── Song Radio: a "radio" built around one song, started from the song menu ──────────
+
+    private var songRadioJob: Job? = null
+
+    /**
+     * Spotify-style Song Radio. Plays [seed] straight away, then fills up next with songs
+     * that sound like it:
+     *  - the nearest neighbours by audio embedding ([com.theveloper.pixelplay.data.analysis.ml.SimilarityEngine]),
+     *    for library songs that have been analysed;
+     *  - the "Similar" queue mix ([com.theveloper.pixelplay.presentation.library.QueueVibeMix.SIMILAR_ID]):
+     *    same artist / album / genre, shared vibes and close audio features;
+     *  - online songs related to it when the library alone has too few.
+     * When those run out the continuous mix carries on from what was played.
+     */
+    /**
+     * Plays [seed] and fills up next with songs like it. [openQueue] = open the player on its queue
+     * once it starts (the "Start radio" action); a song tapped in Search just plays (false).
+     */
+    fun startSongRadio(seed: Song, openQueue: Boolean = true, radioName: String = "${seed.title} Radio") {
+        songRadioJob?.cancel()
+        queueMixJob?.cancel()
+        playSongs(listOf(seed), seed, queueName = radioName)
+        _queueMixFilterId.value = com.theveloper.pixelplay.presentation.library.QueueVibeMix.SIMILAR_ID
+        _queueMixBusy.value = true
+        // Show the radio straight away: once the seed is playing, open the player on its queue,
+        // where the station's songs appear as soon as they're picked.
+        viewModelScope.launch {
+            val started = withTimeoutOrNull(6_000) {
+                stablePlayerState.first { state ->
+                    val current = state.currentSong ?: return@first false
+                    current.id == seed.id || com.theveloper.pixelplay.data.mixIdentity(current) == com.theveloper.pixelplay.data.mixIdentity(seed)
+                }
+            } != null
+            if (started && openQueue) showQueue()
+        }
+        songRadioJob = viewModelScope.launch {
+            try {
+                val seedIdentity = com.theveloper.pixelplay.data.mixIdentity(seed)
+                val library = allSongsFlow.value
+                val disliked: (Song) -> Boolean = dailyMixStateHolder::isDisliked
+
+                // 1. Embedding neighbours (library songs only: the engine is keyed by MediaStore id).
+                val embeddingIds: List<String> = seed.id.toLongOrNull()?.let { id ->
+                    try {
+                        dagger.hilt.android.EntryPointAccessors
+                            .fromApplication(context, SongRadioEntryPoint::class.java)
+                            .similarityEngine()
+                            .getSimilarTracks(id, limit = SONG_RADIO_EMBEDDING_NEIGHBOURS)
+                            .map { it.toString() }
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                }.orEmpty()
+                val byId = library.associateBy { it.id }
+                val embeddingPicks = embeddingIds.mapNotNull(byId::get).filterNot(disliked)
+
+                // 2. Online top-up when the library won't make a full station on its own
+                //    (always for online seeds: the library rarely knows their neighbours).
+                val seedAffinity = com.theveloper.pixelplay.data.MixAffinityIndex(listOf(seed))
+                val libraryRelated = library.count { it.id != seed.id && seedAffinity.affinity(it) > 0 }
+                val wantOnline = !seed.isLocal || libraryRelated < SONG_RADIO_SIZE
+                val online = if (!wantOnline) emptyList() else try {
+                    kotlinx.coroutines.withTimeoutOrNull(8_000) {
+                        dailyMixStateHolder.nextMixBatch(
+                            com.theveloper.pixelplay.data.MixFlavor.SMART,
+                            listOf(seed),
+                            setOf(seedIdentity)
+                        )
+                    }.orEmpty()
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    emptyList()
+                }
+
+                // 3. The "Similar" mix over library + online, with what the mixes have learned.
+                val pool = dailyMixStateHolder.analysed((library + online).filterNot(disliked))
+                val learned = try {
+                    dailyMixStateHolder.personalAdjustments(pool)
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    emptyMap()
+                }
+                val similar = withContext(Dispatchers.Default) {
+                    com.theveloper.pixelplay.presentation.library.QueueVibeMix.build(
+                        filterId = com.theveloper.pixelplay.presentation.library.QueueVibeMix.SIMILAR_ID,
+                        current = seed,
+                        pool = pool,
+                        likedIds = favoriteSongIds.value,
+                        customFilters = emptyList(),
+                        seed = System.nanoTime(),
+                        size = SONG_RADIO_SIZE,
+                        adjust = learned
+                    )
+                }
+
+                // Interleave: embedding neighbours lead every other slot so the station opens
+                // with the closest-sounding songs, then the broader Similar mix fills in.
+                val seen = HashSet<String>().apply { add(seedIdentity) }
+                val picks = ArrayList<Song>(SONG_RADIO_SIZE)
+                val a = embeddingPicks.iterator()
+                val b = similar.iterator()
+                while (picks.size < SONG_RADIO_SIZE && (a.hasNext() || b.hasNext())) {
+                    for (source in arrayOf(a, b)) {
+                        while (source.hasNext()) {
+                            val song = source.next()
+                            if (seen.add(com.theveloper.pixelplay.data.mixIdentity(song))) {
+                                picks += song
+                                break
+                            }
+                        }
+                    }
+                }
+                if (picks.isEmpty()) {
+                    _toastEvents.emit("Couldn't find songs like \"${seed.title}\" yet")
+                    return@launch
+                }
+
+                val items = picks.map { song ->
+                    if (song.youtubeId != null || song.id.startsWith("yt_") || com.theveloper.pixelplay.data.accounts.CatalogTracks.isCatalogSongId(song.id)) {
+                        try {
+                            musicRepository.saveCloudSong(song)
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            // Still playable from its stream URI; only the library record is missing.
+                        }
+                    }
+                    // Tagged like the queue mix buttons' songs: a mix re-plan never removes them.
+                    com.theveloper.pixelplay.data.MixQueueMetadata.markFilterPick(
+                        playbackDispatchStateHolder.buildResolvedPlaybackMediaItem(song)
+                    )
+                }
+
+                // Wait for the seed to actually be playing; if the user has already moved on to
+                // something else, don't hijack their queue.
+                val playingSeed = withTimeoutOrNull(6_000) {
+                    stablePlayerState.first { state ->
+                        val current = state.currentSong ?: return@first false
+                        current.id == seed.id || com.theveloper.pixelplay.data.mixIdentity(current) == seedIdentity
+                    }
+                } != null
+                if (!playingSeed) return@launch
+                val controller = mediaController ?: return@launch
+                val index = controller.currentMediaItemIndex
+                val count = controller.mediaItemCount
+                if (index + 1 < count) controller.removeMediaItems(index + 1, count)
+                controller.addMediaItems(items)
+                dailyMixStateHolder.clearVibe()
+                _toastEvents.emit("$radioName · ${items.size} songs")
+                if (_activeMixFlavor.value == null) {
+                    startContinuousMix(com.theveloper.pixelplay.data.MixFlavor.NORMAL, keepVibe = true)
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                Log.w("PlayerViewModel", "Song radio failed", e)
+                _toastEvents.emit("Couldn't start Song Radio")
+            } finally {
+                _queueMixBusy.value = false
+            }
+        }
+    }
+
     fun activateSmartMix() {
         // Holding the mix button while Smart Mix is already on leaves it running.
         if (_activeMixFlavor.value == com.theveloper.pixelplay.data.MixFlavor.SMART) return
@@ -3051,37 +3386,82 @@ class PlayerViewModel @Inject constructor(
     }
 
     /**
-     * "More of this": finds songs for [text] (library first, then online) and steers the mix
-     * toward them. Starts Smart Mix from the playing song when no mix is running; otherwise the
-     * running mix re-plans its upcoming songs, keeping the next one so the change is gradual.
+     * The queue prompt box. Plain English, any mix of parts: a song or artist ("Queen"), or a sound
+     * ("upbeat 80s rock like Queen", "slow sad acoustic", "fast aussie hip hop but no rap",
+     * "songs like Mr Brightside but chiller"). Read on-device and scored over the library, then
+     * the mix is steered toward it: Smart Mix starts from the playing song when no mix is
+     * running; otherwise the running mix re-plans its upcoming songs, keeping the next one so the
+     * change is gradual.
      */
     fun steerMixWithPrompt(text: String) {
         val query = text.trim()
         if (query.isEmpty()) return
         mixPromptJob?.cancel()
         mixPromptJob = viewModelScope.launch {
-            val matches = try {
+            val resolution = try {
                 dailyMixStateHolder.resolveMixPrompt(query)
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (e: Exception) {
                 Log.w("PlayerViewModel", "Mix prompt lookup failed", e)
-                emptyList()
+                null
             }
-            if (matches.isEmpty()) {
-                _toastEvents.emit("Couldn't find \"$query\"")
-                return@launch
+            val found = resolution != null && resolution.isUsable
+            // Instant, on-device reading first: the mix changes straight away.
+            if (found) applyMixPromptResolution(query, resolution!!, refined = false)
+            // Then, if on-device Gemini Nano is ready, a richer reading of the same words. It only
+            // re-steers when it understood something the quick reading missed.
+            if (dailyMixStateHolder.isPromptAiReady) {
+                val refined = dailyMixStateHolder.readMixPromptWithAi(query)
+                if (refined != null) {
+                    val local = com.theveloper.pixelplay.data.MixPromptParser.parse(query)
+                    val merged = local.mergedWith(refined)
+                    val addsSomething = merged.copy(labels = emptyList(), freeWords = emptyList()) !=
+                        local.copy(labels = emptyList(), freeWords = emptyList())
+                    if (addsSomething || !found) {
+                        val better = try {
+                            dailyMixStateHolder.resolveMixPrompt(query, refined)
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                            throw cancelled
+                        } catch (e: Exception) {
+                            Log.w("PlayerViewModel", "Refined mix prompt lookup failed", e)
+                            null
+                        }
+                        if (better != null && better.isUsable) {
+                            applyMixPromptResolution(query, better, refined = true)
+                            return@launch
+                        }
+                    }
+                }
             }
-            dailyMixStateHolder.steerMixTowards(matches)
-            val running = _activeMixFlavor.value
-            if (running == null) {
-                startContinuousMix(com.theveloper.pixelplay.data.MixFlavor.SMART, keepPrompt = true)
-            } else {
-                continuousMixRuntime.refreshFuture(keepAutomatic = 1)
-            }
-            _mixPrompt.value = query
-            _toastEvents.emit("${(running ?: com.theveloper.pixelplay.data.MixFlavor.SMART).title} · more like $query")
+            if (!found) _toastEvents.emit("Couldn't find \"$query\"")
         }
+    }
+
+    /** The queue options menu opened: load on-device Gemini Nano so a prompt answers quickly. */
+    fun warmUpMixPromptAi() = dailyMixStateHolder.warmUpPromptAi()
+
+    /** Steers the mix with a resolved prompt and says what was understood. */
+    private suspend fun applyMixPromptResolution(
+        query: String,
+        resolution: com.theveloper.pixelplay.data.AdaptiveMix.PromptResolution,
+        refined: Boolean,
+    ) {
+        val applied = dailyMixStateHolder.applyMixPrompt(resolution)
+        val running = _activeMixFlavor.value
+        if (running == null) {
+            startContinuousMix(com.theveloper.pixelplay.data.MixFlavor.SMART, keepPrompt = true)
+        } else if ((resolution.intent?.strength ?: 0.0) >= 0.6) {
+            // "only …" / "a lot": a big change is allowed to replace the upcoming mix.
+            continuousMixRuntime.refreshFuture(keepAutomatic = 1)
+        } else {
+            // Everything else moves the vibe and swaps only what now clashes.
+            continuousMixRuntime.nudgeFuture("steering: " + applied.joinToString(" · ").ifBlank { query })
+        }
+        _mixPrompt.value = query
+        val understood = applied.joinToString(" · ").ifBlank { resolution.labels.joinToString(" · ").ifBlank { "more like $query" } }
+        val suffix = if (refined) " ✦" else ""
+        _toastEvents.emit("${(running ?: com.theveloper.pixelplay.data.MixFlavor.SMART).title} · $understood$suffix")
     }
 
     /** Removes the typed steer; the running mix goes back to following what's played. */
@@ -3090,7 +3470,7 @@ class PlayerViewModel @Inject constructor(
         if (_mixPrompt.value == null) return
         _mixPrompt.value = null
         dailyMixStateHolder.clearMixPromptSteer()
-        continuousMixRuntime.refreshFuture(keepAutomatic = 2)
+        continuousMixRuntime.nudgeFuture("steers cleared")
     }
 
     /**
@@ -3148,7 +3528,13 @@ class PlayerViewModel @Inject constructor(
         flavor: com.theveloper.pixelplay.data.MixFlavor,
         initial: List<Song> = emptyList(),
         keepPrompt: Boolean = false,
-        keepVibe: Boolean = false
+        keepVibe: Boolean = false,
+        /**
+         * Play [initial] as given first, then let the mix keep adding songs after it (Fresh
+         * Finds' Shuffle: the shuffled finds, then Smart Mix discoveries). Normal Mix already
+         * does this for any [initial].
+         */
+        playInitialFirst: Boolean = false
     ) {
         continuousMixJob?.cancel()
         continuousMixRuntime.stop()
@@ -3184,7 +3570,7 @@ class PlayerViewModel @Inject constructor(
                     val seeds = initial.ifEmpty { dailyMixStateHolder.yourMixSongs.value }
                     var firstBatch = when {
                         // An explicit list (a Your Music vibe mix) plays as given, in its order.
-                        flavor == com.theveloper.pixelplay.data.MixFlavor.NORMAL && initial.isNotEmpty() ->
+                        (flavor == com.theveloper.pixelplay.data.MixFlavor.NORMAL || playInitialFirst) && initial.isNotEmpty() ->
                             initial.filterNot(dailyMixStateHolder::isDisliked).take(com.theveloper.pixelplay.data.MixRefillPolicy.MAX_QUEUE)
                         // Normal Mix from nothing: planned by the mix engine, seeded by the top of
                         // Your Mix, so it learns and sequences like the rest of the mix.
@@ -3254,13 +3640,42 @@ class PlayerViewModel @Inject constructor(
     }
     /** [userPick] = the listener chose it (steers the mix's vibe); false for friend / follow additions. */
     fun addSongToQueue(song: Song, userPick: Boolean = true) {
-        playbackDispatchStateHolder.addSongToQueue(song)
+        val result = playbackDispatchStateHolder.addSongToQueue(song)
         if (userPick) continuousMixRuntime.noteQueuedByUser(song)
+        // Your own picks get the bubble over the mini player; friend / follow additions stay quiet.
+        if (userPick && result != PlaybackDispatchStateHolder.QueueAddResult.NONE) {
+            announceQueueAction(com.theveloper.pixelplay.presentation.components.player.QueueActionKind.QUEUE, song)
+        } else {
+            noteQueueMove(result, "Moved to end of queue")
+        }
     }
 
     fun addSongNextToQueue(song: Song, userPick: Boolean = true) {
-        playbackDispatchStateHolder.addSongNextToQueue(song)
+        val result = playbackDispatchStateHolder.addSongNextToQueue(song)
         if (userPick) continuousMixRuntime.noteQueuedByUser(song)
+        if (userPick && result != PlaybackDispatchStateHolder.QueueAddResult.NONE) {
+            announceQueueAction(com.theveloper.pixelplay.presentation.components.player.QueueActionKind.NEXT, song)
+        } else {
+            noteQueueMove(result, "Moved to play next")
+        }
+    }
+
+    /** The "Next / Queue / Soon" bubble that grows out of the mini player (see QueueActionBubbleHost). */
+    private fun announceQueueAction(kind: com.theveloper.pixelplay.presentation.components.player.QueueActionKind, song: Song, afterSongs: Int? = null) {
+        com.theveloper.pixelplay.presentation.components.player.QueueActionAnnouncer.announce(
+            kind = kind,
+            title = song.title,
+            subtitle = song.displayArtist,
+            coverUrl = song.albumArtUriString,
+            afterSongs = afterSongs,
+        )
+    }
+
+    /** A queue action found the song already up next and moved it instead of duplicating it. */
+    private fun noteQueueMove(result: PlaybackDispatchStateHolder.QueueAddResult, message: String) {
+        if (result == PlaybackDispatchStateHolder.QueueAddResult.MOVED) {
+            viewModelScope.launch { _toastEvents.emit(message) }
+        }
     }
 
     /**
@@ -3271,10 +3686,72 @@ class PlayerViewModel @Inject constructor(
         playbackDispatchStateHolder.addSongNextToQueue(song, markFilterPick = true)
     }
 
+    /**
+     * Soon with a chosen spot (the "after which song" slider): right after the [upcoming]-th song
+     * of Up next, 0 = right after the song playing now. Moves a copy already in Up next.
+     */
+    fun addSongAfterUpcoming(song: Song, upcoming: Int, announce: Boolean = true) {
+        val result = playbackDispatchStateHolder.addSongAfterUpcoming(song, upcoming)
+        if (result == PlaybackDispatchStateHolder.QueueAddResult.NONE) return
+        continuousMixRuntime.noteQueuedByUser(song)
+        if (announce) {
+            // Right after the playing song is "Next"; further on is "Soon · after n songs".
+            if (upcoming <= 0) announceQueueAction(com.theveloper.pixelplay.presentation.components.player.QueueActionKind.NEXT, song)
+            else announceQueueAction(com.theveloper.pixelplay.presentation.components.player.QueueActionKind.SOON, song, afterSongs = upcoming)
+        } else {
+            noteQueueMove(result, "Moved to play soon")
+        }
+    }
+
     /** Play Soon: after the current song and anything already added with Play next (max 3 ahead). */
     fun addSongSoon(song: Song) {
-        playbackDispatchStateHolder.addSongSoon(song)
+        val result = playbackDispatchStateHolder.addSongSoon(song)
         continuousMixRuntime.noteQueuedByUser(song)
+        if (result != PlaybackDispatchStateHolder.QueueAddResult.NONE) {
+            announceQueueAction(com.theveloper.pixelplay.presentation.components.player.QueueActionKind.SOON, song)
+        }
+    }
+
+    /**
+     * Queues a whole playlist as one block (Queue = end, Next = right after this song, Soon = after
+     * the first [PlaybackDispatchStateHolder.PlaylistQueuePlacement.AfterUpcoming.upcoming] songs).
+     * The queue shows a turnover card before it and switches its title when it's reached.
+     */
+    fun queuePlaylist(
+        songs: List<Song>,
+        name: String,
+        playlistId: String?,
+        placement: PlaybackDispatchStateHolder.PlaylistQueuePlacement,
+        /** Soon's shuffle button: the block goes in a plain random order instead of top to bottom. */
+        shuffled: Boolean = false,
+    ) {
+        val playable = if (shuffled) songs.shuffled() else songs
+        val added = playbackDispatchStateHolder.queuePlaylist(playable, name, playlistId, placement)
+        if (added == 0) return
+        playable.distinctBy { it.id }.forEach { continuousMixRuntime.noteQueuedByUser(it) }
+        // The same bubble as a song, with the playlist's name, cover and song count.
+        val (kind, after) = when (placement) {
+            PlaybackDispatchStateHolder.PlaylistQueuePlacement.Next -> com.theveloper.pixelplay.presentation.components.player.QueueActionKind.NEXT to null
+            PlaybackDispatchStateHolder.PlaylistQueuePlacement.End -> com.theveloper.pixelplay.presentation.components.player.QueueActionKind.QUEUE to null
+            is PlaybackDispatchStateHolder.PlaylistQueuePlacement.AfterUpcoming ->
+                if (placement.upcoming == 0) com.theveloper.pixelplay.presentation.components.player.QueueActionKind.NEXT to null
+                else com.theveloper.pixelplay.presentation.components.player.QueueActionKind.SOON to placement.upcoming
+        }
+        val count = playable.distinctBy { it.id }.size
+        com.theveloper.pixelplay.presentation.components.player.QueueActionAnnouncer.announce(
+            kind = kind,
+            title = name,
+            subtitle = if (shuffled) "$count songs · shuffled" else "$count songs",
+            coverUrl = playable.firstOrNull()?.albumArtUriString,
+            afterSongs = after,
+            isPlaylist = true,
+        )
+    }
+
+    /** Takes a whole queued playlist (its upcoming songs) back out of the queue. */
+    fun removeQueuedPlaylist(groupId: String) {
+        val removed = playbackDispatchStateHolder.removeQueuedPlaylist(groupId)
+        if (removed > 0) viewModelScope.launch { _toastEvents.emit("Removed $removed songs from the queue") }
     }
 
     // =====================================================
@@ -3404,6 +3881,34 @@ class PlayerViewModel @Inject constructor(
 
     fun playPause() = playbackDispatchStateHolder.playPause()
 
+    /**
+     * Radio rewind: play the current station from [recordingMs] in its recording, or live when
+     * null. A progressive stream can't seek in place, so the item is swapped for the same stream
+     * URL with a start point (see RadioTimeShift); the player re-prepares it (a short rebuffer).
+     */
+    fun seekRadio(recordingMs: Long?) {
+        val controller = mediaController ?: return
+        val song = stablePlayerState.value.currentSong ?: return
+        if (!com.theveloper.pixelplay.data.radio.RadioPlayback.isRadio(song)) return
+        val streamUrl = song.contentUriString.ifBlank { song.path }
+        if (streamUrl.isBlank()) return
+        // A station restored from an earlier run wasn't registered yet: record it from now on.
+        com.theveloper.pixelplay.data.radio.timeshift.RadioTimeShift.register(
+            streamUrl = streamUrl,
+            bitrateKbps = (song.bitrate ?: 0) / 1000,
+            isHls = song.mimeType?.contains("mpegurl", ignoreCase = true) == true ||
+                streamUrl.contains(".m3u8", ignoreCase = true),
+        )
+        val index = controller.currentMediaItemIndex
+        if (index !in 0 until controller.mediaItemCount) return
+        val item = com.theveloper.pixelplay.utils.MediaItemBuilder.build(song).buildUpon()
+            .setUri(com.theveloper.pixelplay.data.radio.timeshift.RadioTimeShift.uriFor(streamUrl, recordingMs))
+            .build()
+        controller.replaceMediaItem(index, item)
+        controller.prepare()
+        controller.play()
+    }
+
     private data class VideoAudioResumePoint(val songId: String, val position: Long, val wasPlaying: Boolean)
     private var videoAudioResumePoint: VideoAudioResumePoint? = null
 
@@ -3447,22 +3952,51 @@ class PlayerViewModel @Inject constructor(
         playbackStateHolder.seekTo(position)
     }
 
-    private fun refreshAutomaticMixFuture() = continuousMixRuntime.refreshFuture()
+    /**
+     * Applies a tune / feedback change to the running mix as a gentle swap: only upcoming mix
+     * songs that now clash are replaced (at most a quarter), the rest re-ordered. It used to
+     * replace every upcoming mix song.
+     */
+    private fun refreshAutomaticMixFuture(reason: String? = null) = continuousMixRuntime.nudgeFuture(reason)
+
+    /** For changes made outside the player (friends in the room, their share): a gentle swap. */
+    fun nudgeMix(reason: String? = null) = refreshAutomaticMixFuture(reason)
+
+    /** Active steers (chips under the prompt box), oldest first. */
+    val mixSteers get() = dailyMixStateHolder.mixSteers
+
+    /** Removes one steer chip and lets the mix ease back. */
+    fun removeMixSteer(id: String) {
+        if (!dailyMixStateHolder.removeMixSteer(id)) return
+        if (dailyMixStateHolder.mixSteers.value.isEmpty()) _mixPrompt.value = null
+        refreshAutomaticMixFuture("steer removed")
+    }
+
+    /** Where the mix is heading, in words (energy, mood, tempo, genres), or null. */
+    fun mixHeadingSummary(): String? = dailyMixStateHolder.mixHeadingSummary()
 
     var mixDiscoveryBalance: Double
         get() = dailyMixStateHolder.discoveryBalance
-        set(value) { dailyMixStateHolder.discoveryBalance = value; refreshAutomaticMixFuture() }
+        set(value) { dailyMixStateHolder.discoveryBalance = value; refreshAutomaticMixFuture("Discover updated") }
     fun mixDecisionSummary() = dailyMixStateHolder.decisionSummary()
 
     /** Focused (0) ↔ Varied (1): how soon an artist may come back in the mix. */
     var mixVariety: Double
         get() = dailyMixStateHolder.variety
-        set(value) { dailyMixStateHolder.variety = value; refreshAutomaticMixFuture() }
+        set(value) { dailyMixStateHolder.variety = value; refreshAutomaticMixFuture("variety updated") }
 
     /** Energy for the mix: null = follow the music, else 0…1 (Calm 0.25 · Steady 0.55 · Hype 0.85). */
     var mixEnergyTarget: Double?
         get() = dailyMixStateHolder.energyTarget
-        set(value) { dailyMixStateHolder.energyTarget = value; refreshAutomaticMixFuture() }
+        set(value) {
+            dailyMixStateHolder.energyTarget = value
+            refreshAutomaticMixFuture(when {
+                value == null -> "energy follows the music"
+                value < 0.4 -> "easing to calm"
+                value < 0.7 -> "easing to steady"
+                else -> "easing to hype"
+            })
+        }
 
     /** Why the mix picked each of its queued songs, and whether it's a discovery (by song id). */
     val mixSongInsights get() = dailyMixStateHolder.mixInsights
@@ -3479,14 +4013,14 @@ class PlayerViewModel @Inject constructor(
         val song = stablePlayerState.value.currentSong ?: return
         dailyMixStateHolder.moreLike(song)
         if (_activeMixFlavor.value != null) _mixPrompt.value = song.title
-        refreshAutomaticMixFuture()
+        refreshAutomaticMixFuture("more like ${song.title}")
     }
     /** Recent mix feedback (exclusions, snoozes, removals), newest first, for Tune this mix. */
     val mixFeedbackLog get() = dailyMixStateHolder.feedbackLog
 
     /** Undoes one item of [mixFeedbackLog] and refreshes the upcoming mix songs. */
     fun undoMixFeedbackItem(id: String) {
-        if (dailyMixStateHolder.undoFeedback(id)) refreshAutomaticMixFuture()
+        if (dailyMixStateHolder.undoFeedback(id)) refreshAutomaticMixFuture("feedback undone")
     }
 
     /**
@@ -3504,7 +4038,14 @@ class PlayerViewModel @Inject constructor(
         val song = stablePlayerState.value.currentSong ?: return
         dailyMixStateHolder.heardTooMuch(song)
         viewModelScope.launch { _toastEvents.emit("Snoozed for 2 weeks. Undo from the broken-heart button.") }
-        refreshAutomaticMixFuture()
+        // A snooze is about this one song: no re-plan, just its other copies leave up next.
+        mediaController?.let { controller ->
+            val index = controller.currentMediaItemIndex
+            for (i in controller.mediaItemCount - 1 downTo index + 2) {
+                val item = controller.getMediaItemAt(i)
+                if (com.theveloper.pixelplay.data.MixQueueMetadata.automatic(item) && item.mediaId == song.id) controller.removeMediaItem(i)
+            }
+        }
         listeningStatsTracker.markEndReason(com.theveloper.pixelplay.data.MixEndReason.INTERRUPTION)
         playbackStateHolder.nextSong()
     }
@@ -3518,7 +4059,7 @@ class PlayerViewModel @Inject constructor(
     fun undoMixFeedback() {
         if (dailyMixStateHolder.undoMixFeedback()) {
             _mixStatus.value = "Feedback undone"
-            refreshAutomaticMixFuture()
+            refreshAutomaticMixFuture("feedback undone")
         }
     }
 
@@ -3557,6 +4098,11 @@ class PlayerViewModel @Inject constructor(
 
     fun previousSong() {
         playbackStateHolder.previousSong()
+    }
+
+    /** Always the previous song (no "restart this one first"), for the mini player's right swipe. */
+    fun previousSongNow() {
+        playbackStateHolder.previousSongNow()
     }
 
     private fun startProgressUpdates() {
@@ -3659,8 +4205,14 @@ class PlayerViewModel @Inject constructor(
     }
 
     val searchError = searchStateHolder.searchError
+    /** Online autocomplete for the typed query (spelling-corrected), shown while typing. */
+    val searchQuerySuggestions = searchStateHolder.querySuggestions
     val searchSongPaging = searchStateHolder.songPaging
+    /** A new query's first results haven't arrived yet (the results list shows skeleton rows). */
+    val searchInProgress = searchStateHolder.isSearching
     fun loadMoreSearchSongs() = searchStateHolder.loadMoreSongs()
+    /** Next page of search results for the current filter (songs, albums, artists, playlists or people). */
+    fun loadMoreSearchResults() = searchStateHolder.loadMoreResults()
     suspend fun resolveSearchPlaylist(playlist: com.theveloper.pixelplay.data.model.Playlist) = searchStateHolder.resolveSearchPlaylist(playlist)
     fun isConnectedSearchPlaylist(playlistId: String) = searchStateHolder.isConnectedPlaylist(playlistId)
 
@@ -3726,6 +4278,8 @@ class PlayerViewModel @Inject constructor(
     // --- AI Playlist Generation ---
 
     fun showAiPlaylistSheet() {
+        // AI playlists are Pixel-only.
+        if (!com.theveloper.pixelplay.data.ai.nano.DeviceAi.isPixel) return
         aiStateHolder.showAiPlaylistSheet()
     }
 
@@ -4147,6 +4701,7 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun playSong(song: Song) {
+        playbackDispatchStateHolder.markSongStarting(song)
         viewModelScope.launch {
             val controller = mediaController ?: return@launch
             val mediaItem = playbackDispatchStateHolder.buildResolvedPlaybackMediaItem(song)
@@ -4310,3 +4865,15 @@ internal fun normalizeLibraryTabs(storedOrder: List<String>): List<String> {
 
 /** How many previously played songs the queue's history keeps. */
 private const val PLAY_HISTORY_MAX = 50
+
+/** Songs a Song Radio queues up front (the continuous mix carries on after them). */
+private const val SONG_RADIO_SIZE = 50
+/** How many embedding neighbours lead a Song Radio. */
+private const val SONG_RADIO_EMBEDDING_NEIGHBOURS = 25
+
+/** Lets [PlayerViewModel.startSongRadio] reach the embedding engine without a constructor change. */
+@dagger.hilt.EntryPoint
+@dagger.hilt.InstallIn(dagger.hilt.components.SingletonComponent::class)
+interface SongRadioEntryPoint {
+    fun similarityEngine(): com.theveloper.pixelplay.data.analysis.ml.SimilarityEngine
+}

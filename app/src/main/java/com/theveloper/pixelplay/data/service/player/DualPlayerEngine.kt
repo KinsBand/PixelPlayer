@@ -32,13 +32,13 @@ import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.AudioRendererEventListener
 import androidx.media3.exoplayer.audio.AudioSink
-import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.mp3.Mp3Extractor
 import androidx.media3.extractor.flac.FlacExtractor
 import com.theveloper.pixelplay.data.diagnostics.PerformanceMetrics
+import com.theveloper.pixelplay.data.dsp.TimeStretchGuard
 import com.theveloper.pixelplay.data.model.Curve
 import com.theveloper.pixelplay.data.model.TransitionMode
 import com.theveloper.pixelplay.data.model.TransitionSettings
@@ -1290,17 +1290,14 @@ class DualPlayerEngine @Inject constructor(
                 enableFloatOutput: Boolean,
                 enableAudioOutputPlaybackParams: Boolean
             ): AudioSink {
-                return DefaultAudioSink.Builder(context)
-                    .setEnableFloatOutput(hiFiModeEnabled)
-                    .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
-                    .setAudioProcessorChain(
-                        DefaultAudioSink.DefaultAudioProcessorChain(
-                            HiResSampleRateCapAudioProcessor(),
-                            SurroundDownmixProcessor(),
-                            dspEngineManager.createAudioProcessor()
-                        )
-                    )
-                    .build()
+                // Speed / pitch always in software, with a limiter after Sonic (TimeStretchGuard).
+                return TimeStretchGuard.buildSink(
+                    context,
+                    hiFiModeEnabled,
+                    HiResSampleRateCapAudioProcessor(),
+                    SurroundDownmixProcessor(),
+                    dspEngineManager.createAudioProcessor()
+                )
             }
 
             override fun buildVideoRenderers(
@@ -1374,6 +1371,9 @@ class DualPlayerEngine @Inject constructor(
         )
         val dataSourceFactory = DefaultDataSource.Factory(context, httpFactory)
         val resolvingFactory = ResolvingDataSource.Factory(dataSourceFactory, resolver)
+        // Radio stations that can be rewound are read from their recording (see RadioTimeShift);
+        // every other URI goes through unchanged.
+        val radioAwareFactory = com.theveloper.pixelplay.data.radio.timeshift.RadioRoutingDataSource.Factory(context, resolvingFactory)
         val extractorsFactory = DefaultExtractorsFactory()
             // FLAG_WORKAROUND_IGNORE_EDIT_LISTS intentionally removed: it breaks Opus files
             // by discarding the edit list that encodes the pre-skip (encoder delay), causing
@@ -1387,7 +1387,7 @@ class DualPlayerEngine @Inject constructor(
         val loadControl = buildAdaptiveLoadControl()
 
         return ExoPlayer.Builder(context, renderersFactory)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(resolvingFactory, extractorsFactory))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(radioAwareFactory, extractorsFactory))
             .setLoadControl(loadControl)
             .build().apply {
             // Warm the next queued item while the current track plays, even without crossfade.

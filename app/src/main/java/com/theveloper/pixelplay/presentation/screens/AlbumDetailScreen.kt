@@ -2,12 +2,22 @@
 
 package com.theveloper.pixelplay.presentation.screens
 
+import com.theveloper.pixelplay.presentation.components.subcomps.rememberShuffleSpin
+import com.theveloper.pixelplay.presentation.components.subcomps.shuffleSpin
+import com.theveloper.pixelplay.presentation.navigation.popBackStackSafely
 import com.theveloper.pixelplay.presentation.components.LocalSongPrimaryTap
 import com.theveloper.pixelplay.presentation.components.handle
 import com.theveloper.pixelplay.presentation.navigation.navigateSafely
 import com.theveloper.pixelplay.presentation.navigation.navigateSafelyReplacing
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateDpAsState
@@ -17,6 +27,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
@@ -35,11 +46,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ContainedLoadingIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
@@ -212,7 +225,8 @@ fun AlbumDetailScreen(
                 val playWholeAlbum: () -> Unit = {
                     viewModel.playWholeAlbum(
                         shuffle = true,
-                        onStart = { song, queue -> playerViewModel.showAndPlaySong(song, queue) },
+                        // Named after the album so the queue sheet can link back here.
+                        onStart = { song, queue -> playerViewModel.showAndPlaySong(song, queue, album.title) },
                         onAppend = { song -> playerViewModel.addSongToQueue(song) }
                     )
                 }
@@ -348,28 +362,6 @@ fun AlbumDetailScreen(
                                 )
                             }
                         }
-                        if (uiState.tracklistFailed) {
-                            item(key = "album_tracklist_failed", contentType = "album_tracklist_failed") {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(20.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                                        .padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "Couldn't load the full tracklist",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    androidx.compose.material3.TextButton(onClick = viewModel::retryTracklist) {
-                                        Text("Retry")
-                                    }
-                                }
-                            }
-                        }
                         songsByDisc.forEach { (discNumber, discSongs) ->
                             if (songsByDisc.size > 1) {
                                 item(key = "disc_header_$discNumber") {
@@ -399,8 +391,8 @@ fun AlbumDetailScreen(
                                     },
                                     onClick = {
                                         // Add Song from lyrics: opens the action sheet instead.
-                                        songTap.handle(song, songs, "Current Context") {
-                                            playerViewModel.showAndPlaySong(song, songs)
+                                        songTap.handle(song, songs, album.title) {
+                                            playerViewModel.showAndPlaySong(song, songs, album.title)
                                         }
                                     }
                                 )
@@ -429,7 +421,44 @@ fun AlbumDetailScreen(
                                 )
                             }
                         }
+                        // Looking the release up in the catalogue: a pulsing "finding the music"
+                        // placeholder where the missing tracks will appear.
+                        if (uiState.isLoadingTracklist && uiState.missingTracks.isEmpty()) {
+                            item(key = "album_finding_tracks", contentType = "album_finding_tracks") {
+                                com.theveloper.pixelplay.presentation.components.DelayedSkeleton {
+                                    com.theveloper.pixelplay.presentation.screens.library.FindingMissingTracksPlaceholder()
+                                }
+                            }
+                        }
+                        if (uiState.error != null && songs.isEmpty() && uiState.missingTracks.isEmpty()) {
+                            item(key = "album_error_message", contentType = "album_error_message") {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(32.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = uiState.error!!,
+                                        color = MaterialTheme.colorScheme.error,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
+                            }
+                        }
                     }
+
+                    // Tracklist lookup failed: a floating "Find missing songs" action, bottom right,
+                    // above the mini player and navigation bar. It stays (spinning) while a retry runs.
+                    RetryTracklistFab(
+                        visible = uiState.tracklistFailed,
+                        isLoading = uiState.isLoadingTracklist,
+                        expanded = !lazyListState.canScrollBackward || !lazyListState.isScrollInProgress,
+                        onRetry = viewModel::retryTracklist,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 20.dp, bottom = fabBottomPadding + systemNavBarInset + 8.dp)
+                    )
 
                     if (showScrollBar) {
                         ExpressiveScrollBar(
@@ -455,7 +484,7 @@ fun AlbumDetailScreen(
                                     headerArtworkLoaded = true
                                 }
                             },
-                            onBackPressed = { navController.popBackStack() },
+                            onBackPressed = { navController.popBackStackSafely() },
                             onPlayClick = playWholeAlbum,
                             isSaved = uiState.isSaved,
                             canToggleSave = uiState.canToggleSave,
@@ -473,7 +502,7 @@ fun AlbumDetailScreen(
                                     headerArtworkLoaded = true
                                 }
                             },
-                            onBackPressed = { navController.popBackStack() },
+                            onBackPressed = { navController.popBackStackSafely() },
                             onPlayClick = playWholeAlbum,
                             isSaved = uiState.isSaved,
                             canToggleSave = uiState.canToggleSave,
@@ -496,6 +525,7 @@ fun AlbumDetailScreen(
                     }
                 }
                 SongInfoBottomSheet(
+                    onStartSongRadio = { seedSong -> playerViewModel.startSongRadio(seedSong) },
                     song = currentSong,
                     isFavorite = isFavorite,
                     onToggleFavorite = {
@@ -511,15 +541,20 @@ fun AlbumDetailScreen(
                     onAddNextToQueue = {
                         playerViewModel.addSongNextToQueue(currentSong)
                     },
+                    // Hold Next → Soon (the "after which song" slider).
+                    soonPlayer = playerViewModel,
+                    onAddSoon = { k -> playerViewModel.addSongAfterUpcoming(currentSong, k) },
                     onAddToPlayList = {
                         showPlaylistBottomSheet = true;
                     },
                     onDeleteFromDevice = playerViewModel::deleteFromDevice,
                     onNavigateToAlbum = {
-                        navController.navigateSafelyReplacing(
-                            route = Screen.AlbumDetail.createRoute(currentSong.albumId),
-                            patternToPop = Screen.AlbumDetail.route
-                        )
+                        Screen.AlbumDetail.createRouteForSong(currentSong)?.let { route ->
+                            navController.navigateSafelyReplacing(
+                                route = route,
+                                patternToPop = Screen.AlbumDetail.route
+                            )
+                        }
                         showSongInfoBottomSheet = false
                     },
                     onNavigateToArtist = {
@@ -584,6 +619,73 @@ fun AlbumDetailScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * Bottom-right "Find missing songs" action shown when the official tracklist couldn't be loaded.
+ * Tapping it retries; the refresh icon spins until the lookup finishes, then the button leaves
+ * (on success) or settles back (still failing). It shrinks to an icon while the list scrolls.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun RetryTracklistFab(
+    visible: Boolean,
+    isLoading: Boolean,
+    expanded: Boolean,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var isRetrying by remember { mutableStateOf(false) }
+    // The retry is over once the lookup it started finishes.
+    LaunchedEffect(isLoading) { if (!isLoading) isRetrying = false }
+
+    val rotation = remember { Animatable(0f) }
+    LaunchedEffect(isRetrying) {
+        if (isRetrying) {
+            while (true) {
+                rotation.animateTo(
+                    targetValue = rotation.value + 360f,
+                    animationSpec = tween(durationMillis = 650, easing = LinearEasing)
+                )
+            }
+        } else if (rotation.value % 360f != 0f) {
+            // Finish the turn smoothly instead of snapping back.
+            rotation.animateTo(
+                targetValue = kotlin.math.ceil(rotation.value / 360f) * 360f,
+                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)
+            )
+            rotation.snapTo(0f)
+        }
+    }
+
+    AnimatedVisibility(
+        visible = visible || isRetrying,
+        modifier = modifier,
+        enter = scaleIn(spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow)) +
+            fadeIn(),
+        exit = scaleOut(spring(stiffness = Spring.StiffnessMedium)) + fadeOut()
+    ) {
+        ExtendedFloatingActionButton(
+            onClick = {
+                if (!isRetrying) {
+                    isRetrying = true
+                    onRetry()
+                }
+            },
+            expanded = expanded,
+            icon = {
+                Icon(
+                    imageVector = Icons.Rounded.Refresh,
+                    contentDescription = "Retry tracklist",
+                    modifier = Modifier.graphicsLayer { rotationZ = rotation.value }
+                )
+            },
+            text = { Text(if (isRetrying) "Finding songs…" else "Find missing songs") },
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+            shape = CircleShape
+        )
     }
 }
 
@@ -702,8 +804,9 @@ private fun SharedAlbumTopBarProbe(
                 .padding(end = 12.dp, top = 4.dp)
         )
 
+        val topBarShuffleSpin = rememberShuffleSpin()
         LargeExtendedFloatingActionButton(
-            onClick = onPlayClick,
+            onClick = { topBarShuffleSpin.play(); onPlayClick() },
             shape = RoundedStarShape(sides = 8, curve = 0.05, rotation = 0f),
             modifier = Modifier
                 .align(shuffleAlignment)
@@ -715,7 +818,11 @@ private fun SharedAlbumTopBarProbe(
                     alpha = expandedContentAlpha
                 }
         ) {
-            Icon(Icons.Rounded.Shuffle, contentDescription = stringResource(R.string.common_shuffle_play_album))
+            Icon(
+                Icons.Rounded.Shuffle,
+                contentDescription = stringResource(R.string.common_shuffle_play_album),
+                modifier = Modifier.shuffleSpin(topBarShuffleSpin)
+            )
         }
     }
 }
@@ -889,8 +996,9 @@ private fun CollapsingAlbumTopBar(
                     }
                 }
 
+                val fabShuffleSpin = rememberShuffleSpin()
                 LargeExtendedFloatingActionButton(
-                    onClick = onPlayClick,
+                    onClick = { fabShuffleSpin.play(); onPlayClick() },
                     shape = RoundedStarShape(sides = 8, curve = 0.05, rotation = 0f),
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
@@ -901,7 +1009,11 @@ private fun CollapsingAlbumTopBar(
                             alpha = fabScale
                         }
                 ) {
-                    Icon(Icons.Rounded.Shuffle, contentDescription = stringResource(R.string.common_shuffle_play_album))
+                    Icon(
+                        Icons.Rounded.Shuffle,
+                        contentDescription = stringResource(R.string.common_shuffle_play_album),
+                        modifier = Modifier.shuffleSpin(fabShuffleSpin)
+                    )
                 }
             }
         }

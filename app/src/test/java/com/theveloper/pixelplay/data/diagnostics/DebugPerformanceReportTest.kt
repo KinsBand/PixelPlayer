@@ -78,7 +78,6 @@ class DebugPerformanceReportTest {
             replayGainAlbumMode = false
         ),
         controllers = ControllerSection(
-            widgetActive = true,
             androidAutoActive = true,
             connectedControllers = listOf(
                 ConnectedController("com.google.android.projection.gearhead", isAndroidAuto = true)

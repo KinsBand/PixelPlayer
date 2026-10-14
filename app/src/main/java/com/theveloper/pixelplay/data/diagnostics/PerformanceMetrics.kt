@@ -9,7 +9,7 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * This is intentionally a plain `object` (no DI) so that static call sites — the
  * `AlbumArtUtils` object, the `AudioMetadataReader` object, `SyncWorker`,
- * `CoilBitmapLoader`, `DualPlayerEngine`, `MusicService`, `WidgetUpdateManager` —
+ * `CoilBitmapLoader`, `DualPlayerEngine`, `MusicService` —
  * can record samples without any extra plumbing.
  *
  * Design constraints (see the high-res performance investigation brief):
@@ -34,7 +34,6 @@ object PerformanceMetrics {
         const val PLAYBACK_PREPARE = "playback_prepare"
         const val AUDIO_DECODER_INIT = "audio_decoder_init"
         const val TRANSITION = "transition"
-        const val WIDGET_UPDATE = "widget_update"
         const val MEDIASESSION_ITEM_BUILD = "mediasession_item_build"
     }
 
@@ -119,8 +118,7 @@ object PerformanceMetrics {
         val counters: Map<String, Long>,
         val maxes: Map<String, Long>,
         val offloadEvents: List<OffloadEvent>,
-        val controllers: List<ControllerInfo>,
-        val widgetActive: Boolean
+        val controllers: List<ControllerInfo>
     )
 
     private val timings = ConcurrentHashMap<String, TimingStat>()
@@ -138,9 +136,6 @@ object PerformanceMetrics {
         Timings.MEDIASESSION_ITEM_BUILD
     )
 
-    @Volatile
-    var widgetActive: Boolean = false
-        private set
 
     // ---- Producers -----------------------------------------------------------
 
@@ -238,10 +233,6 @@ object PerformanceMetrics {
         )
     }
 
-    fun setWidgetActive(active: Boolean) {
-        widgetActive = active
-    }
-
     // ---- Consumer ------------------------------------------------------------
 
     fun snapshot(): Snapshot {
@@ -256,8 +247,7 @@ object PerformanceMetrics {
             counters = counterSnap,
             maxes = maxSnap,
             offloadEvents = events,
-            controllers = controllers.values.sortedBy { it.firstSeenElapsedMs },
-            widgetActive = widgetActive
+            controllers = controllers.values.sortedBy { it.firstSeenElapsedMs }
         )
     }
 
@@ -268,6 +258,5 @@ object PerformanceMetrics {
         maxes.clear()
         synchronized(offloadEvents) { offloadEvents.clear() }
         controllers.clear()
-        widgetActive = false
     }
 }

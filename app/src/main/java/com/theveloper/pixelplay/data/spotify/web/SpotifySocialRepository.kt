@@ -52,8 +52,13 @@ data class SpotifyPublicProfile(
     val name: String,
     val avatarUrl: String?,
     val followers: Int,
-    val playlists: List<SpotifyPlaylist>
+    val playlists: List<SpotifyPlaylist>,
+    /** How many people they follow; -1 = not reported. */
+    val followingCount: Int = -1,
 )
+
+/** One page of people search results; [hasMore] = another page can be asked for. */
+data class SpotifyUserSearchPage(val people: List<SpotifyPublicProfile>, val hasMore: Boolean)
 
 /**
  * Friends on Spotify, from three layers so a change on Spotify's side doesn't take it all down:
@@ -73,12 +78,19 @@ class SpotifySocialRepository @Inject constructor(
         private const val PROFILE_URL = "https://spclient.wg.spotify.com/user-profile-view/v3/profile"
         private const val RECENT_MS = 30 * 60_000L
         private const val PROFILE_TTL_MS = 12 * 60 * 60_000L
+        /** Followers / following lists change more often than profiles; re-read after 10 min. */
+        private const val PEOPLE_TTL_MS = 10 * 60_000L
+        /** Official Web API endpoint for following / unfollowing users (documented by Spotify). */
+        private const val FOLLOW_URL = "https://api.spotify.com/v1/me/following"
+        /** What the Spotify clients use to follow / unfollow people (POST = follow, DELETE = unfollow). */
+        private const val SOCIAL_GRAPH_URL = "https://spclient.wg.spotify.com/socialgraph/v2/following?format=json"
     }
 
     private data class Cached<T>(val value: T, val at: Long)
     private val trackCache = ConcurrentHashMap<String, SpotifyFriendActivity>()
     private val profileCache = ConcurrentHashMap<String, Cached<SpotifyPublicProfile>>()
     @Volatile private var followingCache: Cached<List<SpotifyPublicProfile>>? = null
+    private val peopleCache = ConcurrentHashMap<String, Cached<List<SpotifyPublicProfile>>>()
     private val lookups = Semaphore(4)
 
     /** Everyone to show in the Friends list, listening-now first. */
@@ -137,6 +149,76 @@ class SpotifySocialRepository @Inject constructor(
         val list = SpotifySocialParsers.following(json)
         followingCache = Cached(list, System.currentTimeMillis())
         return list
+    }
+
+    /** The signed-in user's id, or blank when Spotify isn't connected. */
+    val myUserId: String get() = session.username
+
+    /** People you follow, re-read from Spotify (for the mutual "Friends" badge after a change). */
+    suspend fun myFollowing(force: Boolean = false): List<SpotifyPublicProfile> {
+        if (force) followingCache = null
+        return following()
+    }
+
+    /**
+     * [userId]'s followers ([followers] = true) or the people they follow (users only, not artists).
+     * Throws when Spotify refuses (private profile, offline); callers show a retry.
+     */
+    suspend fun people(userId: String, followers: Boolean, force: Boolean = false): List<SpotifyPublicProfile> {
+        require(userId.isNotBlank())
+        val key = (if (followers) "followers:" else "following:") + userId
+        val cached = peopleCache[key]
+        if (!force && cached != null && System.currentTimeMillis() - cached.at < PEOPLE_TTL_MS) return cached.value
+        val path = if (followers) "followers" else "following"
+        val json = JSONObject(pathfinder.rest("GET", "$PROFILE_URL/${java.net.URLEncoder.encode(userId, "UTF-8")}/$path?market=from_token"))
+        val list = SpotifySocialParsers.following(json)
+        peopleCache[key] = Cached(list, System.currentTimeMillis())
+        return list
+    }
+
+    /**
+     * One page of Spotify's people search (the web player's "searchUsers"). [offset] counts from 0.
+     * Results carry no follower counts (-1). Throws when Spotify refuses; callers show a retry.
+     */
+    suspend fun searchUsers(term: String, offset: Int, limit: Int): SpotifyUserSearchPage {
+        require(term.isNotBlank())
+        val data = pathfinder.query(SpotifyQueries.SEARCH_USERS, JSONObject()
+            .put("searchTerm", term)
+            .put("offset", offset)
+            .put("limit", limit)
+            .put("numberOfTopResults", 5)
+            .put("includeAudiobooks", false)
+            .put("includePreReleases", false)
+            .put("includeAuthors", false))
+        return SpotifySocialParsers.userSearch(data, offset)
+    }
+
+    /** Follows or unfollows a Spotify user (your real Spotify account, not PixelPlayer's "follow along"). */
+    suspend fun setFollowing(user: SpotifyPublicProfile, follow: Boolean) {
+        // The web player's own social-graph endpoint first: api.spotify.com rate-limits web-player
+        // tokens hard ("try again in a minute"). The documented Web API is the fallback.
+        val target = JSONObject().put("target_uris", JSONArray().put("spotify:user:${user.userId}")).toString()
+        try {
+            pathfinder.rest(if (follow) "POST" else "DELETE", SOCIAL_GRAPH_URL, target)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (first: Exception) {
+            val url = "$FOLLOW_URL?type=user&ids=${java.net.URLEncoder.encode(user.userId, "UTF-8")}"
+            try {
+                pathfinder.rest(if (follow) "PUT" else "DELETE", url, JSONObject().put("ids", JSONArray().put(user.userId)).toString())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (second: Exception) {
+                second.addSuppressed(first)
+                throw second
+            }
+        }
+        // Keep the cached "people you follow" in step, so badges update without another request.
+        followingCache?.let { cached ->
+            val rest = cached.value.filterNot { it.userId == user.userId }
+            followingCache = Cached(if (follow) rest + user else rest, cached.at)
+        }
+        peopleCache.keys.filter { it.endsWith(":" + user.userId) || it.endsWith(":" + myUserId) }.forEach(peopleCache::remove)
     }
 
     private suspend fun feed(): List<SpotifyFriend> {
@@ -253,11 +335,16 @@ internal object SpotifySocialParsers {
         val playlists = (0 until lists.length()).mapNotNull { i ->
             val p = lists.optJSONObject(i) ?: return@mapNotNull null
             val id = p.optString("uri").takeIf { it.startsWith("spotify:playlist:") || it.contains(":playlist:") }?.substringAfterLast(':') ?: return@mapNotNull null
+            // Collaborative / saves / description are read only when Spotify includes them.
             SpotifyPlaylist(id, p.optString("name").ifBlank { "Untitled playlist" }, p.optString("image_url").ifBlank { null }, 0,
-                userId(p.optString("owner_uri")) ?: userId, p.optString("owner_name"), false)
+                userId(p.optString("owner_uri")) ?: userId, p.optString("owner_name"),
+                collaborative = p.optBoolean("is_collaborative", p.optBoolean("collaborative", false)),
+                saves = if (p.has("followers_count")) p.optInt("followers_count", -1) else -1,
+                description = p.optString("description").trim().ifBlank { null })
         }
         return SpotifyPublicProfile(userId, json.optString("name").ifBlank { userId }, json.optString("image_url").ifBlank { null },
-            json.optInt("followers_count", 0), playlists)
+            json.optInt("followers_count", 0), playlists,
+            followingCount = if (json.has("following_count")) json.optInt("following_count", -1) else -1)
     }
 
     fun following(json: JSONObject): List<SpotifyPublicProfile> {
@@ -265,7 +352,28 @@ internal object SpotifySocialParsers {
         return (0 until profiles.length()).mapNotNull { i ->
             val p = profiles.optJSONObject(i) ?: return@mapNotNull null
             val id = userId(p.optString("uri")) ?: return@mapNotNull null // skips artists
-            SpotifyPublicProfile(id, p.optString("name").ifBlank { id }, p.optString("image_url").ifBlank { null }, p.optInt("followers_count", 0), emptyList())
+            SpotifyPublicProfile(id, p.optString("name").ifBlank { id }, p.optString("image_url").ifBlank { null }, p.optInt("followers_count", 0), emptyList(),
+                followingCount = if (p.has("following_count")) p.optInt("following_count", -1) else -1)
         }
+    }
+
+    /** `searchV2.users` from "searchUsers": people only, in Spotify's order. */
+    fun userSearch(data: JSONObject, offset: Int): SpotifyUserSearchPage {
+        val users = data.optJSONObject("searchV2")?.optJSONObject("users") ?: return SpotifyUserSearchPage(emptyList(), false)
+        val items = users.optJSONArray("items") ?: JSONArray()
+        val people = (0 until items.length()).mapNotNull { i ->
+            val entry = items.optJSONObject(i) ?: return@mapNotNull null
+            val user = entry.optJSONObject("data") ?: entry.optJSONObject("item")?.optJSONObject("data") ?: entry
+            if (user.optString("__typename").let { it.isNotBlank() && it != "User" }) return@mapNotNull null
+            val id = userId(user.optString("uri")) ?: user.optString("id").ifBlank { user.optString("username") }.ifBlank { null }
+                ?: return@mapNotNull null
+            val sources = user.optJSONObject("avatar")?.optJSONArray("sources")
+            // Largest picture last in Spotify's list; any is fine for a 44 dp circle.
+            val avatar = sources?.let { arr -> (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.optString("url")?.ifBlank { null } }.lastOrNull() }
+            SpotifyPublicProfile(id, user.optString("displayName").ifBlank { user.optString("name") }.ifBlank { id }, avatar, -1, emptyList())
+        }
+        val total = users.optInt("totalCount", -1)
+        val hasMore = if (total >= 0) offset + items.length() < total else items.length() > 0
+        return SpotifyUserSearchPage(people, hasMore && items.length() > 0)
     }
 }

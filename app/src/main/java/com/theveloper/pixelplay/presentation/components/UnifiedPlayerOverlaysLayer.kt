@@ -93,7 +93,8 @@ internal fun UnifiedPlayerQueueLayer(
     onQueueDrag: (Float) -> Unit,
     onQueueRelease: (Float, Float) -> Unit,
     queuePredictiveBackProgress: Animatable<Float, AnimationVector1D>,
-    queuePredictiveBackSwipeEdge: State<Int?>
+    queuePredictiveBackSwipeEdge: State<Int?>,
+    onOpenQueueSource: (QueueSourceLink) -> Unit = {}
 ) {
     if (!shouldRenderLayer) return
 
@@ -171,7 +172,8 @@ internal fun UnifiedPlayerQueueLayer(
                     onQueueRelease = onQueueRelease,
                     predictiveBackProgress = queuePredictiveBackProgress,
                     predictiveBackSwipeEdge = queuePredictiveBackSwipeEdge,
-                    queueSheetOffset = queueSheetOffset
+                    queueSheetOffset = queueSheetOffset,
+                    onOpenQueueSource = onOpenQueueSource
                 )
             }
         }
@@ -210,6 +212,8 @@ internal fun UnifiedPlayerSongInfoLayer(
             shapes = MaterialTheme.shapes
         ) {
             SongInfoBottomSheet(
+                onStartSongRadio = { seedSong -> playerViewModel.startSongRadio(seedSong) },
+                onShowStationOnMap = { station -> playerViewModel.openRadioMapForStation(station) },
                 song = liveSong,
                 isFavorite = liveSong.isFavorite,
                 onToggleFavorite = { playerViewModel.toggleFavoriteSpecificSong(liveSong) },
@@ -232,6 +236,9 @@ internal fun UnifiedPlayerSongInfoLayer(
                     playerViewModel.addSongNextToQueue(liveSong)
                     Toast.makeText(context, toastPlayingNext, Toast.LENGTH_SHORT).show()
                 },
+                // Hold Next → Soon (the "after which song" slider).
+                soonPlayer = playerViewModel,
+                onAddSoon = { k -> playerViewModel.addSongAfterUpcoming(liveSong, k) },
                 onAddToPlayList = {
                     showPlaylistBottomSheet = true
                 },
@@ -311,6 +318,7 @@ internal fun UnifiedPlayerQueueAndSongInfoHost(
     onNavigateToAlbum: (Song) -> Unit,
     onNavigateToArtist: (Song) -> Unit,
     onNavigateToGenre: (Song) -> Unit,
+    onOpenQueueSource: (QueueSourceLink) -> Unit = {},
     queuePredictiveBackProgress: Animatable<Float, AnimationVector1D>,
     queuePredictiveBackSwipeEdge: State<Int?>
 ) {
@@ -440,7 +448,8 @@ internal fun UnifiedPlayerQueueAndSongInfoHost(
                 onQueueDrag = onQueueDrag,
                 onQueueRelease = onQueueRelease,
                 queuePredictiveBackProgress = queuePredictiveBackProgress,
-                queuePredictiveBackSwipeEdge = queuePredictiveBackSwipeEdge
+                queuePredictiveBackSwipeEdge = queuePredictiveBackSwipeEdge,
+                onOpenQueueSource = onOpenQueueSource
             )
 
             UnifiedPlayerSongInfoLayer(

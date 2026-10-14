@@ -12,7 +12,14 @@ enum class VideoType(val displayName: String, val searchQuerySuffix: String) {
     ALL("All versions", "")
 }
 
-data class TrackVideo(val id: String, val title: String, val channel: String, val thumbnailUrl: String)
+data class TrackVideo(
+    val id: String,
+    val title: String,
+    val channel: String,
+    val thumbnailUrl: String,
+    /** Length in seconds when the search reported it, else 0. */
+    val durationSec: Long = 0,
+)
 
 // setPlaybackQuality is a no-op in the IFrame API. Playback speed IS supported.
 enum class PlaybackSpeed(val displayName: String, val rate: PlayerConstants.PlaybackRate) {

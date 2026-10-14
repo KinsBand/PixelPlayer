@@ -1,8 +1,19 @@
 package com.theveloper.pixelplay.presentation.components.player
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.layout.layout
+import com.theveloper.pixelplay.ui.theme.MotionTokens
+import androidx.compose.animation.animateColorAsState
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateIntAsState
@@ -30,6 +41,11 @@ import androidx.compose.material.icons.rounded.FitScreen
 import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Hd
+import androidx.compose.material.icons.rounded.Sd
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.StarBorder
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.material.icons.rounded.LiveTv
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.MusicVideo
@@ -67,6 +83,7 @@ import com.theveloper.pixelplay.data.model.VideoType
 import com.theveloper.pixelplay.data.preferences.CarouselStyle
 import com.theveloper.pixelplay.presentation.components.PixelVideoPlayer
 import com.theveloper.pixelplay.presentation.components.SongVideoPlaybackController
+import com.theveloper.pixelplay.presentation.components.PixelExoVideoPlayer
 import com.theveloper.pixelplay.presentation.viewmodel.SongVideoViewModel
 import kotlinx.coroutines.delay
 
@@ -108,6 +125,8 @@ fun SongVideoSection(
     viewModel: SongVideoViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val quality by viewModel.quality.collectAsStateWithLifecycle()
+    val currentRendition = remember(quality) { viewModel.renditionFor(quality) }
     val context = LocalContext.current
     var versionSheetOpen by remember { mutableStateOf(false) }
     var overlayVisible by remember { mutableStateOf(true) }
@@ -196,11 +215,35 @@ fun SongVideoSection(
             val selected = state.selected
             val isSearching = state.songId != song.id || state.loading
 
-            // The player view is composed straight away (even while the search is still
-            // running) so the embedded YouTube page boots in parallel with the lookup, and it is
-            // not keyed by video id so switching versions reuses the already-initialised player.
-            val showPlayer = isSearching || selected != null
-            if (showPlayer) {
+            // Video plays in ExoPlayer when NewPipe finds its streams (real quality choice);
+            // the YouTube embed is the fallback when that fails.
+            LaunchedEffect(selected?.id, isSearching) {
+                if (!isSearching && selected != null) viewModel.resolveStreams(selected.id)
+            }
+            val forSelected = selected != null && !isSearching && quality.videoId == selected.id
+            val useExo = forSelected && quality.streams != null && !quality.fallback
+            val useEmbed = forSelected && quality.fallback
+            val resolvingStreams = selected != null && !isSearching && !useExo && !useEmbed
+            // The spinner shows in the play buttons while the streams are looked up.
+            LaunchedEffect(resolvingStreams) { if (resolvingStreams) playback.isLoading = true }
+            val playerModifier = Modifier
+                .align(Alignment.Center)
+                .then(
+                    if (fullscreen) Modifier.fillMaxSize()
+                    else Modifier.requiredSize(videoWidth, videoHeight)
+                )
+            if (useExo) {
+                PixelExoVideoPlayer(
+                    videoId = selected?.id,
+                    rendition = currentRendition,
+                    dataSourceFactory = viewModel.videoDataSourceFactory,
+                    playback = playback,
+                    onPlayerError = { id, _ -> viewModel.exoPlaybackFailed(id) },
+                    modifier = playerModifier
+                )
+            }
+            // Not keyed by video id, so switching versions reuses the initialised embed.
+            if (useEmbed) {
                 PixelVideoPlayer(
                     videoId = if (isSearching) null else selected?.id,
                     playback = playback,
@@ -214,17 +257,13 @@ fun SongVideoSection(
                             tryNext
                         )
                     },
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .then(
-                            if (fullscreen) Modifier.fillMaxSize()
-                            else Modifier.requiredSize(videoWidth, videoHeight)
-                        )
+                    modifier = playerModifier
                 )
             }
             val waitingForFirstFrame = selected != null && !isSearching &&
-                playback.durationMs == 0L && !playback.isPlaying
-            if (isSearching || waitingForFirstFrame) {
+                (resolvingStreams || (playback.durationMs == 0L && !playback.isPlaying))
+            // While the overlay shows, its play button is the spinner; never two at once.
+            if (isSearching || (waitingForFirstFrame && !overlayVisible)) {
                 CircularProgressIndicator(
                     modifier = Modifier.align(Alignment.Center),
                     color = Color.White
@@ -311,6 +350,19 @@ fun SongVideoSection(
                         song = song,
                         typeLabel = state.type.displayName,
                         playback = playback,
+                        qualityHeights = if (useExo) quality.streams?.heights.orEmpty() else emptyList(),
+                        currentHeight = currentRendition?.height,
+                        isAutoQuality = quality.pickedAuto ||
+                            (quality.pickedHeight == null && quality.starredHeight == null),
+                        starredHeight = quality.starredHeight,
+                        onPickQuality = { height ->
+                            bump()
+                            viewModel.pickQuality(height)
+                        },
+                        onToggleStar = { height ->
+                            bump()
+                            viewModel.toggleStar(height)
+                        },
                         fullscreen = fullscreen,
                         fillCover = fillCover,
                         onVersionClick = {
@@ -379,6 +431,12 @@ private fun VideoControlsOverlay(
     song: Song,
     typeLabel: String,
     playback: SongVideoPlaybackController,
+    qualityHeights: List<Int>,
+    currentHeight: Int?,
+    isAutoQuality: Boolean,
+    starredHeight: Int?,
+    onPickQuality: (Int?) -> Unit,
+    onToggleStar: (Int) -> Unit,
     fullscreen: Boolean,
     fillCover: Boolean,
     onVersionClick: () -> Unit,
@@ -430,6 +488,20 @@ private fun VideoControlsOverlay(
                 }
             }
             VideoVersionChip(label = typeLabel, onClick = onVersionClick)
+            // Quality (icon only), top right. Hidden on the embed fallback, which can't change it.
+            if (qualityHeights.isNotEmpty()) {
+                // Full screen: the title already fills the row's free space.
+                if (!fullscreen) Spacer(Modifier.weight(1f)) else Spacer(Modifier.width(8.dp))
+                VideoQualityButton(
+                    heights = qualityHeights,
+                    currentHeight = currentHeight,
+                    isAuto = isAutoQuality,
+                    starredHeight = starredHeight,
+                    onPick = onPickQuality,
+                    onToggleStar = onToggleStar,
+                    onInteraction = onInteraction
+                )
+            }
         }
 
         // Centre: previous · play/pause · next
@@ -449,6 +521,7 @@ private fun VideoControlsOverlay(
                 iconRes = if (playback.isPlaying) R.drawable.rounded_pause_filled_24
                 else R.drawable.rounded_play_arrow_filled_24,
                 contentDescription = if (playback.isPlaying) "Pause" else "Play",
+                loading = playback.isLoading,
                 size = if (fullscreen) 84.dp else 72.dp,
                 iconSize = if (fullscreen) 44.dp else 38.dp,
                 container = MaterialTheme.colorScheme.primaryContainer,
@@ -603,6 +676,8 @@ private fun VideoTransportButton(
     container: Color = Color.Black.copy(alpha = 0.5f),
     content: Color = Color.White,
     cornerPercent: Int = 50,
+    /** Shows a loading indicator in place of the icon (the video is loading/buffering). */
+    loading: Boolean = false,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -628,13 +703,32 @@ private fun VideoTransportButton(
             ),
         contentAlignment = Alignment.Center
     ) {
-        Icon(
-            painter = painterResource(iconRes),
-            contentDescription = contentDescription,
-            tint = content,
-            modifier = Modifier.size(iconSize)
-        )
+        Crossfade(
+            targetState = loading,
+            animationSpec = tween(MotionTokens.DurationShort4, easing = MotionTokens.Emphasized),
+            label = "videoBtnLoading"
+        ) { isLoading ->
+            if (isLoading) {
+                VideoLoadingIndicator(color = content, modifier = Modifier.size(iconSize + 6.dp))
+            } else {
+                Icon(
+                    painter = painterResource(iconRes),
+                    contentDescription = contentDescription,
+                    tint = content,
+                    modifier = Modifier.size(iconSize)
+                )
+            }
+        }
     }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun VideoLoadingIndicator(color: Color, modifier: Modifier = Modifier) {
+    LoadingIndicator(
+        modifier = modifier.semantics { contentDescription = "Loading video" },
+        color = color
+    )
 }
 
 @Composable
@@ -658,20 +752,86 @@ private fun VideoIconButton(icon: ImageVector, contentDescription: String, onCli
     }
 }
 
-private fun VideoType.icon(): ImageVector = when (this) {
-    VideoType.MUSIC_VIDEO -> Icons.Rounded.MusicVideo
-    VideoType.LIVE_PERFORMANCE -> Icons.Rounded.LiveTv
-    VideoType.LYRIC_VIDEO -> Icons.Rounded.Subtitles
-    VideoType.ACOUSTIC -> Icons.Rounded.Mic
-    VideoType.REMIX -> Icons.Rounded.GraphicEq
-    VideoType.COVER -> Icons.Rounded.People
-    VideoType.ALL -> Icons.Rounded.VideoLibrary
+
+/**
+ * Icon-only quality button (HD / SD icon for the playing quality). Opens a menu: Auto, then
+ * every height the video has, highest first. Each height has a star: the starred quality is
+ * used every time a video loads (or the nearest lower one when a video doesn't have it).
+ */
+@Composable
+private fun VideoQualityButton(
+    heights: List<Int>,
+    currentHeight: Int?,
+    isAuto: Boolean,
+    starredHeight: Int?,
+    onPick: (Int?) -> Unit,
+    onToggleStar: (Int) -> Unit,
+    onInteraction: () -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    val label = currentHeight?.let { "${it}p" } ?: "Auto"
+    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+        VideoIconButton(
+            icon = if ((currentHeight ?: 0) >= 720) Icons.Rounded.Hd else Icons.Rounded.Sd,
+            contentDescription = "Video quality, $label",
+            onClick = {
+                onInteraction()
+                open = true
+            }
+        )
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            shape = MaterialTheme.shapes.large,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        ) {
+            DropdownMenuItem(
+                text = { Text(if (isAuto && currentHeight != null) "Auto (${currentHeight}p)" else "Auto") },
+                leadingIcon = {
+                    Icon(Icons.Rounded.Check, contentDescription = null,
+                        modifier = Modifier.graphicsLayer { alpha = if (isAuto) 1f else 0f })
+                },
+                onClick = {
+                    open = false
+                    onPick(null)
+                }
+            )
+            heights.forEach { height ->
+                val selected = !isAuto && height == currentHeight
+                val starred = height == starredHeight
+                DropdownMenuItem(
+                    text = { Text("${height}p") },
+                    leadingIcon = {
+                        Icon(Icons.Rounded.Check, contentDescription = null,
+                            modifier = Modifier.graphicsLayer { alpha = if (selected) 1f else 0f })
+                    },
+                    trailingIcon = {
+                        IconButton(onClick = { onToggleStar(height) }) {
+                            Icon(
+                                if (starred) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                                contentDescription = if (starred) "Unstar ${height}p" else "Always use ${height}p",
+                                tint = if (starred) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    },
+                    modifier = Modifier.semantics {
+                        stateDescription = if (starred) "${height}p, starred" else "${height}p"
+                    },
+                    onClick = {
+                        open = false
+                        onPick(height)
+                    }
+                )
+            }
+        }
+    }
 }
 
 /**
- * The "which video" picker, styled like the app's other player sheets: version pills on top,
- * the videos found for that version underneath (updates live when the version changes), and
- * "Open in YouTube" at the bottom.
+ * The "which video" picker, styled like the app's other player sheets: the videos found for the
+ * chosen version (updates live when the version changes), then one sideways row of version
+ * pills, then "Open in YouTube" at the bottom.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -709,38 +869,6 @@ private fun VideoVersionSheet(
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(16.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                VideoType.entries.forEach { type ->
-                    val selected = type == selectedType
-                    val corner by animateIntAsState(if (selected) 30 else 50, label = "typePill")
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(corner))
-                            .background(if (selected) colors.primary else colors.surfaceContainerHighest)
-                            .clickable { onTypeSelected(type) }
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = if (selected) Icons.Rounded.Check else type.icon(),
-                            contentDescription = null,
-                            tint = if (selected) colors.onPrimary else colors.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = type.displayName,
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                            color = if (selected) colors.onPrimary else colors.onSurface,
-                            modifier = Modifier.padding(start = 6.dp)
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.height(20.dp))
             Text(
                 text = "Videos found",
                 style = MaterialTheme.typography.titleSmall,
@@ -766,6 +894,7 @@ private fun VideoVersionSheet(
                         val isSelected = video.id == selectedId
                         Row(
                             modifier = Modifier
+                                .animateItem()
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(18.dp))
                                 .background(if (isSelected) colors.secondaryContainer else colors.surfaceContainer)
@@ -808,6 +937,60 @@ private fun VideoVersionSheet(
                                 )
                             }
                         }
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            // Which kind of video: one sideways row of text pills, right above Open in YouTube.
+            val typeRowState = androidx.compose.foundation.lazy.rememberLazyListState()
+            LaunchedEffect(Unit) {
+                val index = VideoType.entries.indexOf(selectedType)
+                if (index > 0) typeRowState.scrollToItem(index, scrollOffset = -48)
+            }
+            androidx.compose.foundation.lazy.LazyRow(
+                state = typeRowState,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(horizontal = 20.dp),
+                // Edge to edge inside the sheet's 20 dp padding, so pills scroll under the edges.
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .layout { measurable, constraints ->
+                        val extra = 40.dp.roundToPx()
+                        val placeable = measurable.measure(
+                            constraints.copy(maxWidth = constraints.maxWidth + extra, minWidth = constraints.minWidth + extra)
+                        )
+                        layout(constraints.maxWidth, placeable.height) { placeable.place(-extra / 2, 0) }
+                    }
+            ) {
+                items(VideoType.entries, key = { it.name }) { type ->
+                    val selected = type == selectedType
+                    val container by animateColorAsState(
+                        if (selected) colors.primary else colors.surfaceContainerHighest,
+                        tween(MotionTokens.DurationShort4, easing = MotionTokens.Emphasized),
+                        label = "typePillContainer"
+                    )
+                    val content by animateColorAsState(
+                        if (selected) colors.onPrimary else colors.onSurface,
+                        tween(MotionTokens.DurationShort4, easing = MotionTokens.Emphasized),
+                        label = "typePillContent"
+                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(container)
+                            .clickable { onTypeSelected(type) }
+                            .semantics { this.selected = selected }
+                            .heightIn(min = 40.dp)
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = type.displayName,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                            color = content,
+                            maxLines = 1
+                        )
                     }
                 }
             }

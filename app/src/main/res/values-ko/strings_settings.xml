@@ -168,9 +168,9 @@
     <string name="settings_language_turkish">í„°í‚¤ì–´</string>
     <string name="settings_app_theme_title">ì•± í…Œë§ˆ</string>
     <string name="settings_app_theme_subtitle">ë°ì€ í…Œë§ˆ, ì–´ë‘ìš´ í…Œë§ˆ ë˜ëŠ” ì‹œìŠ¤í…œ ì„¤ì • ë”°ë¥´ê¸° ì¤‘ì—ì„œ ì„ íƒí•˜ì„¸ìš”.</string>
-    <string name="settings_theme_light">ë°ì€ í…Œë§ˆ</string>
-    <string name="settings_theme_dark">ì–´ë‘ìš´ í…Œë§ˆ</string>
-    <string name="settings_theme_follow_system">ì‹œìŠ¤í…œ ì„¤ì • ë”°ë¥´ê¸°</string>
+    <string name="settings_theme_light">밝게</string>
+    <string name="settings_theme_dark">어둡게</string>
+    <string name="settings_theme_follow_system">시스템</string>
     <string name="settings_smooth_corners_title">ë¶€ë“œëŸ¬ìš´ ëª¨ì„œë¦¬ ì‚¬ìš©</string>
     <string name="settings_smooth_corners_subtitle">ë³µìž¡í•œ ëª¨ì–‘ì˜ ëª¨ì„œë¦¬ë¥¼ ì‚¬ìš©í•˜ì—¬ ë¯¸ì  ê°ê°ì„ íš¨ê³¼ì ìœ¼ë¡œ ê°œì„ í•˜ì§€ë§Œ, ì €ì‚¬ì–‘ ê¸°ê¸°ì—ì„œëŠ” ì„±ëŠ¥ì— ì˜í–¥ì„ ì¤„ ìˆ˜ ìžˆìŠµë‹ˆë‹¤.</string>
     <string name="settings_disable_blur_all_over_title">ë¸”ëŸ¬ íš¨ê³¼ ë¹„í™œì„±í™”</string>

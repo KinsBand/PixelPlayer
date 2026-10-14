@@ -41,6 +41,10 @@ class DownloadQueue @Inject constructor(
 
     private val cancelledIds = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
 
+    /** Quality picked for a queued song (playlist download menu); absent = the default rule. */
+    private data class Request(val quality: DownloadQuality?, val replaceExisting: Boolean)
+    private val requests = java.util.concurrent.ConcurrentHashMap<String, Request>()
+
     /** Label + totals for the single batch notification ("Downloading Liked music · 18/42"). */
     private var batchLabel: String? = null
     private var batchTotal = 0
@@ -63,6 +67,7 @@ class DownloadQueue @Inject constructor(
                         if (workerGeneration != generation) return@launch
                         _queueSize.update { (it - 1).coerceAtLeast(0) }
                         if (cancelledIds.remove(song.id)) {
+                            requests.remove(song.id)
                             _pendingIds.update { it - song.id }
                             onBatchItemFinished()
                             false
@@ -74,7 +79,12 @@ class DownloadQueue @Inject constructor(
                     if (!shouldDownload) continue
                     var failed = false
                     try {
-                        failed = songDownloadManager.downloadSong(song).isFailure
+                        val request = requests.remove(song.id)
+                        failed = songDownloadManager.downloadSong(
+                            song,
+                            quality = request?.quality,
+                            replaceExisting = request?.replaceExisting == true
+                        ).isFailure
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -99,9 +109,18 @@ class DownloadQueue @Inject constructor(
     @Synchronized
     fun enqueue(song: Song): Admission = enqueueAll(listOf(song))
 
-    /** Queues [songs] (skipping ones already queued). [label] names the batch in the notification. */
+    /**
+     * Queues [songs] (skipping ones already queued). [label] names the batch in the notification.
+     * [quality] = download at that quality; [replaceExisting] = also re-download songs already on
+     * the device at a different quality (their old file stays until the new one is saved).
+     */
     @Synchronized
-    fun enqueueAll(songs: List<Song>, label: String? = null): Admission {
+    fun enqueueAll(
+        songs: List<Song>,
+        label: String? = null,
+        quality: DownloadQuality? = null,
+        replaceExisting: Boolean = false,
+    ): Admission {
         val pending = _pendingIds.value.toMutableSet()
         val accepted = ArrayList<Song>(minOf(songs.size, maxPendingDownloads))
         val seen = HashSet<String>()
@@ -122,6 +141,8 @@ class DownloadQueue @Inject constructor(
         batchTotal += accepted.size
         for (song in accepted) {
             cancelledIds.remove(song.id)
+            if (quality != null || replaceExisting) requests[song.id] = Request(quality, replaceExisting)
+            else requests.remove(song.id)
             check(queueChannel.trySend(song).isSuccess)
         }
         updateBatchNotification()
@@ -144,6 +165,7 @@ class DownloadQueue @Inject constructor(
         queueChannel = Channel(1_000)
         isStarted = false
         cancelledIds.clear()
+        requests.clear()
         _queueSize.value = 0
         _activeDownloads.value = 0
         _pendingIds.value = emptySet()

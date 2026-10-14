@@ -1,5 +1,7 @@
 package com.theveloper.pixelplay.presentation.components.player
 
+import com.theveloper.pixelplay.presentation.components.subcomps.rememberShuffleSpin
+import com.theveloper.pixelplay.presentation.components.subcomps.shuffleSpin
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.Configuration
@@ -127,12 +129,24 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import com.theveloper.pixelplay.presentation.components.loadingOutlineTrace
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.coerceAtLeast
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.HeartBroken
+import androidx.compose.material.icons.rounded.AllInclusive
+import androidx.compose.material.icons.rounded.Hearing
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Map
+import androidx.compose.material.icons.rounded.Radio
+import androidx.compose.material.icons.rounded.SkipNext
+import android.os.SystemClock
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import com.theveloper.pixelplay.ui.theme.MotionTokens
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.SmartDisplay
 import androidx.compose.foundation.selection.selectable
@@ -207,6 +221,8 @@ import com.theveloper.pixelplay.data.lyrics.LyricsHighlightMode
 import com.theveloper.pixelplay.data.preferences.dataStore
 import com.theveloper.pixelplay.presentation.components.resolveBrightWarmColor
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.StateFlow
 
 
@@ -348,6 +364,127 @@ fun FullPlayerContent(
     }
     LaunchedEffect(currentSheetState) {
         if (currentSheetState != PlayerSheetState.EXPANDED && playerViewMode == "Video") returnToAudio()
+    }
+
+    // --- Radio ------------------------------------------------------------------------------
+    // A live station gets its own player: Radio instead of Song/Video, no download / lyrics,
+    // Map | Listen | Like under the controls, listening time → ∞ on the timeline and History.
+    val radioContext = LocalContext.current
+    val isRadio = remember(song.id) { com.theveloper.pixelplay.data.radio.RadioPlayback.isRadio(song) }
+    val radioStation = remember(song.id, isRadio) {
+        if (isRadio) com.theveloper.pixelplay.data.radio.RadioPlayback.stationFor(radioContext, song) else null
+    }
+    val radioNowPlaying = remember { com.theveloper.pixelplay.data.radio.RadioNowPlaying.get(radioContext) }
+    val radioStore = remember { com.theveloper.pixelplay.data.radio.RadioStore.get(radioContext) }
+    val radioFavorites by radioStore.favorites.collectAsStateWithLifecycle()
+    val radioListening by radioNowPlaying.listening.collectAsStateWithLifecycle()
+    var showRadioHistory by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(isRadio) {
+        if (isRadio && playerViewMode == "Video") returnToAudio()
+        if (!isRadio) showRadioHistory = false
+    }
+    LaunchedEffect(radioNowPlaying) {
+        radioNowPlaying.results.collect { result ->
+            when (result) {
+                is com.theveloper.pixelplay.data.radio.RadioNowPlaying.ListenResult.Found -> {
+                    val t = result.track
+                    val line = t.title + (t.artist.takeIf { it.isNotBlank() }?.let { " — $it" } ?: "")
+                    playerViewModel.sendToast(if (result.fromStream) "On now: $line" else "Heard: $line")
+                }
+                com.theveloper.pixelplay.data.radio.RadioNowPlaying.ListenResult.NotFound ->
+                    playerViewModel.sendToast("Couldn't catch the song. Try again in a moment.")
+            }
+        }
+    }
+    // Hearting a station saves it to the radio's favourites (not the song library).
+    val effectiveIsFavoriteProvider: () -> Boolean =
+        if (radioStation != null) ({ radioFavorites.any { it.uuid == radioStation.uuid } }) else isFavoriteProvider
+    val effectiveOnFavoriteToggle: () -> Unit =
+        if (radioStation != null) ({ radioStore.toggleFavorite(radioStation) }) else onFavoriteToggle
+    val onOpenRadioMap: () -> Unit = {
+        radioStation?.let { playerViewModel.openRadioMapForStation(it) }
+    }
+    // Radio lyrics: the song the station names (or Listen found), synced to the radio.
+    val radioLyrics = remember { com.theveloper.pixelplay.presentation.viewmodel.RadioLyricsStateHolder.get(radioContext) }
+    val radioLyricsState by radioLyrics.state.collectAsStateWithLifecycle()
+    val radioLyricsSearchState by radioLyrics.searchState.collectAsStateWithLifecycle()
+    val radioCurrent by radioNowPlaying.current.collectAsStateWithLifecycle()
+    // Lyrics button: a loading trace while lyrics are fetched. On radio it needs a song.
+    val songLyricsLoading by remember(playerViewModel) {
+        playerViewModel.stablePlayerState.map { it.isLoadingLyrics }.distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = false)
+    val lyricsButtonLoading = if (isRadio) radioLyricsState.isLoading else songLyricsLoading
+    val lyricsButtonEnabled = !isRadio || radioCurrent != null
+    // Radio Like: with a song recognised, Like offers "Like station" or "Like <song>".
+    var showRadioLikeMenu by remember { mutableStateOf(false) }
+    val likedSongIds by playerViewModel.favoriteSongIds.collectAsStateWithLifecycle()
+    val radioSongLiked = radioCurrent?.songId?.let { it in likedSongIds } == true
+    val radioStationLiked = radioStation != null && radioFavorites.any { it.uuid == radioStation.uuid }
+    val radioLikeScope = rememberCoroutineScope()
+    val toggleRadioSongLike: (com.theveloper.pixelplay.data.radio.RadioHeardTrack) -> Unit = { track ->
+        radioLikeScope.launch {
+            val found = radioNowPlaying.findSong(track)
+            if (found != null) playerViewModel.toggleFavoriteSpecificSong(found)
+            else playerViewModel.sendToast(radioContext.getString(R.string.radio_song_not_found, track.title))
+        }
+    }
+    val radioAwareIsFavorite: () -> Boolean =
+        if (isRadio) ({ radioStationLiked || radioSongLiked }) else effectiveIsFavoriteProvider
+    val radioAwareFavoriteToggle: () -> Unit =
+        if (isRadio) ({ if (radioCurrent != null) showRadioLikeMenu = true else effectiveOnFavoriteToggle() })
+        else effectiveOnFavoriteToggle
+    val radioLikeMenu: (@Composable () -> Unit)? = if (!isRadio) null else ({
+        DropdownMenu(expanded = showRadioLikeMenu, onDismissRequest = { showRadioLikeMenu = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(if (radioStationLiked) R.string.radio_unlike_station else R.string.radio_like_station)) },
+                leadingIcon = {
+                    Icon(
+                        painter = painterResource(if (radioStationLiked) R.drawable.round_favorite_24 else R.drawable.rounded_favorite_24),
+                        contentDescription = null
+                    )
+                },
+                onClick = {
+                    showRadioLikeMenu = false
+                    effectiveOnFavoriteToggle()
+                }
+            )
+            radioCurrent?.let { track ->
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(stringResource(if (radioSongLiked) R.string.radio_unlike_song else R.string.radio_like_song))
+                            Text(
+                                listOf(track.title, track.artist).filter { it.isNotBlank() }.joinToString(" · "),
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    },
+                    leadingIcon = {
+                        Icon(
+                            painter = painterResource(if (radioSongLiked) R.drawable.round_favorite_24 else R.drawable.rounded_favorite_24),
+                            contentDescription = null
+                        )
+                    },
+                    onClick = {
+                        showRadioLikeMenu = false
+                        toggleRadioSongLike(track)
+                    }
+                )
+            }
+        }
+    })
+    // The lyrics sheet on radio reads the radio song and its lyrics instead of the station.
+    val radioLyricsScope = rememberCoroutineScope()
+    val radioLyricsPlayerState = remember(radioLyrics, playerViewModel) {
+        kotlinx.coroutines.flow.combine(playerViewModel.stablePlayerState, radioLyrics.state) { stable, radio ->
+            stable.copy(
+                currentSong = radio.song ?: stable.currentSong,
+                lyrics = radio.lyrics,
+                isLoadingLyrics = radio.isLoading
+            )
+        }.stateIn(radioLyricsScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(1_000), playerViewModel.stablePlayerState.value)
     }
 
     // --- Video full screen ---------------------------------------------------------------------
@@ -571,7 +708,14 @@ fun FullPlayerContent(
     // Lógica para el botón de Lyrics en el reproductor expandido
     val onLyricsClick = {
         val lyrics = lyricsProvider()
-        if (lyrics?.synced.isNullOrEmpty() && lyrics?.plain.isNullOrEmpty()) {
+        if (isRadio) {
+            // Radio: the lyrics view for the song on now (it finds them, or offers a search).
+            if (radioCurrent != null) showLyricsSheet = true
+        } else if (playerViewModel.stablePlayerState.value.isLoadingLyrics) {
+            // Still fetching (e.g. right after start-up): open the lyrics view, which shows the
+            // "finding lyrics" animation and moves into the lyrics when they arrive.
+            showLyricsSheet = true
+        } else if (lyrics?.synced.isNullOrEmpty() && lyrics?.plain.isNullOrEmpty()) {
             // Si no hay letra, mostramos el diálogo para buscar
             showFetchLyricsDialog = true
         } else {
@@ -606,7 +750,9 @@ fun FullPlayerContent(
                 },
                 onImport = {
                     filePickerLauncher.launch(com.theveloper.pixelplay.utils.LyricsImportSecurity.pickerMimeTypes())
-                }
+                },
+                // No lyrics: go straight to searching and show the matches to pick from.
+                autoStart = true
             )
         }
     }
@@ -641,7 +787,9 @@ fun FullPlayerContent(
         onShowQueueClicked()
     }
 
-    val onSongMetadataArtistClick = {
+    val onSongMetadataArtistClick = onArtistTap@{
+        // Radio has no artist page.
+        if (isRadio) return@onArtistTap
         val resolvedArtistId = currentSongArtists.firstOrNull { it.id != 0L && it.id != -1L }?.id ?: song.artistId
         if (currentSongArtists.size > 1) {
             showArtistPicker = true
@@ -769,7 +917,7 @@ fun FullPlayerContent(
         )
         if (playerViewMode == "Video") {
             videoSection(modifier, false)
-        } else {
+        } else Box(modifier, propagateMinConstraints = true) {
             FullPlayerAlbumCoverSection(
                 song = song,
                 currentPlaybackQueue = currentPlaybackQueue,
@@ -789,20 +937,61 @@ fun FullPlayerContent(
                 onAlbumClick = { albumSong ->
                     playerViewModel.triggerAlbumNavigationFromPlayer(albumSong)
                 },
-                isCoverLyricsEnabled = isCoverLyricsEnabled,
-                lyrics = lyricsProvider(),
-                isLoadingLyrics = playerViewModel.stablePlayerState.value.isLoadingLyrics,
+                // Radio: the lyrics of the song on now, following the radio's progress.
+                isCoverLyricsEnabled = isCoverLyricsEnabled && (!isRadio || radioCurrent != null),
+                lyrics = if (isRadio) radioLyricsState.lyrics else lyricsProvider(),
+                isLoadingLyrics = if (isRadio) radioLyricsState.isLoading else playerViewModel.stablePlayerState.value.isLoadingLyrics,
                 // Follows the timeline while it's being scrubbed, so the cover lyrics cycle
                 // through the lines like the lyrics sheet does.
-                playbackPositionFlow = coverLyricsPositionFlow,
-                lyricsSyncOffset = lyricsSyncOffset,
+                playbackPositionFlow = if (isRadio) radioLyrics.position else coverLyricsPositionFlow,
+                lyricsSyncOffset = if (isRadio) 0 else lyricsSyncOffset,
                 onOpenLyricsSheet = { showLyricsSheet = true },
                 disableBlurAllOver = disableBlurAllOver,
                 coverLyricsAccentColor = coverLyricsAccentColor,
                 coverLyricsContentColor = playerOnBaseColor,
                 isImmersiveTemporarilyDisabled = isImmersiveTemporarilyDisabled,
-                modifier = modifier
+                modifier = Modifier
             )
+            // Radio: the song on now, minimised at the top centre of the cover (as in lyrics),
+            // full width with title and artist; it stays while cover lyrics are on.
+            if (isRadio) {
+                val nowSong = remember(radioCurrent) { radioCurrent?.toSong() }
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = nowSong != null,
+                    enter = fadeIn(tween(MotionTokens.DurationMedium2, easing = MotionTokens.EmphasizedDecelerate)) +
+                        slideInVertically(tween(MotionTokens.DurationMedium2, easing = MotionTokens.EmphasizedDecelerate)) { -it / 3 },
+                    exit = fadeOut(tween(MotionTokens.DurationShort4, easing = MotionTokens.EmphasizedAccelerate)) +
+                        slideOutVertically(tween(MotionTokens.DurationShort4, easing = MotionTokens.EmphasizedAccelerate)) { -it / 3 },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 12.dp, start = 16.dp, end = 16.dp)
+                        .fillMaxWidth()
+                ) {
+                    val nowLabel = stringResource(
+                        R.string.radio_now_bar_cd,
+                        nowSong?.title.orEmpty(),
+                        nowSong?.artist.orEmpty()
+                    )
+                    com.theveloper.pixelplay.presentation.components.lyrics.CollapsedNowNextBar(
+                        currentSong = nowSong,
+                        nextSong = null,
+                        isPlaying = isPlayingProvider(),
+                        backgroundColor = LocalMaterialTheme.current.surfaceContainerHigh.copy(alpha = 0.92f),
+                        contentColor = LocalMaterialTheme.current.onSurface,
+                        nextContainerColor = Color.Transparent,
+                        nextContentColor = Color.Transparent,
+                        accentColor = playerAccentColor,
+                        onExpand = {},
+                        onNextClick = {},
+                        onNowClick = { showRadioHistory = true },
+                        nowClickLabel = nowLabel,
+                        showExpand = false,
+                        nowOnly = true,
+                        showArtist = true,
+                        modifier = Modifier.semantics { contentDescription = nowLabel }
+                    )
+                }
+            }
         }
     }
 
@@ -814,7 +1003,21 @@ fun FullPlayerContent(
             if (isVideoMode) ({ videoPlayback.currentPositionMs() }) else currentPositionProvider
         val seek: (Long) -> Unit = if (isVideoMode) ({ videoPlayback.seekTo(it) }) else onSeek
         // key(): the slider keeps smoothing/held-seek state; don't let audio state bleed into video.
-        key(isVideoMode) {
+        if (isRadio) {
+            RadioLiveProgressSection(
+                radioNowPlaying = radioNowPlaying,
+                streamUrl = song.contentUriString.ifBlank { song.path },
+                themeStateHolder = playerViewModel.themeStateHolder,
+                onSeekRadio = { playerViewModel.seekRadio(it) },
+                isPlayingProvider = isPlayingProvider,
+                expansionFractionProvider = expansionFractionProvider,
+                activeTrackColor = progressActiveColor,
+                inactiveTrackColor = playerOnBaseColor.copy(alpha = 0.2f),
+                thumbColor = progressActiveColor,
+                timeTextColor = playerOnBaseColor,
+                onShowHistory = { showRadioHistory = true },
+            )
+        } else key(isVideoMode) {
             FullPlayerProgressSection(
                 song = song,
                 playbackMetadataMediaId = playbackAudioMetadata.mediaId,
@@ -850,6 +1053,23 @@ fun FullPlayerContent(
         else -> painterResource(R.drawable.rounded_mobile_speaker_24)
     }
 
+    // Audio loading/buffering shows on the big play/pause button (no separate chip). Only after
+    // 250 ms of continuous buffering, so a quick seek doesn't flicker the button.
+    val audioBufferingState = remember { mutableStateOf(false) }
+    LaunchedEffect(playerViewModel) {
+        playerViewModel.stablePlayerState
+            .map { it.isBuffering }
+            .distinctUntilChanged()
+            .collectLatest { buffering ->
+                if (buffering) {
+                    kotlinx.coroutines.delay(250)
+                    audioBufferingState.value = true
+                } else {
+                    audioBufferingState.value = false
+                }
+            }
+    }
+
     val controlsSection: @Composable () -> Unit = {
         // The transport row is identical in both modes; in Video it simply drives the embedded
         // player instead of the (suspended) audio pipeline.
@@ -863,6 +1083,8 @@ fun FullPlayerContent(
             placeholderOnColor = placeholderOnColor,
             isPlayingProvider = if (isVideoMode) ({ videoPlayback.isPlaying }) else isPlayingProvider,
             isQueueEndedProvider = if (isVideoMode) ({ false }) else isQueueEndedProvider,
+            // Loading/buffering (video or audio): the big play button becomes the spinner.
+            isLoadingProvider = if (isVideoMode) ({ videoPlayback.isLoading }) else ({ audioBufferingState.value }),
             onPrevious = onPreviousWithOptimisticCarousel,
             onPlayPause = if (isVideoMode) ({ videoPlayback.togglePlayPause() }) else onPlayPause,
             onNext = onNextWithOptimisticCarousel,
@@ -871,11 +1093,16 @@ fun FullPlayerContent(
             isShuffleEnabledProvider = isShuffleEnabledProvider,
             shuffleTransitionInProgress = shuffleTransitionInProgress,
             repeatModeProvider = repeatModeProvider,
-            isFavoriteProvider = isFavoriteProvider,
+            isFavoriteProvider = radioAwareIsFavorite,
             onShuffleToggle = onShuffleToggle,
             onRepeatToggle = onRepeatToggle,
-            onFavoriteToggle = onFavoriteToggle,
+            onFavoriteToggle = radioAwareFavoriteToggle,
+            favoriteOverlay = radioLikeMenu,
             onDislike = { showMixFeedbackSheet = true },
+            radioMode = isRadio,
+            onOpenRadioMap = onOpenRadioMap,
+            onRadioListen = { radioNowPlaying.listen() },
+            isRadioListening = radioListening,
             activeMixFlavor = activeMixFlavor,
             onMixCycle = { playerViewModel.cycleMixMode() },
             onSmartMixActivate = { playerViewModel.activateSmartMix() },
@@ -899,6 +1126,9 @@ fun FullPlayerContent(
             placeholderColor = placeholderColor,
             placeholderOnColor = placeholderOnColor,
             isLandscape = false,
+            showLyricsButton = true,
+            lyricsEnabled = lyricsButtonEnabled,
+            isLoadingLyrics = lyricsButtonLoading,
             onLyricsClick = onLyricsClick,
             isCoverLyricsEnabled = isCoverLyricsEnabled,
             onToggleCoverLyrics = onToggleCoverLyrics,
@@ -925,6 +1155,9 @@ fun FullPlayerContent(
             placeholderColor = placeholderColor,
             placeholderOnColor = placeholderOnColor,
             isLandscape = true,
+            showLyricsButton = true,
+            lyricsEnabled = lyricsButtonEnabled,
+            isLoadingLyrics = lyricsButtonLoading,
             onLyricsClick = onLyricsClick,
             isCoverLyricsEnabled = isCoverLyricsEnabled,
             onToggleCoverLyrics = onToggleCoverLyrics,
@@ -943,7 +1176,7 @@ fun FullPlayerContent(
 
     // Song / Video selector: centred in the portrait top bar; in landscape (no top bar) it sits,
     // a little smaller, above the album cover.
-    val songVideoSelector: @Composable (Modifier, Boolean) -> Unit = { selectorModifier, compact ->
+    val songOrVideoSelector: @Composable (Modifier, Boolean) -> Unit = { selectorModifier, compact ->
         Row(
             modifier = selectorModifier
                 .clip(RoundedCornerShape(24.dp))
@@ -1015,6 +1248,50 @@ fun FullPlayerContent(
         }
     }
 
+    // Radio: one "Radio" button instead of Song / Video (a live stream has no video). It opens
+    // the Radio tab with the filters this station was found with.
+    val songVideoSelector: @Composable (Modifier, Boolean) -> Unit = { selectorModifier, compact ->
+        if (isRadio) {
+            val openRadioLabel = stringResource(R.string.radio_open_with_filters_cd)
+            Row(
+                modifier = selectorModifier
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(playerOnAccentColor.copy(alpha = 0.3f))
+                    .padding(4.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(playerAccentColor)
+                        .clickable(
+                            role = Role.Button,
+                            onClickLabel = openRadioLabel,
+                            onClick = { radioStation?.let { playerViewModel.openRadioForStation(it) } }
+                        )
+                        .heightIn(min = if (compact) 32.dp else 40.dp)
+                        .padding(horizontal = if (compact) 10.dp else 14.dp, vertical = if (compact) 4.dp else 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = androidx.compose.material.icons.Icons.Rounded.Radio,
+                        contentDescription = null,
+                        tint = playerOnAccentColor,
+                        modifier = Modifier.size(if (compact) 18.dp else 20.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = stringResource(R.string.radio_player_header),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = playerOnAccentColor,
+                        maxLines = 1
+                    )
+                }
+            }
+        } else {
+            songOrVideoSelector(selectorModifier, compact)
+        }
+    }
+
     Scaffold(
         containerColor = Color.Transparent,
         topBar = {
@@ -1081,7 +1358,8 @@ fun FullPlayerContent(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                     // Tick = saved on this device; download icon = tap to download; ring = downloading.
-                    if (song != null) {
+                    // Radio: nothing to download.
+                    if (song != null && !isRadio) {
                         SongDownloadBadge(
                             song = song,
                             tint = playerAccentColor,
@@ -1224,21 +1502,32 @@ fun FullPlayerContent(
             animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)
         ) + fadeOut(animationSpec = tween(durationMillis = 120))
     ) {
+        val lyricsColorSchemePair by playerViewModel.activePlayerColorSchemePair.collectAsStateWithLifecycle()
+        // On radio the sheet shows the song on now (not the station), synced to the radio, and
+        // its lyrics search looks up that song.
         LyricsSheet(
-            stablePlayerStateFlow = playerViewModel.stablePlayerState,
-            playbackPositionFlow = playerViewModel.currentPlaybackPosition,
-            lyricsSearchUiState = lyricsSearchUiState,
+            stablePlayerStateFlow = if (isRadio) radioLyricsPlayerState else playerViewModel.stablePlayerState,
+            playbackPositionFlow = if (isRadio) radioLyrics.position else playerViewModel.currentPlaybackPosition,
+            lyricsSearchUiState = if (isRadio) radioLyricsSearchState else lyricsSearchUiState,
             onResetAllLyrics = playerViewModel::resetAllLyrics,
             resetLyricsForCurrentSong = {
                 showLyricsSheet = false
-                playerViewModel.resetLyricsForCurrentSong()
+                if (!isRadio) playerViewModel.resetLyricsForCurrentSong()
             },
-            onSearchLyrics = { forcePick -> playerViewModel.fetchLyricsForCurrentSong(forcePick) },
-            onPickResult = { playerViewModel.acceptLyricsSearchResultForCurrentSong(it) },
-            onManualSearch = { title, artist -> playerViewModel.searchLyricsManually(title, artist) },
+            onSearchLyrics = { forcePick ->
+                if (isRadio) radioLyrics.search() else playerViewModel.fetchLyricsForCurrentSong(forcePick)
+            },
+            onPickResult = {
+                if (isRadio) radioLyrics.pick(it) else playerViewModel.acceptLyricsSearchResultForCurrentSong(it)
+            },
+            onManualSearch = { title, artist ->
+                if (isRadio) radioLyrics.searchManually(title, artist) else playerViewModel.searchLyricsManually(title, artist)
+            },
             onImportLyrics = { filePickerLauncher.launch(com.theveloper.pixelplay.utils.LyricsImportSecurity.pickerMimeTypes()) },
-            onDismissLyricsSearch = { playerViewModel.resetLyricsSearchState() },
-            lyricsSyncOffset = lyricsSyncOffset,
+            onDismissLyricsSearch = {
+                if (isRadio) radioLyrics.dismissSearch() else playerViewModel.resetLyricsSearchState()
+            },
+            lyricsSyncOffset = if (isRadio) 0 else lyricsSyncOffset,
             onLyricsSyncOffsetChange = { currentSong?.id?.let { songId -> playerViewModel.setLyricsSyncOffset(songId, it) } },
             lyricsSyncOffsetIsAutomatic = lyricsSyncOffsetState.isAutomatic,
             lyricsSyncOffsetIsManual = lyricsSyncOffsetState.manualMs != null,
@@ -1259,7 +1548,9 @@ fun FullPlayerContent(
                 )
             },
             colorScheme = LocalMaterialTheme.current,
+            colorSchemePair = lyricsColorSchemePair,
             onBackClick = { showLyricsSheet = false },
+            isShown = transition.targetState == androidx.compose.animation.EnterExitState.Visible,
             onSaveLyricsToFile = playerViewModel::saveLyricsToFile,
             onTranslateViaAi = { playerViewModel.translateLyricsViaAi() },
             // Lyrics written / timed by hand go through the same checks and storage as an
@@ -1300,6 +1591,45 @@ fun FullPlayerContent(
             confirmations = playerViewModel.lyricsConfirmations,
             onConfirmationShown = { playerViewModel.consumeLyricsConfirmation() },
             onReaction = { playerViewModel.reactToCurrentSong(it) }
+        )
+    }
+
+    if (showRadioHistory && isRadio) {
+        val radioSession by radioNowPlaying.session.collectAsStateWithLifecycle()
+        val radioCurrent by radioNowPlaying.current.collectAsStateWithLifecycle()
+        val historyScope = rememberCoroutineScope()
+
+        RadioHistorySheet(
+            station = radioStation,
+            tracks = radioSession,
+            current = radioCurrent,
+            isListening = radioListening,
+            isPlaying = isPlayingProvider(),
+            listenedMs = radioNowPlaying.listenedMs(),
+            onListen = { radioNowPlaying.listen() },
+            onPlay = { track ->
+                historyScope.launch {
+                    val found = radioNowPlaying.findSong(track)
+                    if (found != null) {
+                        showRadioHistory = false
+                        playerViewModel.showAndPlaySong(found)
+                    } else {
+                        playerViewModel.sendToast("Couldn't find “${track.title}” to play")
+                    }
+                }
+            },
+            // Hold: the song's normal options sheet, for the song found online / in the library.
+            onOptions = { track ->
+                historyScope.launch {
+                    val found = radioNowPlaying.findSong(track) ?: track.toSong()
+                    showRadioHistory = false
+                    onShowOptionsClick(found)
+                }
+            },
+            isLiked = { track -> track.songId?.let { it in likedSongIds } == true },
+            onToggleLike = toggleRadioSongLike,
+            onClear = { radioNowPlaying.clearSession() },
+            onDismiss = { showRadioHistory = false },
         )
     }
 
@@ -1464,6 +1794,7 @@ private fun FullPlayerControlsSection(
     placeholderOnColor: Color,
     isPlayingProvider: () -> Boolean,
     isQueueEndedProvider: () -> Boolean = { false },
+    isLoadingProvider: () -> Boolean = { false },
     onPrevious: () -> Unit,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
@@ -1477,9 +1808,15 @@ private fun FullPlayerControlsSection(
     onRepeatToggle: () -> Unit,
     onFavoriteToggle: () -> Unit,
     onDislike: () -> Unit,
+    radioMode: Boolean = false,
+    onOpenRadioMap: () -> Unit = {},
+    onRadioListen: () -> Unit = {},
+    isRadioListening: Boolean = false,
     activeMixFlavor: com.theveloper.pixelplay.data.MixFlavor? = null,
     onMixCycle: () -> Unit = onShuffleToggle,
     onSmartMixActivate: (() -> Unit)? = null,
+    /** Drawn over the Like button (radio: the "Like station / Like song" menu, anchored there). */
+    favoriteOverlay: (@Composable () -> Unit)? = null,
     castButton: @Composable () -> Unit,
     queueButton: @Composable () -> Unit
 ) {
@@ -1515,6 +1852,7 @@ private fun FullPlayerControlsSection(
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 isPlayingProvider = isPlayingProvider,
                 isQueueEndedProvider = isQueueEndedProvider,
+                isLoadingProvider = isLoadingProvider,
                 onPrevious = onPrevious,
                 onPlayPause = onPlayPause,
                 onNext = onNext,
@@ -1554,9 +1892,14 @@ private fun FullPlayerControlsSection(
                     onRepeatToggle = onRepeatToggle,
                     onFavoriteToggle = onFavoriteToggle,
                     onDislike = onDislike,
+                    radioMode = radioMode,
+                    onOpenRadioMap = onOpenRadioMap,
+                    onRadioListen = onRadioListen,
+                    isRadioListening = isRadioListening,
                     activeMixFlavor = activeMixFlavor,
                     onMixCycle = onMixCycle,
-                    onSmartMixActivate = onSmartMixActivate
+                    onSmartMixActivate = onSmartMixActivate,
+                    favoriteOverlay = favoriteOverlay
                 )
                 queueButton()
             }
@@ -1645,6 +1988,287 @@ private fun FullPlayerProgressSection(
     }
 }
 
+/**
+ * The radio's timeline: a wavy bar, the listening point on the left, ∞ (or Live) on the right,
+ * and in the middle — where a song shows its audio format — a History pill.
+ *
+ * - **Recorded stations** (Icecast/Shoutcast, see RadioTimeShift) can be rewound: the bar spans
+ *   the recording (up to 60 minutes) and dragging plays from that point. Behind live, ∞ turns
+ *   into a Live button that jumps back to live. You can't go past live.
+ * - **Other stations** (HLS) stay live: the bar is full and drags are ignored, as before.
+ * - **Songs** the station names (or Listen finds) colour their stretch of the wave with their
+ *   cover's colour; talk and idents between them keep the normal colour.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RadioLiveProgressSection(
+    radioNowPlaying: com.theveloper.pixelplay.data.radio.RadioNowPlaying,
+    streamUrl: String?,
+    isPlayingProvider: () -> Boolean,
+    expansionFractionProvider: () -> Float,
+    activeTrackColor: Color,
+    inactiveTrackColor: Color,
+    thumbColor: Color,
+    timeTextColor: Color,
+    themeStateHolder: com.theveloper.pixelplay.presentation.viewmodel.ThemeStateHolder,
+    onSeekRadio: (Long?) -> Unit,
+    onShowHistory: () -> Unit,
+) {
+    val context = LocalContext.current
+    val isVisible by remember(expansionFractionProvider) {
+        derivedStateOf { expansionFractionProvider() > 0.01f }
+    }
+    val recorder = remember { com.theveloper.pixelplay.data.radio.timeshift.RadioTimeShiftRecorder.get(context) }
+    val recState by recorder.state.collectAsStateWithLifecycle()
+    val baseUrl = remember(streamUrl) {
+        streamUrl?.let { com.theveloper.pixelplay.data.radio.timeshift.RadioTimeShift.baseUrl(android.net.Uri.parse(it)) }
+    }
+    // This station's recording, when it can be rewound.
+    val rec = recState?.takeIf { it.streamUrl == baseUrl && !it.failed && it.seekable }
+    val canRewind = rec != null
+
+    // Starts at the end: the radio opens live.
+    val sliderValue = remember { mutableFloatStateOf(1f) }
+    var dragging by remember { mutableStateOf(false) }
+    var seekTargetMs by remember { mutableLongStateOf(0L) }
+    var seekSettleUntil by remember { mutableLongStateOf(0L) }
+    var listenedMs by remember { mutableLongStateOf(radioNowPlaying.listenedMs()) }
+    var playheadMs by remember { mutableLongStateOf(0L) }
+    val segments = remember { mutableStateOf<List<com.theveloper.pixelplay.presentation.components.TimelineSegment>>(emptyList()) }
+
+    // Cover colours for the songs heard this session (cached per cover by the theme holder).
+    val session by radioNowPlaying.session.collectAsStateWithLifecycle()
+    val darkTheme = com.theveloper.pixelplay.ui.theme.LocalPixelPlayDarkTheme.current
+    val songColors = remember { androidx.compose.runtime.mutableStateMapOf<String, Color>() }
+    LaunchedEffect(session, darkTheme) {
+        session.mapNotNull { it.coverUrl }.distinct().filter { it !in songColors }.forEach { url ->
+            val pair = themeStateHolder.getOrGenerateColorScheme(url) ?: return@forEach
+            songColors[url] = if (darkTheme) pair.dark.primary else pair.light.primary
+        }
+    }
+    val latestSession by rememberUpdatedState(session)
+    val latestRec by rememberUpdatedState(rec)
+    val fallbackSegmentColor by rememberUpdatedState(activeTrackColor)
+
+    LaunchedEffect(isVisible) {
+        while (isVisible) {
+            listenedMs = radioNowPlaying.listenedMs()
+            val r = latestRec
+            val axisStart: Long
+            val axisEnd: Long
+            val now: Long
+            if (r != null) {
+                val rawPlayhead = radioNowPlaying.playheadMs() ?: r.liveEdgeMs
+                // Right after a rewind / Live the player re-prepares and its position restarts
+                // at 0 for a moment: keep showing where it was sent instead of jumping back.
+                playheadMs = if (SystemClock.elapsedRealtime() < seekSettleUntil) seekTargetMs else rawPlayhead
+                axisStart = r.firstAvailableMs
+                axisEnd = r.liveEdgeMs.coerceAtLeast(axisStart + 1)
+                now = playheadMs
+                // Live (normal playback, and on entering the player): the thumb is pinned to the
+                // end, next to ∞, and never creeps back as the recording grows. Only a real
+                // rewind (behind live by more than the threshold) moves it off the end.
+                val live = r.liveEdgeMs - playheadMs <= com.theveloper.pixelplay.data.radio.timeshift.RadioTimeShift.BEHIND_LIVE_THRESHOLD_MS
+                if (!dragging) {
+                    sliderValue.floatValue = if (live) 1f
+                    else ((playheadMs - axisStart).toFloat() / (axisEnd - axisStart)).coerceIn(0f, 1f)
+                }
+            } else {
+                axisStart = 0L
+                axisEnd = listenedMs.coerceAtLeast(1L)
+                now = listenedMs
+                sliderValue.floatValue = 1f
+            }
+            segments.value = radioTimelineSegments(
+                tracks = latestSession,
+                axisStart = axisStart,
+                axisEnd = axisEnd,
+                nowMs = if (r != null) r.liveEdgeMs else now,
+                colorFor = { url -> url?.let { songColors[it] } ?: fallbackSegmentColor },
+            )
+            kotlinx.coroutines.delay(250)
+        }
+    }
+
+    val behindLiveMs = rec?.let { (it.liveEdgeMs - playheadMs).coerceAtLeast(0L) } ?: 0L
+    val isBehindLive = canRewind && behindLiveMs > com.theveloper.pixelplay.data.radio.timeshift.RadioTimeShift.BEHIND_LIVE_THRESHOLD_MS
+    val interactionSource = remember { MutableInteractionSource() }
+    val liveLabel = stringResource(R.string.radio_live)
+    val behindLabel = stringResource(R.string.radio_behind_live, formatDuration(behindLiveMs))
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 70.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (canRewind) Modifier
+                    else Modifier.pointerInput(Unit) { detectVerticalDragGestures(onVerticalDrag = { _, _ -> }) }
+                )
+                .semantics { contentDescription = if (isBehindLive) behindLabel else liveLabel }
+        ) {
+            EfficientSlider(
+                valueState = sliderValue,
+                onValueChange = { v ->
+                    if (canRewind) {
+                        dragging = true
+                        sliderValue.floatValue = v
+                    }
+                },
+                onValueCommit = { v ->
+                    val r = latestRec
+                    if (canRewind && r != null) {
+                        val target = r.firstAvailableMs + ((r.liveEdgeMs - r.firstAvailableMs) * v).toLong()
+                        // Dropped at (or right next to) the end = live.
+                        val goLive = r.liveEdgeMs - target < LIVE_SNAP_MS
+                        if (goLive) onSeekRadio(null) else onSeekRadio(target)
+                        seekTargetMs = if (goLive) r.liveEdgeMs else target.coerceAtMost(r.liveEdgeMs)
+                        seekSettleUntil = SystemClock.elapsedRealtime() + SEEK_SETTLE_MS
+                        playheadMs = seekTargetMs
+                        sliderValue.floatValue = if (goLive) 1f else v
+                    }
+                    dragging = false
+                },
+                thumbColor = thumbColor,
+                activeTrackColor = activeTrackColor,
+                inactiveTrackColor = inactiveTrackColor,
+                interactionSource = interactionSource,
+                isPlaying = isVisible && isPlayingProvider(),
+                isVisible = isVisible,
+                trackEdgePadding = 0.dp,
+                segments = { segments.value }
+            )
+        }
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.Center),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val leftMs = when {
+                    !isVisible -> null
+                    canRewind && dragging -> rec?.let { it.firstAvailableMs + ((it.liveEdgeMs - it.firstAvailableMs) * sliderValue.floatValue).toLong() }
+                    canRewind -> playheadMs
+                    else -> listenedMs
+                }
+                Text(
+                    leftMs?.let { formatDuration(it) } ?: "--:--",
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    fontWeight = FontWeight.SemiBold,
+                    color = timeTextColor
+                )
+                // ∞ while live; behind live it becomes a button back to live.
+                AnimatedContent(
+                    targetState = isBehindLive,
+                    transitionSpec = {
+                        (fadeIn(tween(MotionTokens.DurationMedium1, easing = MotionTokens.EmphasizedDecelerate)) +
+                            scaleIn(tween(MotionTokens.DurationMedium1, easing = MotionTokens.EmphasizedDecelerate), initialScale = 0.9f))
+                            .togetherWith(fadeOut(tween(MotionTokens.DurationShort3, easing = MotionTokens.EmphasizedAccelerate)))
+                    },
+                    label = "radioLive"
+                ) { behind ->
+                    if (behind) {
+                        Surface(
+                            onClick = {
+                                onSeekRadio(null)
+                                latestRec?.let { r ->
+                                    seekTargetMs = r.liveEdgeMs
+                                    seekSettleUntil = SystemClock.elapsedRealtime() + SEEK_SETTLE_MS
+                                    playheadMs = r.liveEdgeMs
+                                }
+                                sliderValue.floatValue = 1f
+                            },
+                            shape = CircleShape,
+                            color = timeTextColor.copy(alpha = 0.16f),
+                            contentColor = timeTextColor,
+                            modifier = Modifier
+                                .heightIn(min = 32.dp)
+                                .semantics { contentDescription = context.getString(R.string.radio_go_live_cd) }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.SkipNext,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text(liveLabel, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.AllInclusive,
+                            contentDescription = "Live, no end",
+                            tint = timeTextColor,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+            // Same pill as the audio-format chip on songs, saying History.
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(horizontal = 44.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .clickable(
+                        onClickLabel = "Show what played this session",
+                        role = Role.Button,
+                        onClick = onShowHistory
+                    ),
+                shape = RoundedCornerShape(999.dp),
+                color = timeTextColor.copy(alpha = 0.12f),
+                contentColor = timeTextColor.copy(alpha = 0.96f)
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)
+                            .widthIn(min = 16.dp)
+                            .heightIn(min = 16.dp)
+                            .background(timeTextColor.copy(alpha = 0.25f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 2.dp, vertical = 1.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.History,
+                            contentDescription = null,
+                            tint = timeTextColor,
+                            modifier = Modifier.size(11.dp)
+                        )
+                    }
+                    Text(
+                        text = "History",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 10.5.sp,
+                            letterSpacing = 0.sp
+                        ),
+                        maxLines = 1,
+                        modifier = Modifier.padding(end = 10.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Dropping the timeline thumb this close to the end goes live. */
+private const val LIVE_SNAP_MS = 4_000L
+
+/** After a rewind / Live, how long the timeline holds the target while the player re-prepares. */
+private const val SEEK_SETTLE_MS = 2_500L
+
 private fun resolveQueueIndex(
     queue: ImmutableList<Song>,
     songId: String,
@@ -1702,6 +2326,11 @@ private fun FullPlayerSongMetadataSection(
     placeholderColor: Color,
     placeholderOnColor: Color,
     isLandscape: Boolean,
+    showLyricsButton: Boolean = true,
+    /** False: shown dimmed and not clickable (radio before a song is recognised). */
+    lyricsEnabled: Boolean = true,
+    /** Lyrics are being fetched: a thin trace runs round the button. */
+    isLoadingLyrics: Boolean = false,
     onLyricsClick: () -> Unit,
     isCoverLyricsEnabled: Boolean = false,
     onToggleCoverLyrics: () -> Unit = {},
@@ -1748,6 +2377,9 @@ private fun FullPlayerSongMetadataSection(
             modifier = Modifier
                 .padding(start = 0.dp),
             onClickLyrics = onLyricsClick,
+            showLyricsButton = showLyricsButton,
+            lyricsEnabled = lyricsEnabled,
+            isLoadingLyrics = isLoadingLyrics,
             isCoverLyricsEnabled = isCoverLyricsEnabled,
             onToggleCoverLyrics = onToggleCoverLyrics,
             playerAccentColor = playerAccentColor,
@@ -1874,6 +2506,9 @@ private fun SongMetadataDisplaySection(
     chipColor: Color,
     chipContentColor: Color,
     onClickLyrics: () -> Unit,
+    showLyricsButton: Boolean = true,
+    lyricsEnabled: Boolean = true,
+    isLoadingLyrics: Boolean = false,
     isCoverLyricsEnabled: Boolean = false,
     onToggleCoverLyrics: () -> Unit = {},
     playerAccentColor: Color = chipContentColor,
@@ -1911,53 +2546,7 @@ private fun SongMetadataDisplaySection(
             )
         }
         
-        val stablePlayerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
-        val isBuffering = stablePlayerState.isBuffering
-
-
-        AnimatedVisibility(
-            visible = isBuffering,
-            enter = scaleIn(
-                initialScale = 0.85f,
-                animationSpec = tween(
-                    durationMillis = 400,
-                    delayMillis = 80,
-                    easing = FastOutSlowInEasing
-                )
-            ) + fadeIn(
-                animationSpec = tween(
-                    durationMillis = 300,
-                    delayMillis = 80
-                )
-            ),
-            exit = scaleOut(
-                targetScale = 0.85f,
-                animationSpec = tween(
-                    durationMillis = 300,
-                    easing = FastOutSlowInEasing
-                )
-            ) + fadeOut(
-                animationSpec = tween(
-                    durationMillis = 200
-                )
-            )
-        ) {
-            Surface(
-                shape = CircleShape,
-                color = chipColor,
-                modifier = Modifier.padding(end = 8.dp)
-            ) {
-                Box(
-                    modifier = Modifier.padding(10.dp), 
-                    contentAlignment = Alignment.Center
-                ) {
-                    LoadingIndicator(
-                        modifier = Modifier.size(28.dp),
-                        color = chipContentColor
-                    )
-                }
-            }
-        }
+        // Loading/buffering shows on the big play/pause button now (see controlsSection).
 
         if (showQueueButton) {
             val haptic = LocalHapticFeedback.current
@@ -1971,21 +2560,26 @@ private fun SongMetadataDisplaySection(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
+                if (showLyricsButton) Box(
                     modifier = Modifier
                         .size(height = 42.dp, width = 50.dp)
+                        .graphicsLayer { alpha = if (lyricsEnabled) 1f else DISABLED_LYRICS_ALPHA }
                         .clip(landscapeLyricsShape)
+                        .loadingOutlineTrace(isLoadingLyrics, playerAccentColor) { landscapeLyricsShape }
+                        .semantics { if (isLoadingLyrics) stateDescription = "Loading lyrics" }
                         .then(
                             if (isCoverLyricsEnabled) {
                                 Modifier.border(
                                     width = 2.dp,
-                                    color = playerAccentColor,
+                                    // Dimmed while lyrics load, so the accent trace running round it shows.
+                                    color = playerAccentColor.copy(alpha = if (isLoadingLyrics) COVER_LYRICS_BORDER_LOADING_ALPHA else 1f),
                                     shape = landscapeLyricsShape
                                 )
                             } else Modifier
                         )
                         .background(chipColor)
                         .combinedClickable(
+                            enabled = lyricsEnabled,
                             onClick = onClickLyrics,
                             onLongClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -2040,14 +2634,19 @@ private fun SongMetadataDisplaySection(
             val haptic = LocalHapticFeedback.current
             val lyricsButtonShape = CircleShape
             val lyricsButtonBorder = if (isCoverLyricsEnabled) {
-                BorderStroke(2.dp, playerAccentColor)
+                // Dimmed while lyrics load, so the accent trace running round it shows (cover lyrics on).
+                BorderStroke(2.dp, playerAccentColor.copy(alpha = if (isLoadingLyrics) COVER_LYRICS_BORDER_LOADING_ALPHA else 1f))
             } else null
 
-            Surface(
+            if (showLyricsButton) Surface(
                 modifier = Modifier
                     .size(width = 48.dp, height = 48.dp)
+                    .graphicsLayer { alpha = if (lyricsEnabled) 1f else DISABLED_LYRICS_ALPHA }
                     .clip(lyricsButtonShape)
+                    .loadingOutlineTrace(isLoadingLyrics, playerAccentColor) { lyricsButtonShape }
+                    .semantics { if (isLoadingLyrics) stateDescription = "Loading lyrics" }
                     .combinedClickable(
+                        enabled = lyricsEnabled,
                         onClick = onClickLyrics,
                         onLongClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -2331,7 +2930,8 @@ private fun EfficientSlider(
     interactionSource: MutableInteractionSource,
     isPlaying: Boolean,
     isVisible: Boolean,
-    trackEdgePadding: Dp
+    trackEdgePadding: Dp,
+    segments: (() -> List<com.theveloper.pixelplay.presentation.components.TimelineSegment>)? = null
 ) {
     val haptics = LocalHapticFeedback.current
     val currentOnValueChange = rememberUpdatedState(onValueChange)
@@ -2365,7 +2965,8 @@ private fun EfficientSlider(
         // touches that landed a few px off the thin track were eaten by the drag guard and
         // the scrub never started.
         minTouchHeight = 40.dp,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
+        segments = segments
     )
 }
 
@@ -3097,9 +3698,14 @@ private fun BottomToggleRow(
     onRepeatToggle: () -> Unit,
     onFavoriteToggle: () -> Unit,
     onDislike: () -> Unit,
+    radioMode: Boolean = false,
+    onOpenRadioMap: () -> Unit = {},
+    onRadioListen: () -> Unit = {},
+    isRadioListening: Boolean = false,
     activeMixFlavor: com.theveloper.pixelplay.data.MixFlavor? = null,
     onMixCycle: () -> Unit = onShuffleToggle,
-    onSmartMixActivate: (() -> Unit)? = null
+    onSmartMixActivate: (() -> Unit)? = null,
+    favoriteOverlay: (@Composable () -> Unit)? = null
 ) {
     val isFavorite = isFavoriteProvider()
     val rowCorners = 60.dp
@@ -3146,6 +3752,35 @@ private fun BottomToggleRow(
         ) {
             val commonModifier = Modifier.weight(1f)
 
+            // Radio: Map | Listen | Like. Map opens the radio map on this station; Listen finds
+            // out the song that's on (the stream's title, or Now Playing).
+            if (radioMode) {
+                ToggleSegmentButton(
+                    modifier = commonModifier,
+                    active = false,
+                    activeColor = LocalMaterialTheme.current.primaryFixed,
+                    activeCornerRadius = rowCorners,
+                    activeContentColor = LocalMaterialTheme.current.onPrimaryFixed,
+                    inactiveColor = inactiveBg,
+                    inactiveContentColor = inactiveContentColor,
+                    onClick = onOpenRadioMap,
+                    painter = rememberVectorPainter(Icons.Rounded.Map),
+                    contentDesc = "Show station on the map"
+                )
+                ToggleSegmentButton(
+                    modifier = commonModifier,
+                    active = isRadioListening,
+                    activeColor = LocalMaterialTheme.current.secondaryFixed,
+                    activeCornerRadius = rowCorners,
+                    activeContentColor = LocalMaterialTheme.current.onSecondaryFixed,
+                    inactiveColor = inactiveBg,
+                    inactiveContentColor = inactiveContentColor,
+                    onClick = onRadioListen,
+                    painter = rememberVectorPainter(Icons.Rounded.Hearing),
+                    contentDesc = if (isRadioListening) "Listening for the song" else "Listen: what song is this?"
+                )
+            } else {
+            val mixSpin = rememberShuffleSpin()
             ToggleSegmentButton(
                 modifier = commonModifier,
                 active = isMixActive,
@@ -3155,15 +3790,16 @@ private fun BottomToggleRow(
                 activeContentColor = if (isSmart) LocalMaterialTheme.current.onTertiaryFixed else LocalMaterialTheme.current.onPrimaryFixed,
                 inactiveColor = inactiveBg,
                 inactiveContentColor = inactiveContentColor,
-                onClick = onMixCycle,
-                onLongClick = onSmartMixActivate,
+                onClick = { mixSpin.play(); onMixCycle() },
+                onLongClick = onSmartMixActivate?.let { activate -> { mixSpin.play(); activate() } },
                 painter = if (isSmart) rememberVectorPainter(Icons.Rounded.AutoAwesome) else painterResource(R.drawable.rounded_shuffle_24),
                 contentDesc = when {
                     isSmart -> "Smart Mix"
                     activeMixFlavor == com.theveloper.pixelplay.data.MixFlavor.NORMAL -> "Normal Mix"
                     isShuffleEnabled -> "Aleatorio"
                     else -> "No Mix"
-                }
+                },
+                iconModifier = Modifier.shuffleSpin(mixSpin)
             )
             // Order: Mix | Dislike | Like (Like on the right).
             ToggleSegmentButton(
@@ -3179,18 +3815,29 @@ private fun BottomToggleRow(
                 painter = androidx.compose.ui.graphics.vector.rememberVectorPainter(androidx.compose.material.icons.Icons.Rounded.HeartBroken),
                 contentDesc = "Mix feedback"
             )
-            ToggleSegmentButton(
-                modifier = commonModifier,
-                active = isFavorite,
-                activeColor = LocalMaterialTheme.current.tertiaryFixed,
-                activeCornerRadius = rowCorners,
-                activeContentColor = LocalMaterialTheme.current.onTertiaryFixed,
-                inactiveColor = inactiveBg,
-                inactiveContentColor = inactiveContentColor,
-                onClick = onFavoriteToggle,
-                iconId = if (isFavorite) R.drawable.round_favorite_24 else R.drawable.rounded_favorite_24,
-                contentDesc = "Favorite"
-            )
+            }
+            val likeButton: @Composable (Modifier) -> Unit = { likeModifier ->
+                ToggleSegmentButton(
+                    modifier = likeModifier,
+                    active = isFavorite,
+                    activeColor = LocalMaterialTheme.current.tertiaryFixed,
+                    activeCornerRadius = rowCorners,
+                    activeContentColor = LocalMaterialTheme.current.onTertiaryFixed,
+                    inactiveColor = inactiveBg,
+                    inactiveContentColor = inactiveContentColor,
+                    onClick = onFavoriteToggle,
+                    iconId = if (isFavorite) R.drawable.round_favorite_24 else R.drawable.rounded_favorite_24,
+                    contentDesc = "Favorite"
+                )
+            }
+            if (favoriteOverlay != null) {
+                Box(commonModifier) {
+                    likeButton(Modifier.fillMaxWidth())
+                    favoriteOverlay()
+                }
+            } else {
+                likeButton(commonModifier)
+            }
         }
     }
 }
@@ -3557,3 +4204,9 @@ private fun Modifier.onGloballyPositionedCover(top: Boolean = false, onEdge: (Fl
         val bounds = coordinates.boundsInRoot()
         onEdge(if (top) bounds.top else bounds.bottom)
     }
+
+/** Lyrics button alpha while it can't be used (radio before a song is recognised). */
+private const val DISABLED_LYRICS_ALPHA = 0.38f
+
+/** Cover-lyrics border alpha while lyrics load: faint, so the loading trace on top stands out. */
+private const val COVER_LYRICS_BORDER_LOADING_ALPHA = 0.3f

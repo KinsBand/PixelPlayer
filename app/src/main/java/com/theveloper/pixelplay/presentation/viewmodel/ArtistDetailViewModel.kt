@@ -31,6 +31,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import com.theveloper.pixelplay.data.spotify.toSong
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,10 +46,40 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import com.theveloper.pixelplay.data.repository.ArtistProfileSection
+import com.theveloper.pixelplay.data.repository.CrossPlatformArtistMetrics
+import com.theveloper.pixelplay.data.tour.ArtistTour
+import com.theveloper.pixelplay.data.tour.TourRepository
 import java.net.URLDecoder
 import java.util.Locale
 import javax.inject.Inject
+
+/**
+ * The artist page's sections. Each loads on its own; one is "loaded" once its data has arrived,
+ * even when it turned out empty. Until then the page shows that section's skeleton.
+ */
+enum class ArtistSection { TOUR, SONGS, RELEASES, APPEARS_ON, VIDEOS, FANS, GENRES, ABOUT, SPOTIFY, SIMILAR, LIVE, YT_PLAYLISTS, HUB }
+
+/** One of the artist's playlists on YouTube Music (opened through its browse id). */
+@Immutable
+data class ArtistYtPlaylist(val browseId: String, val title: String, val coverUrl: String?)
+
+/** The on-device "Ask about the artist" box: idle, thinking, or the last answer. */
+@Immutable
+data class ArtistAiUiState(
+    /** Gemini Nano is on this phone and ready: the box only shows then. */
+    val available: Boolean = false,
+    val thinking: Boolean = false,
+    val question: String? = null,
+    val answer: String? = null,
+)
+
+/** All songs filters (one at a time). */
+enum class ArtistSongFilter { LIKED, ON_DEVICE, NOT_YOURS }
 
 /** Whether a catalogue song is already yours, and how. */
 enum class TrackOwnership { NONE, LIKED, DOWNLOADED, LOCAL }
@@ -59,7 +91,11 @@ data class ArtistTrackItem(
     /** What plays on tap: your own copy when you have one, else the catalogue song. */
     val playSong: Song,
     val ownership: TrackOwnership,
-    val plays: Int = 0
+    val plays: Int = 0,
+    /** Liked, whatever else you have of it (ownership shows only the strongest: local > download > like). */
+    val isLiked: Boolean = false,
+    /** [RecordingKeys.of] of the catalogue song, worked out once (now-playing match on the page). */
+    val recordingKey: String = ""
 ) {
     val key: String get() = track.song.id
 }
@@ -85,7 +121,9 @@ data class DiscographyCompletion(
     /** Songs you don't have at all (for Like all). */
     val notOwned: List<Song>,
     /** Your local and downloaded copies (for Shuffle downloaded). */
-    val offlineSongs: List<Song>
+    val offlineSongs: List<Song>,
+    /** Songs you've liked (any copy). */
+    val liked: Int = 0
 ) {
     val fraction: Float get() = if (total == 0) 0f else owned.toFloat() / total
 }
@@ -105,6 +143,10 @@ data class ArtistDetailUiState(
     /** [tracks] with the current sort and search applied. */
     val visibleTracks: List<ArtistTrackItem> = emptyList(),
     val songSort: ArtistSongSort = ArtistSongSort.POPULAR,
+    /** The sort's natural order flipped (direction button). */
+    val songSortReversed: Boolean = false,
+    /** One ownership filter at a time; null = all songs. */
+    val songFilter: ArtistSongFilter? = null,
     val songQuery: String = "",
     val appearsOn: List<ArtistTrackItem> = emptyList(),
     val popularReleases: List<ArtistAlbumItem> = emptyList(),
@@ -123,7 +165,32 @@ data class ArtistDetailUiState(
     val listening: ArtistListeningUi? = null,
     val completion: DiscographyCompletion? = null,
     val videos: List<TrackVideo> = emptyList(),
+    /** Live performances (YouTube), shown right under Music videos. */
+    val liveVideos: List<TrackVideo> = emptyList(),
+    /** The artist's playlists on YouTube Music, merged with [spotifyPlaylists] on the page. */
+    val ytPlaylists: List<ArtistYtPlaylist> = emptyList(),
+    /** Official website, streaming / social / community links, band members (MusicBrainz). */
+    val hub: com.theveloper.pixelplay.data.artist.ArtistHubInfo = com.theveloper.pixelplay.data.artist.ArtistHubInfo(),
+    /** AUD per unit by currency code, for merch prices (live, daily; offline fallback). */
+    val audRates: Map<String, Double> = com.theveloper.pixelplay.data.artist.MerchPriceConverter.FALLBACK_RATES,
+    val ai: ArtistAiUiState = ArtistAiUiState(),
     val bio: String? = null,
+    /** Where [bio] came from ("Last.fm" / "Wikipedia"); null when there's no bio. */
+    val bioSource: String? = null,
+    /** Tour dates (Ticketmaster + Spotify concerts, merged); null until loaded or when there's no source. */
+    val tour: ArtistTour? = null,
+    /** The artist's playlists on Spotify (own, "This Is", featuring…); empty without a Spotify sign-in. */
+    val spotifyPlaylists: List<com.theveloper.pixelplay.data.spotify.web.SpotifyArtistPlaylist> = emptyList(),
+    /** Merch from the artist's Spotify page (the Merch tab); empty without a Spotify sign-in. */
+    val merch: List<com.theveloper.pixelplay.data.spotify.web.SpotifyMerchItem> = emptyList(),
+    /** "Similar": Spotify related artists (or Last.fm's), resolved on Deezer, plus a few of their songs. */
+    val similarArtists: List<RelatedArtistItem> = emptyList(),
+    val similarSongs: List<Song> = emptyList(),
+    /** Similar's chip (Artists / Songs). */
+    val activeSimilarFilter: FansFilterType = FansFilterType.ARTISTS,
+
+    /** Sections whose data has arrived (see [ArtistSection]). */
+    val loadedSections: Set<ArtistSection> = emptySet(),
 
     val isLoading: Boolean = false,
     /** Online catalogue still loading (search already works on your own songs). */
@@ -160,7 +227,18 @@ class ArtistDetailViewModel @Inject constructor(
     private val downloadCoordinator: DownloadCoordinator,
     private val videoRepository: VideoRepository,
     private val lastFmRepository: LastFmRepository,
+    private val tourRepository: TourRepository,
+    private val spotifyArtistRepository: com.theveloper.pixelplay.data.spotify.web.SpotifyArtistRepository,
+    private val spotifyRepository: com.theveloper.pixelplay.data.spotify.SpotifyRepository,
+    /** The radio map's base map (OpenFreeMap tiles), reused for the tour map. */
+    val mapTiles: com.theveloper.pixelplay.presentation.screens.radio.RadioMapTiles,
     private val connectedLibrary: com.theveloper.pixelplay.data.accounts.ConnectedLibraryRepository,
+    private val artistHubRepository: com.theveloper.pixelplay.data.artist.ArtistHubRepository,
+    private val exchangeRates: com.theveloper.pixelplay.data.artist.ExchangeRateRepository,
+    private val nanoEngine: com.theveloper.pixelplay.data.ai.nano.NanoEngine,
+    private val gemmaEngine: com.theveloper.pixelplay.data.ai.gemma.GemmaLiteRtEngine,
+    private val gemmaModels: com.theveloper.pixelplay.data.ai.gemma.GemmaModelManager,
+    private val youTubeMusicApi: com.theveloper.pixelplay.data.youtube.YouTubeMusicApiService,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -173,10 +251,15 @@ class ArtistDetailViewModel @Inject constructor(
     // Inputs of the song list.
     private val localSongsFlow = MutableStateFlow<List<Song>>(emptyList())
     private val profileFlow = MutableStateFlow<ArtistCrossPlatformData?>(null)
+    /** True once the catalogue has arrived (or failed), so All songs and Appears on can resolve. */
+    private val catalogueReady = MutableStateFlow(false)
+    private val partialMutex = Mutex()
     private val playsFlow = MutableStateFlow<Map<String, Int>>(emptyMap())
     private val tracksFlow = MutableStateFlow<List<ArtistTrackItem>>(emptyList())
     private val queryFlow = MutableStateFlow("")
     private val sortFlow = MutableStateFlow(ArtistSongSort.POPULAR)
+    private val directionFlow = MutableStateFlow(false)
+    private val filterFlow = MutableStateFlow<ArtistSongFilter?>(null)
 
     private var currentLoadJob: Job? = null
     private var aggregationJob: Job? = null
@@ -223,20 +306,31 @@ class ArtistDetailViewModel @Inject constructor(
 
         // Catalogue + your songs + likes + downloads + plays → the annotated track list.
         combine(
-            profileFlow,
+            combine(profileFlow, catalogueReady) { profile, ready -> profile to ready },
             localSongsFlow,
             musicRepository.getFavoriteSongIdsFlow(),
             downloadCoordinator.downloadedIds,
             playsFlow
-        ) { profile, local, favorites, downloaded, plays ->
-            buildItems(profile, local, favorites, downloaded, plays)
+        ) { (profile, ready), local, favorites, downloaded, plays ->
+            buildItems(profile, local, favorites, downloaded, plays) to ready
         }
             .flowOn(Dispatchers.Default)
             .catch { e -> Log.e(TAG, "Building artist tracks failed", e) }
-            .onEach { built ->
+            .onEach { (built, ready) ->
                 tracksFlow.value = built.tracks
                 _uiState.update {
-                    it.copy(tracks = built.tracks, appearsOn = built.appearsOn, completion = built.completion)
+                    it.copy(
+                        tracks = built.tracks,
+                        appearsOn = built.appearsOn,
+                        completion = built.completion,
+                        // Marked here, with the built list, so the section never flashes empty
+                        // between "catalogue arrived" and "tracks built".
+                        loadedSections = if (ready) {
+                            it.loadedSections + ArtistSection.SONGS + ArtistSection.APPEARS_ON
+                        } else {
+                            it.loadedSections
+                        }
+                    )
                 }
             }
             .launchIn(viewModelScope)
@@ -245,16 +339,28 @@ class ArtistDetailViewModel @Inject constructor(
         combine(
             tracksFlow,
             queryFlow.debounce { if (it.isBlank()) 0L else SEARCH_DEBOUNCE_MS },
-            sortFlow
-        ) { tracks, query, sort ->
+            sortFlow,
+            directionFlow,
+            filterFlow
+        ) { tracks, query, sort, reversed, filter ->
             val playsByKey = HashMap<String, Int>()
             tracks.forEach { item ->
                 if (item.plays > 0) playsByKey[ArtistCatalog.baseKey(item.track.song.title)] = item.plays
             }
-            val sorted = ArtistCatalog.sort(tracks.map { it.track }, sort, playsByKey)
+            val sorted = ArtistCatalog.sort(tracks.map { it.track }, sort, playsByKey, reversed)
             val found = ArtistCatalog.search(sorted, query)
             val byId = tracks.associateBy { it.track.song.id }
             found.mapNotNull { byId[it.song.id] }
+                .filter { item ->
+                    when (filter) {
+                        null -> true
+                        ArtistSongFilter.LIKED -> item.isLiked
+                        ArtistSongFilter.ON_DEVICE -> item.ownership == TrackOwnership.LOCAL || item.ownership == TrackOwnership.DOWNLOADED
+                        ArtistSongFilter.NOT_YOURS -> item.ownership == TrackOwnership.NONE
+                    }
+                }
+                // "Plays" lists only songs you've actually played.
+                .let { list -> if (sort == ArtistSongSort.YOUR_PLAYS) list.filter { it.plays > 0 } else list }
         }
             .flowOn(Dispatchers.Default)
             .onEach { visible -> _uiState.update { it.copy(visibleTracks = visible) } }
@@ -410,9 +516,20 @@ class ArtistDetailViewModel @Inject constructor(
     /**
      * Saved catalogue first (instant, also offline), then a background refresh when it's older
      * than a day or [force]d.
+     *
+     * With nothing saved, each section is shown as soon as its own sources answer (releases, then
+     * related artists, then the full catalogue) instead of all at once. Videos, the bio and tour
+     * dates load alongside, never waiting on the catalogue.
      */
     private fun loadOnlineCrossPlatformData(artistName: String, force: Boolean = false) {
         aggregationJob?.cancel()
+        if (!force) {
+            catalogueReady.value = false
+            _uiState.update { it.copy(loadedSections = emptySet()) }
+            loadExtras(artistName)
+            loadTour(artistName)
+            loadSpotifyExtras(artistName)
+        }
         aggregationJob = viewModelScope.launch {
             _uiState.update { it.copy(isAggregating = true) }
             val cached = try {
@@ -424,19 +541,52 @@ class ArtistDetailViewModel @Inject constructor(
             }
             if (cached != null) {
                 applyProfile(cached.data, cached.savedAt)
+                markCatalogueLoaded()
                 if (!cached.isStale && !force) {
                     _uiState.update { it.copy(isAggregating = false, isOffline = false) }
-                    loadExtras(artistName)
                     return@launch
                 }
             }
+            // Partial sections only when nothing is on screen yet: over a saved catalogue they'd
+            // blank the sections that haven't refetched yet.
+            val progressive = cached == null
+            var partial = emptyProfile(artistName)
+            val onSection: (suspend (ArtistProfileSection) -> Unit)? = if (!progressive) null else ({ section ->
+                partialMutex.withLock {
+                    partial = when (section) {
+                        is ArtistProfileSection.Releases -> partial.copy(
+                            popularReleases = section.albums,
+                            singlesAndEPs = section.singlesAndEPs,
+                            effectiveImageUrl = section.effectiveImageUrl,
+                            fanCount = section.fanCount,
+                            deezerArtistId = section.deezerArtistId,
+                            deezerCandidates = section.deezerCandidates
+                        )
+                        is ArtistProfileSection.RelatedArtists -> partial.copy(fansAlsoLikeArtists = section.artists)
+                        is ArtistProfileSection.Catalogue -> partial.copy(
+                            tracks = section.tracks,
+                            appearsOn = section.appearsOn,
+                            genres = section.genres
+                        )
+                    }
+                    applyProfile(partial, System.currentTimeMillis())
+                    val done = when (section) {
+                        is ArtistProfileSection.Releases -> setOf(ArtistSection.RELEASES)
+                        is ArtistProfileSection.RelatedArtists -> setOf(ArtistSection.FANS)
+                        is ArtistProfileSection.Catalogue -> setOf(ArtistSection.GENRES)
+                    }
+                    _uiState.update { it.copy(loadedSections = it.loadedSections + done) }
+                    if (section is ArtistProfileSection.Catalogue) catalogueReady.value = true
+                }
+            })
             try {
                 val profile = artistAggregationRepository.getArtistProfileData(
                     artistName = artistName,
                     forceRefresh = true,
-                    localTitles = localSongsFlow.value.mapTo(HashSet()) { it.title }
+                    localTitles = localSongsFlow.value.mapTo(HashSet()) { it.title },
+                    onSection = onSection
                 )
-                applyProfile(profile, profile.fetchedAt)
+                partialMutex.withLock { applyProfile(profile, profile.fetchedAt) }
                 _uiState.update { it.copy(isAggregating = false, isOffline = false) }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -446,8 +596,218 @@ class ArtistDetailViewModel @Inject constructor(
                     it.copy(isAggregating = false, isOffline = true, hasSavedCatalogue = cached != null)
                 }
             }
-            loadExtras(artistName)
+            markCatalogueLoaded()
         }
+    }
+
+    /** Every catalogue section has resolved (filled, empty, or failed). */
+    private fun markCatalogueLoaded() {
+        catalogueReady.value = true
+        _uiState.update {
+            it.copy(loadedSections = it.loadedSections + ArtistSection.RELEASES + ArtistSection.FANS + ArtistSection.GENRES)
+        }
+    }
+
+    private fun emptyProfile(artistName: String) = ArtistCrossPlatformData(
+        artistName = artistName,
+        effectiveImageUrl = null,
+        metrics = CrossPlatformArtistMetrics(0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0.0, 0.0, 0.0, 0.0),
+        popularTracks = emptyList(),
+        popularReleases = emptyList(),
+        singlesAndEPs = emptyList(),
+        featuringPlaylists = emptyList(),
+        fansAlsoLikeArtists = emptyList(),
+        fansAlsoLikeSongs = emptyList(),
+        fansAlsoLikePlaylists = emptyList()
+    )
+
+    /** Tour dates. Without a Ticketmaster key the tour section is resolved (empty) straight away. */
+    // Events = Ticketmaster shows + Spotify concerts. Null = that source hasn't answered yet.
+    // (All touched on the main thread, from viewModelScope.)
+    private var ticketmasterShows: List<com.theveloper.pixelplay.data.tour.ArtistShow>? = null
+    private var spotifyShows: List<com.theveloper.pixelplay.data.tour.ArtistShow>? = null
+    private var tourJob: Job? = null
+    private var spotifyJob: Job? = null
+    private var similarJob: Job? = null
+    // Similar's sources: Spotify related artists and Last.fm similar artists. Null = not answered yet.
+    private var spotifyRelatedNames: List<String>? = null
+    private var lastFmSimilarNames: List<String>? = null
+
+    private fun loadTour(artistName: String, force: Boolean = false) {
+        tourJob?.cancel()
+        ticketmasterShows = null
+        if (!tourRepository.isConfigured) {
+            ticketmasterShows = emptyList()
+            publishTour()
+            return
+        }
+        tourJob = viewModelScope.launch {
+            val tour = try {
+                tourRepository.getTour(artistName, forceRefresh = force)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                null
+            }
+            ticketmasterShows = tour?.shows.orEmpty()
+            publishTour()
+        }
+    }
+
+    /** Shows what's arrived so far (merged); the section counts as loaded once both sources answered. */
+    private fun publishTour() {
+        val tm = ticketmasterShows
+        val sp = spotifyShows
+        val merged = com.theveloper.pixelplay.data.tour.TourMerge.merge(tm.orEmpty(), sp.orEmpty())
+        val done = tm != null && sp != null
+        _uiState.update {
+            it.copy(
+                tour = if (merged.isEmpty() && done) null else ArtistTour(merged, System.currentTimeMillis()),
+                loadedSections = if (done) it.loadedSections + ArtistSection.TOUR else it.loadedSections
+            )
+        }
+    }
+
+    /** Spotify extras (playlists, concerts, merch, related artists); empty and loaded at once when signed out. */
+    private fun loadSpotifyExtras(artistName: String, force: Boolean = false) {
+        spotifyJob?.cancel()
+        spotifyShows = null
+        spotifyRelatedNames = null
+        if (!spotifyArtistRepository.isAvailable) {
+            spotifyShows = emptyList()
+            spotifyRelatedNames = emptyList()
+            _uiState.update { it.copy(spotifyPlaylists = emptyList(), merch = emptyList(), loadedSections = it.loadedSections + ArtistSection.SPOTIFY) }
+            publishTour()
+            maybeLoadSimilar()
+            return
+        }
+        spotifyJob = viewModelScope.launch {
+            val extras = try {
+                spotifyArtistRepository.extras(artistName, force)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                null
+            }
+            spotifyShows = extras?.concerts.orEmpty()
+            spotifyRelatedNames = extras?.relatedArtists.orEmpty().map { it.name }
+            _uiState.update {
+                it.copy(
+                    spotifyPlaylists = extras?.playlists.orEmpty(),
+                    merch = extras?.merch.orEmpty(),
+                    loadedSections = it.loadedSections + ArtistSection.SPOTIFY
+                )
+            }
+            publishTour()
+            maybeLoadSimilar()
+        }
+    }
+
+    /**
+     * Similar, once both name sources answered: Spotify's related artists, else Last.fm's similar
+     * artists; minus the artist itself. (The page also hides any already in Fans also like.)
+     */
+    private fun maybeLoadSimilar() {
+        val spotify = spotifyRelatedNames ?: return
+        val lastFm = lastFmSimilarNames ?: return
+        val self = ArtistCatalog.fold(_uiState.value.artist?.name.orEmpty())
+        val names = spotify.ifEmpty { lastFm }.filter { ArtistCatalog.fold(it) != self }
+        similarJob?.cancel()
+        if (names.isEmpty()) {
+            _uiState.update { it.copy(similarArtists = emptyList(), similarSongs = emptyList(), loadedSections = it.loadedSections + ArtistSection.SIMILAR) }
+            return
+        }
+        similarJob = viewModelScope.launch {
+            val (artists, songs) = try {
+                artistAggregationRepository.similarFor(names)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                emptyList<RelatedArtistItem>() to emptyList<Song>()
+            }
+            _uiState.update {
+                it.copy(similarArtists = artists, similarSongs = songs, loadedSections = it.loadedSections + ArtistSection.SIMILAR)
+            }
+        }
+    }
+
+    private var aiJob: Job? = null
+
+    /**
+     * Answers [question] about the artist with Gemini Nano, on the phone only (no network): the
+     * bio, genres, members and best-known songs are given as context. If Nano is busy or slow,
+     * a simple answer from the same local data is shown instead.
+     */
+    fun askAi(question: String) {
+        val q = question.trim()
+        if (q.isBlank()) return
+        val state = _uiState.value
+        val name = state.artist?.name ?: return
+        aiJob?.cancel()
+        _uiState.update { it.copy(ai = it.ai.copy(thinking = true, question = q, answer = null)) }
+        aiJob = viewModelScope.launch {
+            val members = state.hub.members
+            val context = buildString {
+                appendLine("Artist: $name")
+                state.bio?.takeIf { it.isNotBlank() }?.let { appendLine("Bio: ${it.take(AI_BIO_CHARS)}") }
+                if (state.genres.isNotEmpty()) appendLine("Genres: ${state.genres.joinToString(", ")}")
+                if (members.isNotEmpty()) {
+                    appendLine("Members: " + members.joinToString("; ") { m ->
+                        listOfNotNull(m.name, m.role.takeIf { it.isNotBlank() }, "past member".takeIf { !m.isCurrent }).joinToString(", ")
+                    })
+                }
+                val top = state.tracks.sortedByDescending { it.track.popularity ?: 0 }.take(8).map { it.track.song.title }
+                if (top.isNotEmpty()) appendLine("Popular songs: ${top.joinToString(", ")}")
+                val releases = (state.popularReleases + state.singlesAndEPs).take(10)
+                    .map { r -> listOfNotNull(r.title, r.releaseYear?.toString()).joinToString(" ") }
+                if (releases.isNotEmpty()) appendLine("Releases: ${releases.joinToString(", ")}")
+                append("Question: $q")
+            }
+            val answer = try {
+                if (gemmaModels.activeModel() != null) {
+                    // Gemma 4 with tools: it can look up the band's members (their photos appear in
+                    // Members right away), search Wikipedia and read a page before answering.
+                    val tools = com.theveloper.pixelplay.data.ai.gemma.ArtistAgentTools(artistHubRepository) { roster ->
+                        if (roster.isNotEmpty() && _uiState.value.artist?.name == name) {
+                            _uiState.update { it.copy(hub = it.hub.copy(members = roster)) }
+                        }
+                    }
+                    gemmaEngine.generate(
+                        prefix = AI_GEMMA_PREFIX.replace("{artist}", name),
+                        input = context,
+                        temperature = 0.3f,
+                        timeoutMs = 45_000L,
+                        tools = listOf(tools),
+                    )
+                } else {
+                    nanoEngine.generate(prefix = AI_PREFIX, input = context, maxOutputTokens = 220, temperature = 0.3f, timeoutMs = 9_000L)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                null
+            }?.trim()?.takeIf { it.isNotBlank() }
+                ?: com.theveloper.pixelplay.data.artist.ArtistAiEngine().query(
+                    artistName = name, bio = state.bio, prompt = q, genres = state.genres, members = members
+                )
+            _uiState.update { it.copy(ai = it.ai.copy(thinking = false, answer = answer)) }
+        }
+    }
+
+    fun setSimilarFilter(filter: FansFilterType) {
+        _uiState.update { it.copy(activeSimilarFilter = filter) }
+    }
+
+    /** A Spotify playlist's songs (first 100) for opening / playing it from the artist page. Empty on failure. */
+    suspend fun spotifyPlaylistSongs(playlistId: String): List<Song> = try {
+        withContext(Dispatchers.IO) {
+            spotifyRepository.getPlaylistTracks(playlistId, maxTracks = SPOTIFY_PLAYLIST_MAX).map { it.toSong() }
+        }
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (e: Exception) {
+        Log.w(TAG, "Spotify playlist couldn't load", e)
+        emptyList()
     }
 
     private suspend fun applyProfile(profile: ArtistCrossPlatformData, fetchedAt: Long) {
@@ -480,10 +840,76 @@ class ArtistDetailViewModel @Inject constructor(
         refreshListening()
     }
 
-    /** Videos and the Last.fm bio load after the catalogue and never block it. */
+    /** Videos and the Last.fm bio load alongside the catalogue and never block it. */
     private fun loadExtras(artistName: String) {
         extrasJob?.cancel()
+        lastFmSimilarNames = null
+        aiJob?.cancel()
+        _uiState.update { it.copy(ai = ArtistAiUiState(available = it.ai.available)) }
         extrasJob = viewModelScope.launch {
+            // Live performances, after the music videos (so the same video isn't shown twice).
+            launch {
+                val live = try {
+                    videoRepository.searchArtistVideos(artistName, com.theveloper.pixelplay.data.model.VideoType.LIVE_PERFORMANCE)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (e: Exception) {
+                    emptyList()
+                }
+                _uiState.update {
+                    it.copy(liveVideos = live.take(MAX_VIDEOS), loadedSections = it.loadedSections + ArtistSection.LIVE)
+                }
+            }
+            // The artist's YouTube Music playlists (titles naming the artist), next to Spotify's.
+            launch {
+                val needle = ArtistCatalog.fold(artistName)
+                val playlists = try {
+                    youTubeMusicApi.searchCollections(artistName, com.theveloper.pixelplay.data.model.SearchFilterType.PLAYLISTS)
+                        .filterIsInstance<com.theveloper.pixelplay.data.model.SearchResultItem.PlaylistItem>()
+                        .mapNotNull { item ->
+                            val browseId = item.browseId ?: return@mapNotNull null
+                            item.playlist.name.takeIf { needle.isNotBlank() && needle in ArtistCatalog.fold(it) }
+                                ?.let { ArtistYtPlaylist(browseId, it, item.playlist.coverImageUri) }
+                        }
+                        .distinctBy { it.browseId }
+                        .take(MAX_YT_PLAYLISTS)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (e: Exception) {
+                    emptyList()
+                }
+                _uiState.update { it.copy(ytPlaylists = playlists, loadedSections = it.loadedSections + ArtistSection.YT_PLAYLISTS) }
+            }
+            // Website, socials and band members (also feeds the About bio's Wikipedia fallback).
+            val hubDeferred = async {
+                try {
+                    artistHubRepository.hubFor(artistName)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (e: Exception) {
+                    com.theveloper.pixelplay.data.artist.ArtistHubInfo()
+                }
+            }
+            launch {
+                val hub = hubDeferred.await()
+                _uiState.update { it.copy(hub = hub, loadedSections = it.loadedSections + ArtistSection.HUB) }
+            }
+            // Merch prices in AUD with today's rates.
+            launch {
+                exchangeRates.refreshIfStale()
+                _uiState.update { it.copy(audRates = exchangeRates.rates.value) }
+            }
+            // The Ask box only appears where Gemini Nano is ready.
+            launch {
+                val ready = try {
+                    nanoEngine.refreshStatus() == com.theveloper.pixelplay.data.ai.nano.NanoStatus.Ready
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (e: Exception) {
+                    false
+                }
+                _uiState.update { it.copy(ai = it.ai.copy(available = ready)) }
+            }
             launch {
                 val videos = try {
                     videoRepository.searchArtistVideos(artistName)
@@ -492,7 +918,9 @@ class ArtistDetailViewModel @Inject constructor(
                 } catch (e: Exception) {
                     emptyList()
                 }
-                _uiState.update { it.copy(videos = videos.take(MAX_VIDEOS)) }
+                _uiState.update {
+                    it.copy(videos = videos.take(MAX_VIDEOS), loadedSections = it.loadedSections + ArtistSection.VIDEOS)
+                }
             }
             launch {
                 val info = try {
@@ -502,14 +930,35 @@ class ArtistDetailViewModel @Inject constructor(
                 } catch (e: Exception) {
                     null
                 }
+                val lastFmBio = info?.bio
+                    ?.substringBefore("<a href")
+                    ?.substringBefore(" Read more on Last.fm")
+                    ?.trim()
+                    ?.takeIf { b -> b.length > 40 }
                 if (info != null) {
                     _uiState.update {
                         it.copy(
-                            bio = info.bio?.substringBefore(" Read more on Last.fm")?.takeIf { b -> b.length > 40 },
+                            bio = lastFmBio,
+                            bioSource = lastFmBio?.let { "Last.fm" },
                             genres = mergeGenres(it.genres, info.tags.map { tag -> tag.replaceFirstChar { c -> c.titlecase(Locale.ROOT) } })
                         )
                     }
                 }
+                lastFmSimilarNames = info?.similarArtists.orEmpty()
+                maybeLoadSimilar()
+                // No Last.fm bio: Wikipedia (keyless). The screen then falls back to a summary
+                // from your library, so About is never empty.
+                if (lastFmBio == null) {
+                    val wiki = try {
+                        artistHubRepository.wikipediaBio(artistName, hubDeferred.await())
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (e: Exception) {
+                        null
+                    }
+                    if (wiki != null) _uiState.update { it.copy(bio = wiki, bioSource = "Wikipedia") }
+                }
+                _uiState.update { it.copy(loadedSections = it.loadedSections + ArtistSection.ABOUT) }
             }
         }
     }
@@ -613,7 +1062,10 @@ class ArtistDetailViewModel @Inject constructor(
                 track = track,
                 playSong = mine ?: track.song,
                 ownership = ownershipOf(track.song, mine),
-                plays = playsByKey[key] ?: 0
+                plays = playsByKey[key] ?: 0,
+                isLiked = track.song.id in favorites ||
+                    (mine != null && (mine.id in favorites || mine.isFavorite)),
+                recordingKey = com.theveloper.pixelplay.data.library.RecordingKeys.of(track.song)
             )
         }
 
@@ -637,7 +1089,8 @@ class ArtistDetailViewModel @Inject constructor(
                     .map { it.playSong },
                 notOwned = tracks.filter { it.ownership == TrackOwnership.NONE }.map { it.track.song },
                 offlineSongs = tracks.filter { it.ownership == TrackOwnership.LOCAL || it.ownership == TrackOwnership.DOWNLOADED }
-                    .map { it.playSong }
+                    .map { it.playSong },
+                liked = tracks.count { it.isLiked }
             )
         }
         return BuiltItems(tracks, appearsOn, completion)
@@ -655,14 +1108,32 @@ class ArtistDetailViewModel @Inject constructor(
         _uiState.update { it.copy(songSort = sort) }
     }
 
+    /** Flips the current sort's direction (the fixed button at the start of the chip row). */
+    fun toggleSongSortDirection() {
+        val next = !directionFlow.value
+        directionFlow.value = next
+        _uiState.update { it.copy(songSortReversed = next) }
+    }
+
+    /** One ownership filter at a time; selecting the active one again clears it (null). */
+    fun setSongFilter(filter: ArtistSongFilter?) {
+        filterFlow.value = filter
+        _uiState.update { it.copy(songFilter = filter) }
+    }
+
     fun setFansFilter(filter: FansFilterType) {
         _uiState.update { it.copy(activeFansFilter = filter) }
     }
+
+    /** False without a Ticketmaster key: the page leaves the tour section out entirely. */
+    val isTourConfigured: Boolean get() = tourRepository.isConfigured
 
     /** Re-fetches the catalogue now, ignoring the saved copy. */
     fun refreshCatalogue() {
         val name = _uiState.value.artist?.name ?: return
         loadOnlineCrossPlatformData(name, force = true)
+        loadTour(name, force = true)
+        loadSpotifyExtras(name, force = true)
     }
 
     /** "Not this artist?": use another Deezer artist with this name, then refetch. */
@@ -685,10 +1156,15 @@ class ArtistDetailViewModel @Inject constructor(
         val top = state.tracks.sortedByDescending { it.track.popularity ?: 0 }.take(14).map { it.playSong }
         val yours = state.tracks.filter { it.plays > 0 }.sortedByDescending { it.plays }.take(8).map { it.playSong }
         val similar = state.fansAlsoLikeSongs.shuffled().take(10)
-        val seeds = (top.take(1) + (top.drop(1) + yours + similar).shuffled()).distinctBy { it.id }
+        // All seeds shuffled together: the mix used to always open with the artist's #1 song.
+        val seeds = (top + yours + similar).shuffled().distinctBy { it.id }
         // Catalogue songs are matched on YouTube before playback starts: keep the first batch short.
         return seeds.take(MAX_MIX_SEEDS)
     }
+
+    /** Songs on [release] that aren't liked yet (Like albums). Null when its tracklist couldn't load. */
+    suspend fun songsToLike(release: ArtistAlbumItem, favoriteIds: Set<String>): List<Song>? =
+        releaseSongs(release).takeIf { it.isNotEmpty() }?.filterNot { it.id in favoriteIds || it.isFavorite }
 
     /** A release's tracklist (for Latest release → Play), your own copies swapped in. */
     suspend fun releaseSongs(release: ArtistAlbumItem): List<Song> {
@@ -796,7 +1272,17 @@ class ArtistDetailViewModel @Inject constructor(
     private companion object {
         const val TAG = "ArtistDebug"
         const val SEARCH_DEBOUNCE_MS = 150L
+        /** Songs read from a Spotify playlist opened on the artist page (memory cap). */
+        const val SPOTIFY_PLAYLIST_MAX = 100
         const val MAX_VIDEOS = 12
+        const val MAX_YT_PLAYLISTS = 8
+        const val AI_BIO_CHARS = 1_800
+        const val AI_GEMMA_PREFIX = "You are the music assistant inside PixelPlayer, answering a question about {artist}. " +
+            "Use the facts given first. If they aren't enough, use your tools: getBandRosterAndPfps for who is in a band " +
+            "or who plays what, searchArtistWebInfo for other facts, and readWebpageMarkdown only when a snippet isn't enough. " +
+            "Answer in two to four short sentences. Never make up facts or links; if you can't find it, say so."
+        const val AI_PREFIX = "You answer questions about a music artist using only the facts given. " +
+            "Answer in two to four short sentences. If the facts don't say, reply that you don't know."
         const val MAX_GENRE_CHIPS = 8
         const val MAX_MIX_SEEDS = 20
     }

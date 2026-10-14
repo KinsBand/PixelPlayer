@@ -15,7 +15,9 @@ data class DspConfig(
     val crossfeedStrength: CrossfeedStrength = CrossfeedStrength.OFF,
     val limiterEnabled: Boolean = true,
     val softSaturationEnabled: Boolean = true,
-    val loudnessCompGain: Float = 1.0f
+    val loudnessCompGain: Float = 1.0f,
+    /** Extreme volume: linear gain on top of the device's maximum. Applies even with the EQ off. */
+    val volumeBoostGain: Float = 1.0f
 ) {
     companion object {
         val BYPASS = DspConfig()

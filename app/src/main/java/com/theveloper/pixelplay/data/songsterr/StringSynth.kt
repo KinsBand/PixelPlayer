@@ -6,6 +6,7 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.floor
+import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -263,7 +264,7 @@ class StringScoreBuilder(private val pitchShift: Int) {
         val list = p.events[s]
         var len = lenIn
         if (n.staccato) len *= 0.5
-        var pitch = (n.pitch + pitchShift).toFloat()
+        var pitch = TabMidi.foldToMidiRange(n.pitch + pitchShift).toFloat()
         var harmonic = false
         n.harmonic?.let { kind ->
             harmonic = true
@@ -438,6 +439,9 @@ class StringScoreBuilder(private val pitchShift: Int) {
 
 }
 
+/** Shortest waveguide loop (samples) treated as a normal note; shorter loops get extra damping. */
+private const val MIN_STABLE_LOOP = 24.0
+
 /**
  * Renders a [StringScore] in real time. Call [render] from the audio thread only.
  */
@@ -564,6 +568,12 @@ class StringSynthEngine(private val score: StringScore, private val sr: Int = St
         private var dcY = 0f
 
         private val bass = with(StringSynth) { tone.isBass }
+        /**
+         * MIDI pitch whose loop is [MIN_STABLE_LOOP] samples (≈ 1837 Hz at 44.1 kHz). Above it the
+         * loop is very short, so the upper harmonics are rolled off harder (see [brightnessDamp]).
+         * The loop length itself is never floored there: that would detune the note.
+         */
+        private val highPitch = (69.0 + 12.0 * ln(sr / MIN_STABLE_LOOP / 440.0) / ln(2.0)).toFloat()
         /** Wound strings: the lower half of a guitar, every bass string. */
         private val wound = bass || string >= numStrings / 2
         private val allpass = if (wound) (if (bass) -0.22f else -0.12f) else 0f
@@ -733,6 +743,10 @@ class StringSynthEngine(private val score: StringScore, private val sr: Int = St
             if (e.palmMute) s = max(s, 0.62f)
             if (e.harmonic) s = 0.06f
             if (e.dead) s = 0.55f
+            // Very high notes (short loop): fade in extra high-harmonic damping from half an
+            // octave below the threshold, up to +0.35 an octave above it.
+            val octavesOver = (pitch - highPitch) / 12f
+            s += (0.25f * (octavesOver + 0.5f)).coerceIn(0f, 0.35f)
             return s.coerceIn(0.02f, 0.85f)
         }
 

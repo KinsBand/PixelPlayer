@@ -43,6 +43,10 @@ import timber.log.Timber
 private const val CAST_LOG_TAG = "PlayerCastTransfer"
 private const val SONG_ID_QUERY_CHUNK_SIZE = 900
 private const val CATALOG_MATCH_PARALLELISM = 4
+/** A tapped song that hasn't started by then shows the card's failed state. */
+private const val SONG_START_TIMEOUT_MS = 15_000L
+/** How long a card stays in its failed state before going back to normal. */
+private const val SONG_START_FAILED_SHOWN_MS = 4_000L
 private val LOCAL_PLAYBACK_SCHEMES = setOf("content", "file", "android.resource")
 
 /**
@@ -137,6 +141,7 @@ class PlaybackDispatchStateHolder @Inject constructor(
         queueName: String = "Library",
         isVoluntaryPlay: Boolean = true
     ) {
+        if (isVoluntaryPlay) markSongStarting(song)
         launchLatestFullQueuePlayback(
             song = song,
             queueName = queueName,
@@ -154,6 +159,7 @@ class PlaybackDispatchStateHolder @Inject constructor(
         queueName: String = "Liked Songs",
         isVoluntaryPlay: Boolean = true
     ) {
+        if (isVoluntaryPlay) markSongStarting(song)
         launchLatestFullQueuePlayback(
             song = song,
             queueName = queueName,
@@ -330,6 +336,7 @@ class PlaybackDispatchStateHolder @Inject constructor(
         if (cancelPendingQueueBuild) {
             cancelPendingFullQueuePlayback()
         }
+        if (isVoluntaryPlay) markSongStarting(song)
         val playbackContext =
             if (contextSongs.any { it.id == song.id }) contextSongs else listOf(song)
         val castSession = castStateHolder.castSession.value
@@ -374,20 +381,32 @@ class PlaybackDispatchStateHolder @Inject constructor(
                     remoteQueueLoadJob?.cancel()
                     remoteQueueLoadJob = cb.scope.launch {
                         val hydratedQueue = hydrateSongsIfNeeded(desiredQueue)
-                        if (hydratedQueue.isEmpty()) return@launch
+                        if (hydratedQueue.isEmpty()) {
+                            // Nothing playable (e.g. no match online): say so instead of
+                            // silently doing nothing, and show the card's failed state.
+                            markSongStartFailed()
+                            cb.emitToast(context.getString(R.string.player_view_model_no_valid_songs))
+                            return@launch
+                        }
                         val hydratedStartSong =
                             hydratedQueue.firstOrNull { it.id == song.id } ?: hydratedQueue.first()
+                        if (hydratedStartSong.id != song.id) {
+                            cb.updateUiState { it.copy(songStart = SongStartReducer.withPlaybackId(it.songStart, song.id, hydratedStartSong.id)) }
+                        }
                         val loaded = castTransferStateHolder.playRemoteQueue(
                             songsToPlay = hydratedQueue,
                             startSong = hydratedStartSong,
                             isShuffleEnabled = playbackStateHolder.stablePlayerState.value.isShuffleEnabled
                         )
                         if (!loaded) {
+                            markSongStartFailed()
                             Timber.tag(CAST_LOG_TAG).w(
                                 "Failed to load requested remote queue (songId=%s size=%d).",
                                 song.id,
                                 desiredQueue.size
                             )
+                        } else {
+                            markSongStarted(hydratedStartSong.id)
                         }
                     }
                 }
@@ -564,6 +583,9 @@ class PlaybackDispatchStateHolder @Inject constructor(
     fun playSongs(songsToPlay: List<Song>, startSong: Song, queueName: String = "None", playlistId: String? = null) {
         com.theveloper.pixelplay.data.diagnostics.PlaybackTrace.begin(startSong.id)
         cancelPendingFullQueuePlayback()
+        // Play-all and other direct starts: mark the first song's card too (a tap that came
+        // through showAndPlaySong already did; marking again just renews the token).
+        if (cb.getUiState().songStart?.songId != startSong.id) markSongStarting(startSong)
         val requestToken = beginDirectPlaybackRequest()
         directPlaybackJob = cb.scope.launch {
             cb.cancelTransitionScheduler()
@@ -575,6 +597,7 @@ class PlaybackDispatchStateHolder @Inject constructor(
             throwIfDirectPlaybackRequestIsStale(requestToken)
 
             if (hydratedSongs.isEmpty()) {
+                markSongStartFailed()
                 cb.emitToast(context.getString(R.string.player_view_model_no_valid_songs))
                 return@launch
             }
@@ -589,6 +612,10 @@ class PlaybackDispatchStateHolder @Inject constructor(
                 requestedStartSong
             }
             throwIfDirectPlaybackRequestIsStale(requestToken)
+            // Matched to its audio under a new id: the tapped card still follows it.
+            if (validStartSong.id != startSong.id) {
+                cb.updateUiState { it.copy(songStart = SongStartReducer.withPlaybackId(it.songStart, startSong.id, validStartSong.id)) }
+            }
             val validSongs = if (validStartSong === requestedStartSong) hydratedSongs
             else hydratedSongs.map { if (it.id == validStartSong.id) validStartSong else it }
 
@@ -792,6 +819,70 @@ class PlaybackDispatchStateHolder @Inject constructor(
         return scheme == null || scheme in LOCAL_PLAYBACK_SCHEMES
     }
 
+    // ---- Song card start state (SongStartRequest) -------------------------------------------
+    private var songStartToken = 0L
+    private var songStartTimeoutJob: Job? = null
+    private var songStartExpiryJob: Job? = null
+
+    /**
+     * Marks [song]'s card as starting, right at the tap (before hydration, which can take a
+     * couple of seconds for streamed songs). Cleared when audio starts; failed on an error, an
+     * empty queue or after [SONG_START_TIMEOUT_MS].
+     */
+    fun markSongStarting(song: Song) {
+        val controller = cb.getController()
+        // Re-tapping the song that's already loaded and playing: nothing to wait for.
+        if (controller != null && controller.currentMediaItem?.mediaId == song.id &&
+            controller.playbackState == Player.STATE_READY && controller.isPlaying
+        ) {
+            return
+        }
+        val token = ++songStartToken
+        songStartExpiryJob?.cancel()
+        songStartTimeoutJob?.cancel()
+        cb.updateUiState { it.copy(songStart = SongStartReducer.start(song.id, token)) }
+        songStartTimeoutJob = cb.scope.launch {
+            delay(SONG_START_TIMEOUT_MS)
+            // Ask the player itself: the UI state marks a new song "playing" optimistically the
+            // moment it's queued, which made a stuck start look like a success.
+            val c = cb.getController()
+            val playingId = c?.currentMediaItem?.mediaId
+            if (c != null && c.isPlaying && cb.getUiState().songStart?.matches(playingId) == true) {
+                cb.updateUiState { it.copy(songStart = SongStartReducer.started(it.songStart, playingId)) }
+            } else {
+                markSongStartFailed(token, songTitle = song.title)
+            }
+        }
+    }
+
+    /**
+     * The request with [token] couldn't start (null = whatever is starting now). [songTitle]
+     * set = also say so in a toast (left out where a toast was already shown for it).
+     */
+    fun markSongStartFailed(token: Long? = null, songTitle: String? = null) {
+        val current = cb.getUiState().songStart ?: return
+        val next = if (token != null) SongStartReducer.fail(current, token) else SongStartReducer.failInFlight(current)
+        if (next == current) return
+        songStartTimeoutJob?.cancel()
+        cb.updateUiState { it.copy(songStart = next) }
+        if (songTitle != null) cb.sendToast(context.getString(R.string.song_card_failed_toast, songTitle))
+        val failedToken = current.token
+        songStartExpiryJob?.cancel()
+        songStartExpiryJob = cb.scope.launch {
+            delay(SONG_START_FAILED_SHOWN_MS)
+            cb.updateUiState { it.copy(songStart = SongStartReducer.expire(it.songStart, failedToken)) }
+        }
+    }
+
+    /** Audio is playing [mediaId]: its card leaves the starting state. */
+    fun markSongStarted(mediaId: String?) {
+        val current = cb.getUiState().songStart ?: return
+        val next = SongStartReducer.started(current, mediaId)
+        if (next == current) return
+        songStartTimeoutJob?.cancel()
+        cb.updateUiState { it.copy(songStart = next) }
+    }
+
     fun clearPreparingSongIfMatching(mediaId: String? = null) {
         val preparingSongId = cb.getUiState().preparingSongId ?: return
         if (mediaId == null || preparingSongId == mediaId) {
@@ -901,7 +992,13 @@ class PlaybackDispatchStateHolder @Inject constructor(
                 return
             }
 
-            cb.updateUiState { it.copy(currentPlaybackQueue = songsToPlay.toPlaybackQueue(), currentQueueSourceName = queueName) }
+            cb.updateUiState {
+                it.copy(
+                    currentPlaybackQueue = songsToPlay.toPlaybackQueue(),
+                    queueGroupStarts = kotlinx.collections.immutable.persistentListOf(),
+                    currentQueueSourceName = queueName
+                )
+            }
             playbackStateHolder.updateStablePlayerState {
                 it.copy(
                     currentSong = effectiveStartSong,
@@ -916,6 +1013,7 @@ class PlaybackDispatchStateHolder @Inject constructor(
             cb.updateUiState {
                 it.copy(
                     currentPlaybackQueue = songsToPlay.toPlaybackQueue(),
+                    queueGroupStarts = kotlinx.collections.immutable.persistentListOf(),
                     currentQueueSourceName = queueName
                 )
             }
@@ -1012,6 +1110,7 @@ class PlaybackDispatchStateHolder @Inject constructor(
     }
 
     fun loadAndPlaySong(song: Song) {
+        markSongStarting(song)
         com.theveloper.pixelplay.data.diagnostics.PlaybackTrace.begin(song.id)
         continuousMixRuntime.stop()
         cancelPendingFullQueuePlayback()
@@ -1045,18 +1144,139 @@ class PlaybackDispatchStateHolder @Inject constructor(
         }
     }
 
-    fun addSongToQueue(song: Song) {
-        cb.getController()?.let { controller ->
-            val mediaItem = com.theveloper.pixelplay.data.model.QueueEntryMetadata(
-                tier = com.theveloper.pixelplay.data.model.QueueTier.SESSION, pinned = true
-            ).attach(buildPlaybackMediaItem(song))
-            controller.addMediaItem(mediaItem)
-            // Queue UI is synced via onTimelineChanged listener
-        }
+    /** What a queue action did with the song: added a new copy, or moved the one already up next. */
+    enum class QueueAddResult { ADDED, MOVED, NONE }
+
+    /** Where a whole playlist goes in the queue (playlist options: Queue / Soon / Next). */
+    sealed interface PlaylistQueuePlacement {
+        /** Right after the playing song. */
+        data object Next : PlaylistQueuePlacement
+        /** At the end of the queue. */
+        data object End : PlaylistQueuePlacement
+        /** After the first [upcoming] songs of Up next (0 = right after the playing song). */
+        data class AfterUpcoming(val upcoming: Int) : PlaylistQueuePlacement
     }
 
-    fun addSongNextToQueue(song: Song, markFilterPick: Boolean = false) {
-        cb.getController()?.let { controller ->
+    /**
+     * Queues [songs] as one block, in order, tagged with the playlist ([groupName], [groupPlaylistId])
+     * so the queue shows a turnover card before it and switches its title when it's reached.
+     * Songs already elsewhere in Up next stay where they are (the playlist stays whole).
+     * Returns how many songs were added.
+     */
+    fun queuePlaylist(
+        songs: List<Song>,
+        groupName: String,
+        groupPlaylistId: String?,
+        placement: PlaylistQueuePlacement,
+    ): Int {
+        val controller = cb.getController() ?: return 0
+        if (songs.isEmpty()) return 0
+        val groupId = java.util.UUID.randomUUID().toString()
+        val items = songs.map { song ->
+            com.theveloper.pixelplay.data.model.QueueEntryMetadata(
+                tier = com.theveloper.pixelplay.data.model.QueueTier.SESSION,
+                pinned = true,
+                groupId = groupId,
+                groupName = groupName,
+                groupPlaylistId = groupPlaylistId
+            ).attach(buildPlaybackMediaItem(song, groupPlaylistId))
+        }
+        val count = controller.mediaItemCount
+        val current = controller.currentMediaItemIndex
+        val index = if (current == C.INDEX_UNSET) count else when (placement) {
+            PlaylistQueuePlacement.Next -> (current + 1).coerceAtMost(count)
+            PlaylistQueuePlacement.End -> count
+            is PlaylistQueuePlacement.AfterUpcoming -> (current + 1 + placement.upcoming.coerceAtLeast(0)).coerceIn(0, count)
+        }
+        controller.addMediaItems(index, items)
+        // Queue UI is synced via onTimelineChanged listener
+        return items.size
+    }
+
+    /** Removes the not-yet-played songs of a playlist queued as a whole (its turnover card). */
+    fun removeQueuedPlaylist(groupId: String): Int {
+        val controller = cb.getController() ?: return 0
+        val current = controller.currentMediaItemIndex
+        var removed = 0
+        for (i in controller.mediaItemCount - 1 downTo 0) {
+            if (i <= current) break
+            val meta = com.theveloper.pixelplay.data.model.QueueEntryMetadata.read(controller.getMediaItemAt(i))
+            if (meta.groupId == groupId) {
+                controller.removeMediaItem(i)
+                removed++
+            }
+        }
+        return removed
+    }
+
+    /**
+     * First copy of [songId] still ahead of the playing song, or -1. History and the playing song
+     * itself are never touched, so "Play next" on the current song still lines up a replay.
+     */
+    private fun findUpcomingIndex(controller: MediaController, songId: String): Int {
+        val current = controller.currentMediaItemIndex
+        if (current == C.INDEX_UNSET) return -1
+        for (i in current + 1 until controller.mediaItemCount) {
+            if (controller.getMediaItemAt(i).mediaId == songId) return i
+        }
+        return -1
+    }
+
+    /**
+     * Re-tags the queued copy at [from] as a hand-picked, pinned [tier] entry (so a mix re-plan
+     * keeps it) and moves it to [to]. Same re-tag rule as dragging a row (reorderQueueItem).
+     */
+    private fun moveExisting(
+        controller: MediaController,
+        from: Int,
+        to: Int,
+        tier: com.theveloper.pixelplay.data.model.QueueTier,
+        markFilterPick: Boolean = false
+    ) {
+        val existing = controller.getMediaItemAt(from)
+        val meta = com.theveloper.pixelplay.data.model.QueueEntryMetadata.read(existing).copy(
+            tier = tier,
+            pinned = true,
+            origin = com.theveloper.pixelplay.data.model.QueueOrigin.MANUAL,
+            filterPick = markFilterPick,
+            // Moved on its own: it leaves any queued-playlist block it was part of.
+            groupId = null,
+            groupName = null,
+            groupPlaylistId = null
+        )
+        controller.replaceMediaItem(from, meta.attach(existing))
+        val target = to.coerceIn(0, controller.mediaItemCount - 1)
+        if (target != from) controller.moveMediaItem(from, target)
+    }
+
+    fun addSongToQueue(song: Song): QueueAddResult {
+        val controller = cb.getController() ?: return QueueAddResult.NONE
+        val existing = findUpcomingIndex(controller, song.id)
+        if (existing >= 0) {
+            // Already up next: move that copy to the end instead of adding a second one.
+            moveExisting(controller, existing, controller.mediaItemCount - 1, com.theveloper.pixelplay.data.model.QueueTier.SESSION)
+            return QueueAddResult.MOVED
+        }
+        val mediaItem = com.theveloper.pixelplay.data.model.QueueEntryMetadata(
+            tier = com.theveloper.pixelplay.data.model.QueueTier.SESSION, pinned = true
+        ).attach(buildPlaybackMediaItem(song))
+        controller.addMediaItem(mediaItem)
+        // Queue UI is synced via onTimelineChanged listener
+        return QueueAddResult.ADDED
+    }
+
+    fun addSongNextToQueue(song: Song, markFilterPick: Boolean = false): QueueAddResult {
+        val controller = cb.getController() ?: return QueueAddResult.NONE
+        val existing = findUpcomingIndex(controller, song.id)
+        if (existing >= 0) {
+            // Already queued later on: bring that copy up instead of adding a duplicate.
+            moveExisting(
+                controller, existing, controller.currentMediaItemIndex + 1,
+                com.theveloper.pixelplay.data.model.QueueTier.PRIORITY, markFilterPick
+            )
+            return QueueAddResult.MOVED
+        }
+        run {
             val built = com.theveloper.pixelplay.data.model.QueueEntryMetadata(
                 tier = com.theveloper.pixelplay.data.model.QueueTier.PRIORITY, pinned = true
             ).attach(buildPlaybackMediaItem(song))
@@ -1072,6 +1292,7 @@ class PlaybackDispatchStateHolder @Inject constructor(
             controller.addMediaItem(insertionIndex, mediaItem)
             // Queue UI is synced via onTimelineChanged listener
         }
+        return QueueAddResult.ADDED
     }
 
     /**
@@ -1079,8 +1300,24 @@ class PlaybackDispatchStateHolder @Inject constructor(
      * up. Goes after the current song and any songs already added with Play next (priority,
      * pinned), but never more than [PLAY_SOON_MAX_AHEAD] places after the current song.
      */
-    fun addSongSoon(song: Song) {
-        cb.getController()?.let { controller ->
+    fun addSongSoon(song: Song): QueueAddResult {
+        val controller = cb.getController() ?: return QueueAddResult.NONE
+        val existing = findUpcomingIndex(controller, song.id)
+        if (existing >= 0) {
+            // Work out the Play-soon slot as if the existing copy weren't there, then move it.
+            val isPriority: (Int) -> Boolean = { index ->
+                val meta = com.theveloper.pixelplay.data.model.QueueEntryMetadata.read(controller.getMediaItemAt(index))
+                meta.tier == com.theveloper.pixelplay.data.model.QueueTier.PRIORITY && meta.pinned
+            }
+            val slot = playSoonInsertionIndex(
+                currentIndex = controller.currentMediaItemIndex,
+                itemCount = controller.mediaItemCount - 1,
+                isPriority = { index -> isPriority(if (index >= existing) index + 1 else index) }
+            )
+            moveExisting(controller, existing, slot, com.theveloper.pixelplay.data.model.QueueTier.PRIORITY)
+            return QueueAddResult.MOVED
+        }
+        run {
             val mediaItem = com.theveloper.pixelplay.data.model.QueueEntryMetadata(
                 tier = com.theveloper.pixelplay.data.model.QueueTier.PRIORITY, pinned = true
             ).attach(buildPlaybackMediaItem(song))
@@ -1100,6 +1337,30 @@ class PlaybackDispatchStateHolder @Inject constructor(
             }
             controller.addMediaItem(insertionIndex, mediaItem)
         }
+        return QueueAddResult.ADDED
+    }
+
+    /**
+     * Soon with a chosen spot: right after the [upcoming]-th song of Up next (0 = right after the
+     * song playing now). A copy already waiting in Up next is moved there instead of duplicated;
+     * [upcoming] is then counted as if that copy weren't there (the Soon panel leaves it out too).
+     */
+    fun addSongAfterUpcoming(song: Song, upcoming: Int): QueueAddResult {
+        val controller = cb.getController() ?: return QueueAddResult.NONE
+        val current = controller.currentMediaItemIndex
+        val existing = findUpcomingIndex(controller, song.id)
+        if (existing >= 0) {
+            val slot = songAfterUpcomingIndex(current, controller.mediaItemCount - 1, upcoming)
+            moveExisting(controller, existing, slot, com.theveloper.pixelplay.data.model.QueueTier.PRIORITY)
+            return QueueAddResult.MOVED
+        }
+        val mediaItem = com.theveloper.pixelplay.data.model.QueueEntryMetadata(
+            tier = com.theveloper.pixelplay.data.model.QueueTier.PRIORITY, pinned = true
+        ).attach(buildPlaybackMediaItem(song))
+        val count = controller.mediaItemCount
+        val index = if (current == C.INDEX_UNSET) count else songAfterUpcomingIndex(current, count, upcoming)
+        controller.addMediaItem(index, mediaItem)
+        return QueueAddResult.ADDED
     }
 
     private fun buildPlaybackMediaItem(song: Song, playlistId: String? = null): MediaItem {
@@ -1288,6 +1549,15 @@ class PlaybackDispatchStateHolder @Inject constructor(
 
 /** How far after the current song Play Soon may land at most. */
 internal const val PLAY_SOON_MAX_AHEAD = 3
+
+/**
+ * Where a song goes for "after the [upcoming]-th song of Up next": right after the current song
+ * plus [upcoming] places, never past the end. No current song ([currentIndex] < 0) = the end.
+ */
+internal fun songAfterUpcomingIndex(currentIndex: Int, itemCount: Int, upcoming: Int): Int {
+    if (currentIndex < 0) return itemCount
+    return (currentIndex + 1 + upcoming.coerceAtLeast(0)).coerceIn(0, itemCount)
+}
 
 /**
  * Where Play Soon inserts: right after the current song, skipping past songs already queued

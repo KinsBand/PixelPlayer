@@ -34,9 +34,16 @@ class SampledScoreEngine(
     private val midi: MidiEvents?,
     strings: StringScore?,
     private val sr: Int = 44_100,
+    /** Sound style (8-bit, synth…); defaults to the one picked in the tab options. */
+    style: SoundStyle = SoundStyle.current,
+    /** Speed the score was built at (Tabs speed); shortens release tails above 1×. */
+    speed: Float = 1f,
 ) : ScorePcmSource {
 
-    private val synth = SoundFontSynth(font, sr)
+    private val synth = SoundFontSynth(font, sr).apply {
+        if (style == SoundStyle.CHIP || style == SoundStyle.SYNTH) programMap = style::mapProgram
+        scoreSpeed = speed.coerceIn(0.1f, 3f)
+    }
 
     @Volatile override var shiftMs: Double = 0.0
     private var frame = 0L
@@ -168,7 +175,8 @@ class SampledScoreEngine(
             }
             // General MIDI "Guitar Harmonics" sounds two octaves above the key it's given, while
             // the event already carries the harmonic's real pitch.
-            transpose = if (program == GUITAR_HARMONICS) -24f else 0f
+            // (Only when the style keeps the real preset: an 8-bit / synth lead plays the pitch as given.)
+            transpose = if (program == GUITAR_HARMONICS && synth.programMap == null) -24f else 0f
             val key = (e.pitch + transpose).roundToInt().coerceIn(0, 127)
             val midiVel = (28 + velocity.coerceIn(0f, 1f) * 99f).roundToInt().coerceIn(1, 127)
             val style = SoundFontSynth.NoteStyle(

@@ -21,6 +21,12 @@ data class FriendTrack(
     val trackUri: String? = null,
     val durationMs: Long? = null,
     val playedAt: Long = 0,
+    /** Last time this play was seen (ms); 0 = only seen at [playedAt]. Used to merge resumes. */
+    val lastSeenAt: Long = 0,
+    /** The friend was seen paused on this play, so a later timestamp jump is a resume. */
+    val pausedSeen: Boolean = false,
+    /** Album name when the platform reported it (blank otherwise); opens the album page. */
+    val album: String = "",
 ) {
     val key: String get() = trackUri?.takeIf { it.isNotBlank() } ?: "${title.lowercase()}|${artist.lowercase()}"
 }
@@ -33,6 +39,18 @@ data class FriendPublicPlaylist(
     val coverUrl: String? = null,
     val trackCount: Int = 0,
     val durationMs: Long? = null,
+    /** Several people can add songs (only when the platform says so). */
+    val collaborative: Boolean = false,
+    /** Who made it, when the platform says ("Spotify" for editorial playlists). */
+    val ownerName: String? = null,
+    /**
+     * When PixelPlayer last saw its song count change (ms); null = no change seen yet. Platforms
+     * don't report an edit time on public playlists, so this is what PixelPlayer observed.
+     */
+    val lastUpdated: Long? = null,
+    /** Saves on the platform; -1 = unknown. */
+    val saves: Int = -1,
+    val description: String? = null,
 )
 
 /** What a [FriendActivitySource] saw for one friend on one poll. */
@@ -101,6 +119,8 @@ class FriendActivityRepository @Inject constructor(
     private val sources: Set<@JvmSuppressWildcards FriendActivitySource>,
 ) {
     private val file = AtomicFile(File(context.noBackupFilesDir, "friend-activity-v1.json"))
+    // Declared before [loaded] starts, which may use it straight away.
+    private val preMergeBackup = File(context.noBackupFilesDir, "friend-activity-v1.pre-merge.json")
     private val gson = Gson()
     private val lock = Mutex()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -111,6 +131,10 @@ class FriendActivityRepository @Inject constructor(
     val profiles = _profiles.asStateFlow()
     val live = _live.asStateFlow()
     val history = _history.asStateFlow()
+
+    private val _checking = MutableStateFlow(false)
+    /** True while the first poll after opening is asking who's online / playing. */
+    val checking = _checking.asStateFlow()
 
     /** False until a platform that reports friend activity is connected. */
     val hasSources: Boolean get() = sources.isNotEmpty()
@@ -128,7 +152,14 @@ class FriendActivityRepository @Inject constructor(
                 val history = stored.history.orEmpty().mapValues { (_, list) -> list.map(::checkedTrack) }
                 _profiles.value = profiles
                 _live.value = live
-                _history.value = prune(history, System.currentTimeMillis())
+                // One-time clean-up: rows the old ±30 s rule split from one play merge back
+                // together (a copy of the old file is kept as friend-activity-v1.pre-merge.json).
+                val collapsed = history.mapValues { (_, list) -> FriendPlayMerge.collapse(list) }
+                if (collapsed != history) {
+                    backupBeforeFirstMerge()
+                    save(FriendActivityFile(profiles, live, prune(collapsed, System.currentTimeMillis())))
+                }
+                _history.value = prune(collapsed, System.currentTimeMillis())
             } catch (_: Throwable) {
                 // Unreadable cache: start fresh, it's re-fetchable.
                 _profiles.value = emptyMap(); _live.value = emptyMap(); _history.value = emptyMap()
@@ -146,6 +177,9 @@ class FriendActivityRepository @Inject constructor(
     val polling: Flow<Unit> = flow<Unit> {
         if (sources.isEmpty()) return@flow
         loaded.await()
+        var firstRound = true
+        _checking.value = true
+        try {
         while (currentCoroutineContext().isActive) {
             var anyPlaying = false
             var failed = false
@@ -156,7 +190,14 @@ class FriendActivityRepository @Inject constructor(
                     anyPlaying = anyPlaying || reports.any { it.isPlaying }
                 } catch (e: CancellationException) { throw e } catch (_: Exception) { failed = true }
             }
+            if (firstRound) {
+                firstRound = false
+                _checking.value = false
+            }
             delay(when { failed -> 60_000L; anyPlaying -> 10_000L; else -> 30_000L })
+        }
+        } finally {
+            _checking.value = false
         }
     }.shareIn(scope, SharingStarted.WhileSubscribed(0), replay = 0)
 
@@ -175,15 +216,14 @@ class FriendActivityRepository @Inject constructor(
                     displayName = r.displayName.ifBlank { old?.displayName.orEmpty() },
                     avatarUrl = r.avatarUrl ?: old?.avatarUrl,
                     activityHidden = r.activityHidden,
-                    publicPlaylists = r.publicPlaylists ?: old?.publicPlaylists,
+                    publicPlaylists = r.publicPlaylists?.let { withLastUpdated(it, old?.publicPlaylists, now) } ?: old?.publicPlaylists,
                 )
                 live[r.friendId] = FriendLive(r.track, r.isPlaying, now)
                 val track = r.track
                 if (track != null) {
-                    val list = history[r.friendId].orEmpty()
-                    // Same song + same start (±30 s) = the same play seen again on a later poll.
-                    val seen = list.any { it.key == track.key && kotlin.math.abs(it.playedAt - track.playedAt) < 30_000 }
-                    if (!seen) history[r.friendId] = (listOf(track) + list).sortedByDescending { it.playedAt }
+                    // One row per real play: re-sightings, pauses/resumes and seeks merge into the
+                    // play they belong to; only a true replay adds a row (see FriendPlayMerge).
+                    history[r.friendId] = FriendPlayMerge.merge(history[r.friendId].orEmpty(), track, r.isPlaying, now)
                 }
             }
             val pruned = prune(history, now)
@@ -192,14 +232,42 @@ class FriendActivityRepository @Inject constructor(
         }
     }
 
+    /** Carries [FriendPublicPlaylist.lastUpdated] over, and stamps [now] on playlists whose song count changed. */
+    private fun withLastUpdated(fresh: List<FriendPublicPlaylist>, old: List<FriendPublicPlaylist>?, now: Long): List<FriendPublicPlaylist> {
+        val before = old.orEmpty().associateBy { it.source + ":" + it.remoteId }
+        return fresh.map { p ->
+            val prev = before[p.source + ":" + p.remoteId] ?: return@map p
+            val changed = prev.trackCount > 0 && p.trackCount > 0 && prev.trackCount != p.trackCount
+            p.copy(lastUpdated = if (changed) now else p.lastUpdated ?: prev.lastUpdated)
+        }
+    }
+
+    /** Polls every source once now (pull-to-refresh); runs beside [polling] without changing its rhythm. */
+    suspend fun refreshNow() {
+        if (sources.isEmpty()) return
+        loaded.await()
+        for (source in sources) {
+            try { report(source.poll()) } catch (e: CancellationException) { throw e } catch (_: Exception) { }
+        }
+    }
+
     private fun checkedTrack(value: Any?): FriendTrack {
         val t = value as FriendTrack
-        return FriendTrack(t.title.orEmpty(), t.artist.orEmpty(), t.coverUrl, t.trackUri, t.durationMs, t.playedAt)
+        // Gson leaves fields missing from older saved history null; orEmpty() defaults them.
+        return FriendTrack(t.title.orEmpty(), t.artist.orEmpty(), t.coverUrl, t.trackUri, t.durationMs, t.playedAt,
+            t.lastSeenAt, t.pausedSeen, t.album.orEmpty())
+    }
+
+    /** Keeps the history as it was before the first merge, once, in case the merge is ever wrong. */
+    private fun backupBeforeFirstMerge() {
+        if (preMergeBackup.exists()) return
+        try { file.baseFile.copyTo(preMergeBackup, overwrite = false) } catch (_: Exception) { }
     }
 
     private fun checkedPlaylist(value: Any?): FriendPublicPlaylist {
         val p = value as FriendPublicPlaylist
-        return FriendPublicPlaylist(p.remoteId.orEmpty(), p.source.orEmpty(), p.title.orEmpty(), p.coverUrl, p.trackCount, p.durationMs)
+        return FriendPublicPlaylist(p.remoteId.orEmpty(), p.source.orEmpty(), p.title.orEmpty(), p.coverUrl, p.trackCount, p.durationMs,
+            p.collaborative, p.ownerName, p.lastUpdated, p.saves, p.description)
     }
 
     private fun checkedProfile(value: Any?): FriendProfile {

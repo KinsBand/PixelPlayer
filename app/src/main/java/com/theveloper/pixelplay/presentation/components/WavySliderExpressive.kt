@@ -37,6 +37,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -82,7 +86,13 @@ fun WavySliderExpressive(
     semanticsProgressStep: Float = 0.01f,
     /** Minimum height of the touchable area. The track stays centred; the extra height is
      *  invisible, so a finger that lands slightly above/below the thin track still scrubs. */
-    minTouchHeight: Dp = 0.dp
+    minTouchHeight: Dp = 0.dp,
+    /**
+     * Optional coloured ranges (0..1 of the track): the wave keeps its shape and the played /
+     * unplayed parts inside a range take that range's colour (radio: one per song, from its
+     * cover). Read in the draw phase only. Null = one colour, as before.
+     */
+    segments: (() -> List<TimelineSegment>)? = null
 ) {
     val density = LocalDensity.current
     val strokeWidthPx = with(density) { strokeWidth.toPx() }
@@ -244,6 +254,7 @@ fun WavySliderExpressive(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = trackEdgePadding.coerceAtLeast(0.dp))
+                    .then(if (segments != null) Modifier.segmentTint(segments) else Modifier)
                     // Decorative layer: avoid duplicate semantics updates from the visual track.
                     .clearAndSetSemantics { },
                 color = activeTrackColor,
@@ -346,3 +357,32 @@ fun WavySliderExpressive(
         )
     }
 }
+
+/** A coloured range of a [WavySliderExpressive] track: [start]..[end] are 0..1 of its length. */
+@androidx.compose.runtime.Immutable
+data class TimelineSegment(val start: Float, val end: Float, val color: Color)
+
+/**
+ * Recolours the drawn wave inside each segment, keeping its shape and alpha: drawn offscreen,
+ * then each range is painted with SrcIn, so the played part takes the colour at full strength
+ * and the unplayed track keeps its own (lower) alpha.
+ */
+private fun Modifier.segmentTint(segments: () -> List<TimelineSegment>): Modifier = this
+    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        val list = segments()
+        if (list.isEmpty()) return@drawWithContent
+        val w = size.width
+        list.forEach { s ->
+            val x0 = (s.start.coerceIn(0f, 1f) * w)
+            val x1 = (s.end.coerceIn(0f, 1f) * w)
+            if (x1 - x0 < 0.5f) return@forEach
+            drawRect(
+                color = s.color,
+                topLeft = Offset(x0, 0f),
+                size = Size(x1 - x0, size.height),
+                blendMode = BlendMode.SrcIn
+            )
+        }
+    }

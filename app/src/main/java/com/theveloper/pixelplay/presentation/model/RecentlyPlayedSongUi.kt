@@ -95,7 +95,7 @@ fun collectRecentlyPlayedSongIds(
     return seenSongIds.toList()
 }
 
-private fun StatsTimeRange?.resolveBounds(
+internal fun StatsTimeRange?.resolveBounds(
     nowMillis: Long,
     zoneId: ZoneId
 ): Pair<Long?, Long> {

@@ -43,7 +43,6 @@ class SettingsRegistryTest {
         // Player & Lyrics: the player-look half and the lyrics half, one page ("lyrics").
         "NowPlayingSettings.kt" to "lyrics",
         "LyricsSettings.kt" to "lyrics",
-        "WidgetsSettings.kt" to "widgets",
         "PlaybackSettings.kt" to "playback",
         "LibrarySettings.kt" to "library",
         "LikedDownloadsSettings.kt" to "library",

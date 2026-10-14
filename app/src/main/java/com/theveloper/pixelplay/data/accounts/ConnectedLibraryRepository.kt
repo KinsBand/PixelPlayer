@@ -14,6 +14,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import java.io.File
 import java.util.Locale
 import javax.inject.Inject
@@ -37,7 +38,9 @@ data class ConnectedPlaylist(val id: String, val remoteId: String, val source: S
     /** What the service last returned, kept only while [edits] exist. */
     val remoteSongs: List<Song>? = null, val remoteTitle: String? = null,
     /** YouTube Music playlist row ids aligned with the remote song list (needed to remove/move). */
-    val setVideoIds: List<String?>? = null) {
+    val setVideoIds: List<String?>? = null,
+    /** When its songs were last read from the service (ms); 0 = unknown / before this was kept. */
+    val fetchedAt: Long = 0) {
     val remote: List<Song> get() = remoteSongs ?: songs
     val isEditable: Boolean get() = source == "YOUTUBE_MUSIC"
 }
@@ -55,11 +58,21 @@ data class ConnectedSnapshot(val playlists: List<ConnectedPlaylist> = emptyList(
     /** Friends removed in the app (friend ids). The friends feed never brings these back. */
     val hiddenFriends: List<String>? = null,
     /** Friends' playlists pinned into Your playlists (playlist ids). */
-    val pinnedFriendPlaylists: List<String>? = null)
+    val pinnedFriendPlaylists: List<String>? = null,
+    /** Display names of [hiddenFriends] (friend id -> name), so Accounts can list and restore them. */
+    val hiddenFriendNames: Map<String, String>? = null,
+    /** Friends pinned to the top of their Friends section (friend ids). Null in snapshots saved before pins. */
+    val pinnedFriends: List<String>? = null,
+    /** People you blocked (friend ids): hidden like [hiddenFriends] and kept out of people lists. */
+    val blockedFriends: List<String>? = null)
 
-/** Tombstone for a playlist the user removed. [remote] = the user also asked to delete it on the service. */
+/**
+ * Tombstone for a playlist the user removed. [remote] = the user also asked to delete it on the service.
+ * [friendId] is set when it was removed by hiding that friend (null in tombstones saved before this).
+ */
 data class DeletedPlaylist(val id: String, val remoteId: String, val source: String, val title: String,
-    val coverUrl: String? = null, val deletedAt: Long = 0, val remote: Boolean = false)
+    val coverUrl: String? = null, val deletedAt: Long = 0, val remote: Boolean = false,
+    val friendId: String? = null)
 
 private fun Song.youTubeVideoId(): String? = youtubeId?.takeIf { it.isNotBlank() }
     ?: id.takeIf { it.startsWith("yt_") }?.removePrefix("yt_")?.takeIf { it.isNotBlank() && !it.startsWith("unavailable:") }
@@ -144,7 +157,9 @@ class ConnectedLibraryRepository @Inject constructor(@ApplicationContext context
     private val music: MusicRepository,
     private val downloadQueue: com.theveloper.pixelplay.data.youtube.DownloadQueue,
     private val offlineStore: com.theveloper.pixelplay.data.youtube.OfflinePlaylistStore,
-    private val cloudSongDao: com.theveloper.pixelplay.data.database.CloudSongDao) {
+    private val cloudSongDao: com.theveloper.pixelplay.data.database.CloudSongDao,
+    /** YouTube Music song search for exports (lazy: only built when an export needs it). */
+    private val ytSearch: dagger.Lazy<com.theveloper.pixelplay.data.youtube.YouTubeMusicApiService>) {
     private val file = AtomicFile(File(context.noBackupFilesDir, "connected-library-v1.json"))
     private val gson = Gson()
     private val lock = Mutex()
@@ -165,6 +180,13 @@ class ConnectedLibraryRepository @Inject constructor(@ApplicationContext context
                 val deleted = stored.deletedPlaylists.orEmpty()
                 mutable.value = stored.copy(playlists = stored.playlists.filterNot {
                     (it.source == "YOUTUBE_MUSIC" && isHiddenYouTubeMusicPlaylist(it.remoteId, it.title)) || it.id in deleted
+                }.map { p ->
+                    // Friends' playlists saved before the cap could hold thousands of songs: trim them
+                    // so the snapshot (held in memory all the time) stays small. The next refresh re-reads them.
+                    if (p.friendId != null && p.edits == null && p.songs.size > FRIEND_PLAYLIST_MAX_SONGS) {
+                        p.copy(songs = p.songs.take(FRIEND_PLAYLIST_MAX_SONGS), remoteSongs = null,
+                            setVideoIds = p.setVideoIds?.take(FRIEND_PLAYLIST_MAX_SONGS))
+                    } else p
                 })
             }
             catch (e: Exception) { message.value = "Saved connected library could not be read. Sync to restore it." }
@@ -249,8 +271,17 @@ class ConnectedLibraryRepository @Inject constructor(@ApplicationContext context
         val songs = fetch()
         songs.filter { it.contentUriString.isNotBlank() }.forEach { music.saveCloudSong(it) }
         withRemote(fresh.copy(edits = old?.edits ?: fresh.edits), songs, null, remoteTitle)
-            .copy(error = if (songs.any { it.contentUriString.isBlank() }) "Some tracks are unavailable from this service." else null)
+            .copy(error = if (songs.any { it.contentUriString.isBlank() }) "Some tracks are unavailable from this service." else null,
+                fetchedAt = System.currentTimeMillis())
     } catch (e: CancellationException) { throw e }
+      catch (e: OutOfMemoryError) {
+          // Last resort: one playlist too big to read. Its half-read songs are already garbage, so
+          // keep the previous copy instead of taking the whole app down (this used to crash on sync).
+          val base = old ?: fresh
+          fresh.copy(songs = base.songs, edits = base.edits, remoteSongs = base.remoteSongs, remoteTitle = base.remoteTitle,
+              setVideoIds = base.setVideoIds, title = base.edits?.title ?: fresh.title, fetchedAt = System.currentTimeMillis(),
+              error = "This playlist is too big to load in full.")
+      }
       catch (e: Exception) {
           val base = old ?: fresh
           fresh.copy(songs = base.songs, edits = base.edits, remoteSongs = base.remoteSongs, remoteTitle = base.remoteTitle,
@@ -262,7 +293,9 @@ class ConnectedLibraryRepository @Inject constructor(@ApplicationContext context
     private suspend fun preserveYouTube(old: ConnectedPlaylist?, fresh: ConnectedPlaylist, remoteTitle: String = fresh.title): ConnectedPlaylist {
         var rowIds: List<String?>? = null
         val result = preserve(old, fresh, remoteTitle) {
+            // Friends' playlists keep at most FRIEND_PLAYLIST_MAX_SONGS songs (rows stay aligned).
             val tracks = youtube.getPlaylistTracks(fresh.remoteId)
+                .let { if (fresh.friendId != null && it.size > FRIEND_PLAYLIST_MAX_SONGS) it.take(FRIEND_PLAYLIST_MAX_SONGS) else it }
             rowIds = tracks.map { it.setVideoId }
             tracks.map { it.toSong() }
         }
@@ -277,14 +310,19 @@ class ConnectedLibraryRepository @Inject constructor(@ApplicationContext context
             setVideoIds = rowIds ?: playlist.setVideoIds)
     }
 
-    suspend fun sync() = withContext(Dispatchers.IO) {
+    /**
+     * Syncs every connected service, or only [only] (a source such as "SPOTIFY") when given. A
+     * single-service sync re-lists that account's playlists and likes but leaves friends'
+     * playlists alone; those are refreshed with [refreshPlaylists].
+     */
+    suspend fun sync(only: String? = null) = withContext(Dispatchers.IO) {
         loaded.await()
         lock.withLock {
             syncing.value = true; message.value = null
             try {
                 var next = mutable.value
                 val failures = mutableListOf<String>()
-                if (spotifyAuth.isLoggedInFlow.first()) try {
+                if ((only == null || only == "SPOTIFY") && spotifyAuth.isLoggedInFlow.first()) try {
                     val owner = spotify.getCurrentUserId()
                     val deletedIds = next.deletedPlaylists.orEmpty()
                     val listed = spotify.getUserPlaylists()
@@ -299,7 +337,7 @@ class ConnectedLibraryRepository @Inject constructor(@ApplicationContext context
                     likes.filter { it.contentUriString.isNotBlank() }.forEach { music.saveCloudSong(it) }
                     next = next.copy(playlists = next.playlists.filter { it.source != "SPOTIFY" || (it.manual && listed.none { p -> p.id == it.remoteId }) } + imported, spotifyLikes = likes)
                 } catch (e: CancellationException) { throw e } catch (e: Exception) { failures.add(e.message ?: "Spotify sync failed") }
-                if (appleMusicAuth.hasSession) try {
+                if ((only == null || only == MusicSources.APPLE_MUSIC) && appleMusicAuth.hasSession) try {
                     val deletedIds = next.deletedPlaylists.orEmpty()
                     val listed = appleMusic.getUserPlaylists()
                     val imported = listed
@@ -320,7 +358,7 @@ class ConnectedLibraryRepository @Inject constructor(@ApplicationContext context
                         appleMusicLikes = likes)
                 } catch (e: CancellationException) { throw e } catch (e: Exception) { failures.add(e.message ?: "Apple Music sync failed") }
                 var likeChanges: Pair<Set<String>, Set<String>>? = null
-                if (youtubeAuth.isLoggedInFlow.first()) try {
+                if ((only == null || only == "YOUTUBE_MUSIC") && youtubeAuth.isLoggedInFlow.first()) try {
                     // Push edits made in the app first, so the fetch below already reflects them.
                     next.playlists.filter { it.source == "YOUTUBE_MUSIC" && it.edits != null }.forEach { p ->
                         try { pushLock.withLock { pushPlaylistEdits(p) } } catch (e: CancellationException) { throw e } catch (_: Exception) { /* retried next sync */ }
@@ -345,10 +383,21 @@ class ConnectedLibraryRepository @Inject constructor(@ApplicationContext context
                         it.source != "YOUTUBE_MUSIC" || isHiddenYouTubeMusicPlaylist(it.remoteId, it.title).not() && (it.manual && listed.none { p -> p.id == it.remoteId })
                     } + imported, youtubeLikes = likes)
                 } catch (e: CancellationException) { throw e } catch (e: Exception) { failures.add(e.message ?: "YouTube Music sync failed") }
+                // Manual playlists are re-read here. Friends' playlists used to be re-downloaded in full
+                // on every sync (opening a friend saves all their public playlists), which held
+                // thousands of songs at once and ran out of memory. Now: a friend's playlist is re-read
+                // at most once a day (pinned ones too), only a few per sync (oldest first), and capped.
+                val now = System.currentTimeMillis()
+                val friendDue = if (only != null) emptySet() else next.playlists
+                    .filter { it.manual && it.friendId != null && now - it.fetchedAt >= FRIEND_PLAYLIST_REFRESH_MS }
+                    .sortedBy { it.fetchedAt }
+                    .take(FRIEND_PLAYLISTS_PER_SYNC)
+                    .mapTo(HashSet()) { it.id }
                 val refreshed = next.playlists.map { p ->
-                    if (!p.manual) p
-                    else if (p.source == "SPOTIFY") preserve(p, p) { spotify.getPlaylistTracks(p.remoteId).map { it.toSong() } }
-                    else if (p.source == MusicSources.APPLE_MUSIC) preserve(p, p) { appleMusic.getPlaylistTracks(p.remoteId).map { it.toSong() } }
+                    val cap = if (p.friendId != null) FRIEND_PLAYLIST_MAX_SONGS else Int.MAX_VALUE
+                    if (!p.manual || (p.friendId != null && p.id !in friendDue) || (only != null && p.source != only)) p
+                    else if (p.source == "SPOTIFY") preserve(p, p) { spotify.getPlaylistTracks(p.remoteId, cap).map { it.toSong() } }
+                    else if (p.source == MusicSources.APPLE_MUSIC) preserve(p, p) { appleMusic.getPlaylistTracks(p.remoteId).take(cap).map { it.toSong() } }
                     else preserveYouTube(p, p, p.remoteTitle ?: p.title)
                 }
                 // Save the new remote likes before touching favorites so the favorites observer
@@ -503,7 +552,7 @@ class ConnectedLibraryRepository @Inject constructor(@ApplicationContext context
      */
     suspend fun addSongsToService(playlistId: String, songs: List<Song>): ServiceAddResult = withContext(Dispatchers.IO) {
         loaded.await()
-        val playlist = mutable.value.playlists.find { it.id == playlistId } ?: error("Playlist not found.")
+        val playlist = mutable.value.playlists.find { it.id == playlistId || it.remoteId == playlistId } ?: error("Playlist not found.")
         val present = playlist.songs.mapTo(hashSetOf()) { it.id }
         val fresh = songs.distinctBy { it.id }.filter { it.id !in present }
         val already = songs.distinctBy { it.id }.size - fresh.size
@@ -539,6 +588,160 @@ class ConnectedLibraryRepository @Inject constructor(@ApplicationContext context
                 ServiceAddResult(toAdd.size, already + (ids.size - toAdd.size), notFound)
             }
             else -> error("This playlist can't be edited.")
+        }
+    }
+
+    data class ExportResult(
+        val remotePlaylistId: String,
+        val addedCount: Int,
+        val notFoundCount: Int,
+        val message: String
+    )
+
+    /**
+     * Exports [songs] into a brand new playlist on [service] (Spotify or YouTube Music)
+     * and triggers a background sync to incorporate it into PixelPlayer's connected library.
+     */
+    suspend fun exportPlaylistToService(
+        name: String,
+        songs: List<Song>,
+        service: String,
+        /** "Matching 40 of 120…" style updates for the export sheet. */
+        onProgress: (String) -> Unit = {},
+    ): ExportResult = withContext(Dispatchers.IO) {
+        loaded.await()
+        val unique = songs.distinctBy { it.id }
+        // How TuneMyMusic-style transfers stay quick: match every song first (several at a time,
+        // exact ISRC before a title search, cached per session), and only then create the playlist
+        // and add the matches in big batches. Nothing is created when nothing matched, and a
+        // failure says which step it was instead of leaving an empty playlist with "400".
+        val matched = java.util.concurrent.atomic.AtomicInteger(0)
+        fun tick() {
+            val n = matched.incrementAndGet()
+            if (n == unique.size || n % 5 == 0) onProgress("Matching $n of ${unique.size}…")
+        }
+        when (service) {
+            MusicSources.SPOTIFY -> {
+                val ids = unique.mapConcurrently(EXPORT_MATCH_CONCURRENCY) { song ->
+                    val direct = song.id.removePrefix("spotify_").takeIf { song.id.startsWith("spotify_") && !it.startsWith("unavailable") }
+                    (direct ?: runCatching { spotify.findTrackId(song.title, song.displayArtist, song.creditsAndRelease.isrc) }.getOrNull())
+                        .also { tick() }
+                }
+                val found = ids.filterNotNull().distinct()
+                val notFound = ids.count { it == null }
+                if (found.isEmpty()) error("None of these songs were found on Spotify.")
+                onProgress("Creating the playlist…")
+                val remoteId = exportStep("create the Spotify playlist") { spotify.createPlaylist(name) }
+                onProgress("Adding ${found.size} songs…")
+                exportStep("add songs on Spotify") { spotify.addTracksToPlaylist(remoteId, found) }
+                scope.launch { sync(MusicSources.SPOTIFY) }
+                val msg = if (notFound == 0) "Exported ${found.size} songs to Spotify"
+                    else "Exported ${found.size} songs to Spotify ($notFound not found)"
+                ExportResult(remotePlaylistId = remoteId, addedCount = found.size, notFoundCount = notFound, message = msg)
+            }
+            MusicSources.YOUTUBE_MUSIC -> {
+                val videoIds = unique.mapConcurrently(EXPORT_MATCH_CONCURRENCY) { song ->
+                    (song.youTubeVideoId()
+                        ?: song.youtubeId?.takeIf { it.isNotBlank() }
+                        ?: cloudSongDao.getById(song.id)?.youtubeId?.takeIf { it.isNotBlank() }
+                        // Songs from your phone or other services: find them on YouTube Music.
+                        ?: findYouTubeVideoId(song))
+                        .also { tick() }
+                }
+                val found = videoIds.filterNotNull().distinct()
+                val notFound = videoIds.count { it == null }
+                if (found.isEmpty()) error("None of these songs were found on YouTube Music.")
+                onProgress("Creating the playlist…")
+                val remoteId = exportStep("create the YouTube Music playlist") { youtube.createPlaylist(name) }.removePrefix("VL")
+                onProgress("Adding ${found.size} songs…")
+                val actions = org.json.JSONArray()
+                found.forEach { vid ->
+                    actions.put(org.json.JSONObject().put("action", "ACTION_ADD_VIDEO").put("addedVideoId", vid).put("dedupeOption", "DEDUPE_OPTION_SKIP"))
+                }
+                exportStep("add songs on YouTube Music") { youtube.editPlaylist(remoteId, actions) }
+                scope.launch { sync(MusicSources.YOUTUBE_MUSIC) }
+                val msg = if (notFound == 0) "Exported ${found.size} songs to YouTube Music"
+                    else "Exported ${found.size} songs to YouTube Music ($notFound not found)"
+                ExportResult(remotePlaylistId = remoteId, addedCount = found.size, notFoundCount = notFound, message = msg)
+            }
+            else -> error("Unsupported service for export: $service")
+        }
+    }
+
+    /** Runs one export step; a failure names the step ("Couldn't add songs on Spotify (…)"). */
+    private suspend fun <T> exportStep(what: String, block: suspend () -> T): T = try {
+        block()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        throw IllegalStateException("Couldn't $what (${e.message ?: e.javaClass.simpleName}).", e)
+    }
+
+    /** A YouTube Music song for [song] by title + artist, checked like Spotify matches. */
+    private suspend fun findYouTubeVideoId(song: Song): String? {
+        val results = ytSearch.get().searchSongs("${song.title} ${song.displayArtist}".trim()).getOrNull().orEmpty()
+        val sourceMods = com.theveloper.pixelplay.data.spotify.TrackMatching.modifiers(song.title)
+        return results.firstOrNull { c ->
+            com.theveloper.pixelplay.data.spotify.TrackMatching.titlesMatch(song.title, c.title) &&
+                com.theveloper.pixelplay.data.spotify.TrackMatching.artistsOverlap(song.displayArtist, c.displayArtist) &&
+                com.theveloper.pixelplay.data.spotify.TrackMatching.modifiers(c.title) == sourceMods
+        }?.let { it.youtubeId ?: it.id.takeIf { id -> id.startsWith("yt_") }?.removePrefix("yt_") }
+    }
+
+    private suspend fun <T, R> List<T>.mapConcurrently(limit: Int, transform: suspend (T) -> R): List<R> =
+        kotlinx.coroutines.coroutineScope {
+            val gate = kotlinx.coroutines.sync.Semaphore(limit)
+            map { item -> async { gate.withPermit { transform(item) } } }.awaitAll()
+        }
+
+    /**
+     * Pushes added songs and/or removed song IDs to a remote playlist (Spotify or YouTube Music).
+     */
+    suspend fun syncRemoteChanges(
+        service: String,
+        remotePlaylistId: String,
+        addedSongs: List<Song>,
+        removedSongIds: List<String> = emptyList()
+    ) = withContext(Dispatchers.IO) {
+        loaded.await()
+        when (service) {
+            MusicSources.SPOTIFY -> {
+                if (addedSongs.isNotEmpty()) {
+                    val ids = addedSongs.distinctBy { it.id }.mapNotNull { song ->
+                        val direct = song.id.removePrefix("spotify_").takeIf { song.id.startsWith("spotify_") && !it.startsWith("unavailable") }
+                        direct ?: runCatching { spotify.findTrackId(song.title, song.displayArtist, song.creditsAndRelease.isrc) }.getOrNull()
+                    }
+                    if (ids.isNotEmpty()) {
+                        spotify.addTracksToPlaylist(remotePlaylistId, ids)
+                    }
+                }
+                scope.launch { sync(MusicSources.SPOTIFY) }
+            }
+            MusicSources.YOUTUBE_MUSIC -> {
+                val bareId = remotePlaylistId.removePrefix("VL")
+                val actions = org.json.JSONArray()
+                if (addedSongs.isNotEmpty()) {
+                    val videoIds = addedSongs.distinctBy { it.id }.mapNotNull { song ->
+                        song.youTubeVideoId()
+                            ?: song.youtubeId?.takeIf { it.isNotBlank() }
+                            ?: cloudSongDao.getById(song.id)?.youtubeId?.takeIf { it.isNotBlank() }
+                    }
+                    videoIds.forEach { vid ->
+                        actions.put(org.json.JSONObject().put("action", "ACTION_ADD_VIDEO").put("addedVideoId", vid).put("dedupeOption", "DEDUPE_OPTION_SKIP"))
+                    }
+                }
+                if (removedSongIds.isNotEmpty()) {
+                    val tracks = runCatching { youtube.getPlaylistTracks(bareId) }.getOrNull().orEmpty()
+                    val removedVids = removedSongIds.map { it.removePrefix("yt_") }.toSet()
+                    tracks.filter { it.videoId in removedVids && it.setVideoId != null }.forEach {
+                        actions.put(org.json.JSONObject().put("action", "ACTION_REMOVE_VIDEO").put("setVideoId", it.setVideoId).put("removedVideoId", it.videoId))
+                    }
+                }
+                if (actions.length() > 0) {
+                    youtube.editPlaylist(bareId, actions)
+                }
+                scope.launch { sync(MusicSources.YOUTUBE_MUSIC) }
+            }
         }
     }
 
@@ -625,9 +828,7 @@ class ConnectedLibraryRepository @Inject constructor(@ApplicationContext context
             if (target.source == "YOUTUBE_MUSIC" && target.edits != null) {
                 try { pushLock.withLock { pushPlaylistEdits(target) } } catch (e: CancellationException) { throw e } catch (_: Exception) { }
             }
-            val updated = if (target.source == "SPOTIFY") preserve(target, target) { spotify.getPlaylistTracks(target.remoteId).map { it.toSong() } }
-                else if (target.source == MusicSources.APPLE_MUSIC) preserve(target, target) { appleMusic.getPlaylistTracks(target.remoteId).map { it.toSong() } }
-                else preserveYouTube(target, target, target.remoteTitle ?: target.title)
+            val updated = readPlaylist(target)
             lock.withLock {
                 val current = mutable.value
                 val nextPlaylists = current.playlists.map { if (it.id == playlistId) updated else it }
@@ -637,6 +838,49 @@ class ConnectedLibraryRepository @Inject constructor(@ApplicationContext context
           catch (e: Exception) { message.value = e.message ?: "Sync failed for ${target.title}" }
         finally { _syncingPlaylists.update { it - playlistId } }
     }
+    /**
+     * Re-reads one saved playlist from its service and returns the updated copy (not saved).
+     * Pending edits are kept on top of the fresh list; friends' playlists stay capped at
+     * [FRIEND_PLAYLIST_MAX_SONGS].
+     */
+    private suspend fun readPlaylist(target: ConnectedPlaylist): ConnectedPlaylist {
+        val cap = if (target.friendId != null) FRIEND_PLAYLIST_MAX_SONGS else Int.MAX_VALUE
+        return if (target.source == "SPOTIFY") preserve(target, target) { spotify.getPlaylistTracks(target.remoteId, cap).map { it.toSong() } }
+        else if (target.source == MusicSources.APPLE_MUSIC) preserve(target, target) { appleMusic.getPlaylistTracks(target.remoteId).take(cap).map { it.toSong() } }
+        else preserveYouTube(target, target, target.remoteTitle ?: target.title)
+    }
+
+    /**
+     * Updates the given saved playlists in place (friends' or your own), one at a time: each is
+     * re-read from its service and swapped into the snapshot as soon as it's done. Nothing is
+     * removed or re-imported, and the account itself isn't re-listed. Returns how many failed.
+     */
+    suspend fun refreshPlaylists(playlistIds: Collection<String>): Int = withContext(Dispatchers.IO) {
+        loaded.await()
+        var failed = 0
+        for (playlistId in playlistIds.distinct()) {
+            val target = mutable.value.playlists.find { it.id == playlistId } ?: continue
+            _syncingPlaylists.update { it + playlistId }
+            try {
+                if (target.source == "YOUTUBE_MUSIC" && target.edits != null) {
+                    try { pushLock.withLock { pushPlaylistEdits(target) } } catch (e: CancellationException) { throw e } catch (_: Exception) { }
+                }
+                val updated = readPlaylist(target)
+                if (updated.error != null && updated.fetchedAt == target.fetchedAt) failed++
+                lock.withLock {
+                    val current = mutable.value
+                    // Skip it if it was removed (e.g. friend hidden) while it was being read.
+                    if (current.playlists.any { it.id == playlistId }) {
+                        save(current.copy(playlists = current.playlists.map { if (it.id == playlistId) updated else it }))
+                    }
+                }
+            } catch (e: CancellationException) { throw e }
+              catch (e: Exception) { failed++ }
+            finally { _syncingPlaylists.update { it - playlistId } }
+        }
+        failed
+    }
+
     // ---- Removing playlists -----------------------------------------------------------------
 
     val deletedPlaylists: Flow<List<DeletedPlaylist>> = snapshot.map { s ->
@@ -723,7 +967,10 @@ class ConnectedLibraryRepository @Inject constructor(@ApplicationContext context
             val now = System.currentTimeMillis()
             val removed = current.playlists.filter { it.friendId != null && it.friendId in ids }
             val tombstones = removed.associate { p ->
-                p.id to DeletedPlaylist(p.id, p.remoteId, p.source, p.title, p.coverUrl, now, remote = false)
+                p.id to DeletedPlaylist(p.id, p.remoteId, p.source, p.title, p.coverUrl, now, remote = false, friendId = p.friendId)
+            }
+            val names = ids.associateWith { id ->
+                current.aliases[id] ?: removed.firstOrNull { it.friendId == id }?.ownerName.orEmpty()
             }
             val removedIds = removed.mapTo(hashSetOf()) { it.id }
             save(current.copy(
@@ -731,9 +978,54 @@ class ConnectedLibraryRepository @Inject constructor(@ApplicationContext context
                 deletedPlaylists = current.deletedPlaylists.orEmpty() + tombstones,
                 aliases = current.aliases - ids.toSet(),
                 hiddenFriends = (current.hiddenFriends.orEmpty() + ids).distinct(),
-                pinnedFriendPlaylists = current.pinnedFriendPlaylists?.filterNot { it in removedIds }?.ifEmpty { null }
+                hiddenFriendNames = current.hiddenFriendNames.orEmpty() + names,
+                pinnedFriendPlaylists = current.pinnedFriendPlaylists?.filterNot { it in removedIds }?.ifEmpty { null },
+                // A removed friend is no longer pinned (restoring doesn't re-pin).
+                pinnedFriends = current.pinnedFriends?.filterNot { it in ids }?.ifEmpty { null }
             ))
         }
+    }
+
+    /**
+     * Undoes [removeFriends] for one friend: they show in the friends feed again, and the
+     * playlists that were removed with them are put back (as placeholders, then re-read from the
+     * service one at a time). Playlists hidden before this was tracked can't be matched to the
+     * friend and stay under Hidden playlists.
+     */
+    /** Blocks people: removed like [removeFriends], and remembered so people lists leave them out. */
+    suspend fun blockFriends(ids: Collection<String>) = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext
+        removeFriends(ids)
+        lock.withLock {
+            val current = mutable.value
+            save(current.copy(blockedFriends = (current.blockedFriends.orEmpty() + ids).distinct()))
+        }
+    }
+
+    suspend fun restoreFriend(id: String) = withContext(Dispatchers.IO) {
+        loaded.await()
+        val restoredIds = lock.withLock {
+            val current = mutable.value
+            val name = current.hiddenFriendNames?.get(id)
+            val tombstones = current.deletedPlaylists.orEmpty().values.filter { it.friendId == id }
+            val existing = current.playlists.mapTo(hashSetOf()) { it.id }
+            val placeholders = tombstones.filter { it.id !in existing }.map { t ->
+                ConnectedPlaylist(t.id, t.remoteId, t.source, t.title, t.coverUrl, friendId = id,
+                    ownerName = name.orEmpty(), manual = true)
+            }
+            save(current.copy(
+                playlists = current.playlists + placeholders,
+                deletedPlaylists = (current.deletedPlaylists.orEmpty() - tombstones.map { it.id }.toSet()).ifEmpty { null },
+                hiddenFriends = current.hiddenFriends?.minus(id)?.ifEmpty { null },
+                hiddenFriendNames = current.hiddenFriendNames?.minus(id)?.ifEmpty { null },
+                // Restoring someone from Hidden also unblocks them.
+                blockedFriends = current.blockedFriends?.minus(id)?.ifEmpty { null },
+                aliases = if (!name.isNullOrBlank() && id !in current.aliases) current.aliases + (id to name) else current.aliases
+            ))
+            placeholders.map { it.id }
+        }
+        if (restoredIds.isNotEmpty()) refreshPlaylists(restoredIds)
+        Unit
     }
 
     /** Pins (or unpins) a friend's saved playlist into Your playlists. */
@@ -747,10 +1039,57 @@ class ConnectedLibraryRepository @Inject constructor(@ApplicationContext context
         }
     }
 
+    /**
+     * Renames several friends in one save. A null or blank name removes the alias, so the friend
+     * shows their platform name again.
+     */
+    suspend fun renameFriends(changes: Map<String, String?>) = withContext(Dispatchers.IO) {
+        if (changes.isEmpty()) return@withContext
+        loaded.await()
+        lock.withLock {
+            val current = mutable.value
+            val aliases = current.aliases.toMutableMap()
+            changes.forEach { (id, name) ->
+                val trimmed = name?.trim()
+                if (trimmed.isNullOrBlank()) aliases.remove(id) else aliases[id] = trimmed
+            }
+            save(current.copy(aliases = aliases))
+        }
+    }
+
+    /** Pins (or unpins) friends to the top of their Friends section. */
+    suspend fun setFriendsPinned(ids: Collection<String>, pinned: Boolean) = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext
+        loaded.await()
+        lock.withLock {
+            val current = mutable.value
+            val list = current.pinnedFriends.orEmpty()
+            val next = if (pinned) (list + ids).distinct() else list - ids.toSet()
+            save(current.copy(pinnedFriends = next.ifEmpty { null }))
+        }
+    }
+
     suspend fun renameFriend(id: String, name: String) = withContext(Dispatchers.IO) {
         require(name.trim().isNotBlank()) { "Enter a friend's name." }
         loaded.await(); lock.withLock { save(mutable.value.copy(aliases = mutable.value.aliases + (id to name.trim()))) }
     }
+    /**
+     * The songs of a public playlist, fetched without saving the playlist (friends in the room
+     * use these for a day). Playable songs are stored as cloud songs so the mix can resolve them,
+     * the same as any online find; they don't appear in your library.
+     */
+    suspend fun fetchPublicPlaylistSongs(source: String, remoteId: String): List<Song> = withContext(Dispatchers.IO) {
+        val songs = when (source) {
+            "SPOTIFY" -> spotify.getPlaylistTracks(remoteId).map { it.toSong() }
+            "YOUTUBE_MUSIC" -> youtube.getPlaylistTracks(remoteId).map { it.toSong() }
+            MusicSources.APPLE_MUSIC -> if (!appleMusicAuth.hasSession) emptyList()
+                else appleMusic.getPlaylistTracks(remoteId).map { it.toSong() }
+            else -> emptyList()
+        }
+        songs.filter { it.contentUriString.isNotBlank() }.forEach { music.saveCloudSong(it) }
+        songs
+    }
+
     /**
      * Saves a friend's public playlist and returns its playlist id. Pass [knownFriendId] when the
      * friend already has a platform id (e.g. "SPOTIFY:<userId>" from the friends feed), so the
@@ -772,7 +1111,7 @@ class ConnectedLibraryRepository @Inject constructor(@ApplicationContext context
                     val id = segments.getOrNull(segments.indexOf("playlist") + 1)?.takeIf { segments.contains("playlist") } ?: error("Use a Spotify playlist link.")
                     val p = spotify.getPlaylist(id)
                     val base = ConnectedPlaylist("SPOTIFY:$id", id, "SPOTIFY", p.title, p.coverUrl, friendId = friendId, ownerName = name.trim(), manual = true)
-                    preserve(mutable.value.playlists.find { it.id == base.id }, base) { spotify.getPlaylistTracks(id).map { it.toSong() } }
+                    preserve(mutable.value.playlists.find { it.id == base.id }, base) { spotify.getPlaylistTracks(id, FRIEND_PLAYLIST_MAX_SONGS).map { it.toSong() } }
                 }
                 "music.youtube.com", "www.youtube.com", "youtube.com" -> {
                     val id = uri.getQueryParameter("list") ?: error("Use a YouTube Music playlist link.")
@@ -788,7 +1127,7 @@ class ConnectedLibraryRepository @Inject constructor(@ApplicationContext context
                     if (!appleMusicAuth.hasSession) error("Connect Apple Music in Accounts to add Apple Music playlists.")
                     val p = appleMusic.getCatalogPlaylist(id, storefront)
                     val base = ConnectedPlaylist("APPLE_MUSIC:$id", id, MusicSources.APPLE_MUSIC, p.title, p.coverUrl, friendId = friendId, ownerName = name.trim(), manual = true)
-                    preserve(mutable.value.playlists.find { it.id == base.id }, base) { appleMusic.getPlaylistTracks(id).map { it.toSong() } }
+                    preserve(mutable.value.playlists.find { it.id == base.id }, base) { appleMusic.getPlaylistTracks(id).take(FRIEND_PLAYLIST_MAX_SONGS).map { it.toSong() } }
                 }
                 else -> error("Use a Spotify, YouTube Music or Apple Music playlist link.")
             }
@@ -801,6 +1140,17 @@ class ConnectedLibraryRepository @Inject constructor(@ApplicationContext context
     }
 }
 
+/** A friend's saved playlist is re-read from the service at most this often (sync). */
+private const val FRIEND_PLAYLIST_REFRESH_MS = 24L * 60 * 60 * 1000
 
+/** How many friends' playlists one sync re-reads (oldest first); the rest wait for later syncs. */
+private const val FRIEND_PLAYLISTS_PER_SYNC = 3
 
+/**
+ * Most songs kept for a friend's playlist. Enough for blends and browsing; stops one 5,000-song
+ * playlist from holding thousands of songs in memory (and in the saved snapshot).
+ */
+private const val FRIEND_PLAYLIST_MAX_SONGS = 1_000
 
+/** Songs matched at once during an export (the Spotify client still paces its own requests). */
+private const val EXPORT_MATCH_CONCURRENCY = 4

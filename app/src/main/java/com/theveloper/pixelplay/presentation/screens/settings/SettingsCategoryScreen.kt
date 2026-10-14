@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.gestures.animateScrollBy
@@ -225,48 +224,6 @@ fun SettingsCategoryScreen(
         }
     }
 
-    // Widgets: the live preview and the widget picker stay put; only the options scroll.
-    if (category == SettingsCategory.WIDGETS) {
-        val widgetsScroll = androidx.compose.foundation.rememberScrollState()
-        val widgetsHighlightScroll: (Float) -> Unit = remember(coroutineScope, widgetsScroll) {
-            { rowWindowY ->
-                coroutineScope.launch { runCatching { widgetsScroll.animateScrollBy(rowWindowY - maxTopBarHeightPx * 3) } }
-            }
-        }
-        Box(modifier = Modifier.fillMaxSize()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = minTopBarHeight)
-            ) {
-                WidgetsPinnedHeader(modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp))
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .verticalScroll(widgetsScroll)
-                        .padding(horizontal = 16.dp)
-                        .padding(bottom = MiniPlayerHeight + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 16.dp)
-                ) {
-                    CompositionLocalProvider(
-                        LocalHighlightSettingKey provides highlight,
-                        LocalHighlightScrollRequest provides widgetsHighlightScroll
-                    ) {
-                        WidgetsSettingsContent()
-                    }
-                }
-            }
-            CollapsibleCommonTopBar(
-                collapseFraction = 1f,
-                headerHeight = minTopBarHeight,
-                onBackClick = onBackClick,
-                title = categoryTitle,
-                maxLines = 1,
-                actions = { WidgetResetAction() }
-            )
-        }
-        return
-    }
-
     Box(
         modifier =
             Modifier.nestedScroll(nestedScrollConnection).fillMaxSize()
@@ -335,11 +292,6 @@ fun SettingsCategoryScreen(
                                     navController = navController,
                                     settingsViewModel = settingsViewModel
                                 )
-                            }
-                            SettingsCategory.WIDGETS -> {
-                                // Backed by its own ViewModel, so it takes neither
-                                // settingsViewModel nor the shared uiState.
-                                WidgetsSettingsContent()
                             }
                             SettingsCategory.AI_INTEGRATION -> {
                                 AiSettingsContent(

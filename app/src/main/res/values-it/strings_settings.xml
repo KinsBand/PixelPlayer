@@ -168,9 +168,9 @@
     <string name="settings_language_turkish">Turco</string>
     <string name="settings_app_theme_title">Tema app</string>
     <string name="settings_app_theme_subtitle">Passa tra chiaro, scuro o segui l\'aspetto di sistema.</string>
-    <string name="settings_theme_light">Tema chiaro</string>
-    <string name="settings_theme_dark">Tema scuro</string>
-    <string name="settings_theme_follow_system">Segui sistema</string>
+    <string name="settings_theme_light">Chiaro</string>
+    <string name="settings_theme_dark">Scuro</string>
+    <string name="settings_theme_follow_system">Sistema</string>
     <string name="settings_smooth_corners_title">Usa angoli morbidi</string>
     <string name="settings_smooth_corners_subtitle">Usa angoli a forma complessa che migliorano l\'estetica ma possono influire sulle prestazioni su dispositivi di fascia bassa</string>
     <string name="settings_disable_blur_all_over_title">Disattiva effetti sfocatura</string>

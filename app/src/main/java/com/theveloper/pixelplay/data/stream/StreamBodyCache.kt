@@ -38,6 +38,12 @@ class StreamBodyCache(
     /** Video ids with a writer open. */
     private val writing = HashSet<String>()
 
+    /** Video ids whose whole song is cached (they play offline). */
+    fun completeIds(): Set<String> = synchronized(lock) {
+        ensureIndexed()
+        complete.keys.toSet()
+    }
+
     /** The complete cached song for [videoId], if any. */
     fun lookup(videoId: String): Entry? = synchronized(lock) {
         ensureIndexed()

@@ -16,9 +16,11 @@ object RecordingKeys {
     private val nonAlnum = Regex("""[^\p{L}\p{N}]+""")
     private val artistSplit = Regex("""\s*(?:,|&|;|\bfeat\.?|\bft\.|\bfeaturing\b|\bwith\b)\s*""", RegexOption.IGNORE_CASE)
     private val titleSplit = Regex("""\s+[-–—]\s+""")
+    /** Compiled once: these keys run for every song in the library. */
+    private val whitespace = Regex("\\s+")
 
     private fun norm(value: String): String =
-        nonAlnum.replace(value.lowercase(Locale.ROOT), " ").trim().replace(Regex("\\s+"), " ")
+        nonAlnum.replace(value.lowercase(Locale.ROOT), " ").trim().replace(whitespace, " ")
 
     /** Main artist only: "A, B feat. C" -> "a"; "ArtistVEVO" / "Artist - Topic" -> "artist". */
     fun primaryArtist(artist: String): String {

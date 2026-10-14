@@ -7,6 +7,9 @@ import com.theveloper.pixelplay.data.media.SongMetadataEditor
 import com.theveloper.pixelplay.data.model.Lyrics
 import com.theveloper.pixelplay.data.model.LyricsSourcePreference
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.data.lyrics.align.LyricsAlignmentBuilder
+import com.theveloper.pixelplay.data.lyrics.align.LyricsWordAligner
+import com.theveloper.pixelplay.data.lyrics.autosync.LyricsAutoOffsets
 import com.theveloper.pixelplay.data.lyrics.autosync.LyricsAutoSync
 import com.theveloper.pixelplay.data.preferences.LyricsSyncOffsetState
 import com.theveloper.pixelplay.data.preferences.UserPreferencesRepository
@@ -148,6 +151,77 @@ class LyricsStateHolder @Inject constructor(
                 }
                 .collect { }
         }
+
+        // Adaptive expressive typography: give the current song its measured voice (loudness over
+        // the whole song, energy, tempo) as soon as it has any lyrics, synced or plain, local or
+        // streamed. The analyzer checks the typography toggles itself and saves each result.
+        coroutineScope.launch {
+            stablePlayerState
+                .map { it.currentSong to (!it.lyrics?.synced.isNullOrEmpty() || !it.lyrics?.plain.isNullOrEmpty()) }
+                .distinctUntilChanged { a, b -> a.first?.id == b.first?.id && a.second == b.second }
+                .collect { (song, hasLyrics) ->
+                    if (song != null && hasLyrics) {
+                        com.theveloper.pixelplay.data.lyrics.voice.SongVoiceAnalyzer.get()?.request(song)
+                    }
+                }
+        }
+
+        // On-device word sync: the current song's line-synced lyrics get word and letter timing
+        // from its audio. A saved result applies at once; a new one arrives when the analysis ends.
+        // The automatic model download follows the "mobile data" setting.
+        coroutineScope.launch {
+            userPreferencesRepository.lyricsWordAlignMobileDataFlow.distinctUntilChanged().collect { allowed ->
+                LyricsWordAligner.get()?.models?.allowMobileData = allowed
+            }
+        }
+        coroutineScope.launch {
+            combine(
+                stablePlayerState
+                    .map { it.currentSong to it.lyrics }
+                    .distinctUntilChanged { a, b -> a.first?.id == b.first?.id && a.second?.synced == b.second?.synced },
+                userPreferencesRepository.lyricsWordAlignEnabledFlow.distinctUntilChanged(),
+                // Re-runs when the model finishes downloading, so the song playing gets synced at once.
+                (LyricsWordAligner.get()?.models?.state?.map { it.isReady } ?: kotlinx.coroutines.flow.flowOf(false))
+                    .distinctUntilChanged()
+            ) { songAndLyrics, enabled, _ -> Triple(songAndLyrics.first, songAndLyrics.second, enabled) }
+                .collect { (song, lyrics, enabled) ->
+                    if (!enabled) {
+                        LyricsAutoOffsets.unsuppressAll()
+                        return@collect
+                    }
+                    val aligner = LyricsWordAligner.get() ?: return@collect
+                    if (song == null || LyricsWordAligner.keyOf(lyrics) == null) return@collect
+                    // The offset the player uses for this song right now (manual, else automatic).
+                    aligner.request(song, lyrics!!) { userPreferencesRepository.getLyricsSyncOffset(song.id) }
+                }
+        }
+
+        // Swap aligned lyrics in for the current song when they match what it is showing.
+        coroutineScope.launch {
+            val published = LyricsWordAligner.get()?.published ?: return@launch
+            combine(
+                stablePlayerState.map { it.currentSong?.id to it.lyrics }.distinctUntilChanged(),
+                published,
+                userPreferencesRepository.lyricsWordAlignEnabledFlow.distinctUntilChanged()
+            ) { current, aligned, enabled -> Triple(current, aligned, enabled) }
+                .collect { (current, aligned, enabled) ->
+                    val (songId, lyrics) = current
+                    if (!enabled || songId == null) return@collect
+                    val entry = aligned[songId] ?: return@collect
+                    if (LyricsWordAligner.keyOf(lyrics) != entry.key) return@collect
+                    // Aligned times are audio times. The automatic offset must not be added on top;
+                    // a manual offset still applies, so pre-shift by it to keep the words on time.
+                    val manualMs = try {
+                        userPreferencesRepository.getManualLyricsSyncOffset(songId) ?: 0
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (_: Exception) {
+                        0
+                    }
+                    LyricsAutoOffsets.suppress(songId)
+                    loadCallback?.onLyricsLoaded(songId, LyricsAlignmentBuilder.shift(entry.lyrics, manualMs))
+                }
+        }
     }
 
     /**
@@ -157,6 +231,8 @@ class LyricsStateHolder @Inject constructor(
     private suspend fun requestAutoSync(song: Song, lyrics: Lyrics?, lookAhead: Boolean) {
         val autoSync = LyricsAutoSync.get() ?: return
         if (lyrics?.synced.isNullOrEmpty()) return
+        // Word-aligned lyrics are already in audio time: no offset to measure.
+        if (lyrics?.timing?.source == LyricsAlignmentBuilder.SOURCE) return
         try {
             if (!userPreferencesRepository.lyricsAutoSyncEnabledFlow.first()) return
             if (userPreferencesRepository.hasManualLyricsSyncOffset(song.id)) return
@@ -237,6 +313,11 @@ class LyricsStateHolder @Inject constructor(
             for ((index, song) in songs.withIndex()) {
                 try {
                     val synced = musicRepository.prefetchLyrics(song)
+                    // The next song's typographic voice too (no-op unless its audio is already on
+                    // the phone and adaptive typography is on).
+                    if (index == 0) {
+                        com.theveloper.pixelplay.data.lyrics.voice.SongVoiceAnalyzer.get()?.request(song, lookAhead = true)
+                    }
                     // Measure the next song's lyrics offset now, so it is ready when it starts.
                     if (synced && index == 0) {
                         musicRepository.getStoredLyrics(song)?.first?.let { stored ->

@@ -101,6 +101,9 @@ fun PlaylistBottomSheet(
         else playlistUiState.playlists.filter { it.name.contains(searchQuery, true) }
     }
     val hasActiveAiProviderApiKey by playerViewModel.hasActiveAiProviderApiKey.collectAsStateWithLifecycle()
+    // Typing a name no playlist has offers to create it right here (no dialog).
+    val typedName = searchQuery.trim()
+    val offerCreate = typedName.isNotEmpty() && playlistUiState.playlists.none { it.name.trim().equals(typedName, ignoreCase = true) }
     val addableServiceIds by playlistViewModel.addableServicePlaylistIds.collectAsStateWithLifecycle()
     val reducedMotion = com.theveloper.pixelplay.ui.theme.rememberSystemReducedMotion()
     // Spotify / Apple Music playlists are add-only (matched on the service), never pre-checked.
@@ -133,6 +136,15 @@ fun PlaylistBottomSheet(
         label = "fab_alpha"
     )
 
+    val dismissSheetAnimated = rememberAnimatedSheetDismiss(sheetState, onDismiss)
+    val createTypedPlaylist: (() -> Unit)? = if (offerCreate) {
+        {
+            playlistViewModel.createPlaylistWithSongs(typedName, songs) { message ->
+                playerViewModel.sendToast(message)
+            }
+            dismissSheetAnimated()
+        }
+    } else null
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -173,6 +185,9 @@ fun PlaylistBottomSheet(
                     ),
                     onValueChange = { searchQuery = it },
                     label = { Text(stringResource(R.string.playlist_sheet_search_playlists_hint)) },
+                    // Enter on a new name creates it, same as tapping the "Create" row.
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { createTypedPlaylist?.invoke() }),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 8.dp),
@@ -224,11 +239,30 @@ fun PlaylistBottomSheet(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = offerCreate,
+                    enter = androidx.compose.animation.expandVertically(
+                        androidx.compose.animation.core.tween(com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium1, easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate)
+                    ) + androidx.compose.animation.fadeIn(),
+                    exit = androidx.compose.animation.shrinkVertically(
+                        androidx.compose.animation.core.tween(com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort4, easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate)
+                    ) + androidx.compose.animation.fadeOut()
+                ) {
+                    // Keeps the last name while it shrinks away.
+                    val shownName = remember { mutableStateOf(typedName) }
+                    if (offerCreate) shownName.value = typedName
+                    NewPlaylistSkeletonRow(
+                        name = shownName.value,
+                        onClick = { createTypedPlaylist?.invoke() },
+                        modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp)
+                    )
+                }
+
                 if (playlistUiState.isLoading && sections.isEmpty()) {
                     Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
                         androidx.compose.material3.CircularProgressIndicator()
                     }
-                } else if (sections.isEmpty()) {
+                } else if (sections.isEmpty() && !offerCreate) {
                     Text(
                         text = "No playlists found",
                         style = MaterialTheme.typography.bodyMedium,
@@ -268,10 +302,11 @@ fun PlaylistBottomSheet(
                         onDismiss = { showCreatePlaylistDialog = false },
                         onCreate = { name ->
                             // Pass all selected songs to the new playlist
-                            playlistViewModel.createPlaylist(name, songIds = songs.map { it.id })
+                            playlistViewModel.createPlaylistWithSongs(name, songs) { message ->
+                                playerViewModel.sendToast(message)
+                            }
                             showCreatePlaylistDialog = false
-                            onDismiss() // Close sheet after creation + add
-                            playerViewModel.sendToast(playlistCreatedAndSongsAddedMessage)
+                            dismissSheetAnimated() // Close sheet after creation + add
                         },
                         onGenerateClick = {
                             showCreatePlaylistDialog = false
@@ -300,18 +335,12 @@ fun PlaylistBottomSheet(
                     // Spotify / Apple Music: matched and added on the service; they report their own result.
                     val serviceIds = selectedIds.filter { it in addOnlyServiceIds }
                     val otherIds = selectedIds.filterNot { it in addOnlyServiceIds }
-                    if (songs.size == 1) {
-                         playlistViewModel.addOrRemoveSongFromPlaylists(
-                            songs.first().id,
-                            otherIds,
-                            currentPlaylistId
-                        )
-                    } else if (otherIds.isNotEmpty()) {
-                         // Batch add
-                         playlistViewModel.addSongsToPlaylists(
-                             songs.map { it.id },
-                             otherIds
-                         )
+                    // Online songs are saved first so the playlist can show (and count) them;
+                    // the result (added / removed / what failed) comes back as one message.
+                    if (songs.size == 1 || otherIds.isNotEmpty()) {
+                        playlistViewModel.saveSongsToPlaylists(songs, otherIds, currentPlaylistId) { message ->
+                            playerViewModel.sendToast(message)
+                        }
                     }
                     if (serviceIds.isNotEmpty()) {
                         playlistViewModel.addSongsToServicePlaylists(songs, serviceIds) { message ->
@@ -320,9 +349,6 @@ fun PlaylistBottomSheet(
                     }
                     // Hide first, then remove the sheet (keeps the exit animation).
                     sheetScope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
-                    if (otherIds.isNotEmpty() || songs.size == 1 && serviceIds.isEmpty()) {
-                        playerViewModel.sendToast(if (songs.size > 1) songAddedToPlaylistsMessage else commonSavedMessage)
-                    }
                     playerViewModel.multiSelectionStateHolder.clearSelection()
                 },
                 icon = { Icon(Icons.Rounded.Save, saveActionText) },

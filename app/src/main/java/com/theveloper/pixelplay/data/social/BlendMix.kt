@@ -24,6 +24,11 @@ data class BlendMix(
     val day: Int,
     /** Distinct songs known from the friend's side (recent plays + saved playlists). */
     val friendInputCount: Int = 0,
+    /**
+     * Whose side each song came from (song id -> [BlendMixGenerator.ME], the friend id, or
+     * [BlendMixGenerator.BOTH] for songs you both play). Drives the blend page's contributor filter.
+     */
+    val contributors: Map<String, String> = emptyMap(),
 ) {
     /** Nothing known about the friend's listening yet: no card at all. */
     val hasFriendData: Boolean get() = friendInputCount > 0
@@ -55,6 +60,8 @@ data class CustomBlend(
     val day: Int,
     /** Distinct songs known from the friends' side. */
     val friendInputCount: Int,
+    /** Songs two or more of you play (the blend page marks them with a sparkle). */
+    val sharedSongIds: Set<String> = emptySet(),
 ) {
     val isEmpty: Boolean get() = friendIds.isEmpty()
     val isBuilding: Boolean get() = friendInputCount < BlendMixGenerator.MIN_FRIEND_SONGS || songs.size < BlendMixGenerator.MIN_SONGS
@@ -69,18 +76,27 @@ object BlendMixGenerator {
     /** Member id standing for you in a [CustomBlend]. */
     const val ME = "me"
 
+    /** A 1-on-1 blend song you both play (shows under You and under the friend). */
+    const val BOTH = "both"
+
     /** No more than this many songs by one artist in a custom blend (relaxed only if needed to fill it). */
     private const val GROUP_ARTIST_CAP = 5
+
+    /** A friend's song counts for a mood when at least this share of your rated songs by that artist fit it. */
+    internal const val ARTIST_MOOD_SHARE = 0.5f
+
+    /** Your side of a mood blend is topped up from your library to about this many songs. */
+    const val MOOD_MY_SIDE = 80
 
     fun today(now: Long = System.currentTimeMillis()): Int {
         val c = Calendar.getInstance().apply { timeInMillis = now }
         return c.get(Calendar.YEAR) * 1000 + c.get(Calendar.DAY_OF_YEAR)
     }
 
-    private fun songKey(song: Song): String =
+    internal fun songKey(song: Song): String =
         TrackMatching.normalize(song.title) + "|" + artistKey(song.displayArtist)
 
-    private fun artistKey(artist: String): String =
+    internal fun artistKey(artist: String): String =
         TrackMatching.stripAccents(artist).lowercase(Locale.ROOT)
             .split(',', '&', '/').firstOrNull()?.trim().orEmpty()
 
@@ -120,15 +136,18 @@ object BlendMixGenerator {
             .take(limit * 2).shuffled(random)
 
         val result = LinkedHashMap<String, Song>()
-        fun add(song: Song) { if (result.size < limit) result.putIfAbsent(songKey(song), song) }
+        val sideOf = HashMap<String, String>()
+        fun add(song: Song, side: String) {
+            if (result.size < limit && result.putIfAbsent(songKey(song), song) == null) sideOf[song.id] = side
+        }
 
-        shared.shuffled(random).take(limit / 3).forEach(::add)
+        shared.shuffled(random).take(limit / 3).forEach { add(it, BOTH) }
         // Alternate sides so neither person dominates, overlap-adjacent picks first.
         val mineQueue = ArrayDeque(mineOnArtists.shuffled(random) + mineRest)
         val friendQueue = ArrayDeque(friendOnArtists.shuffled(random) + friendRest)
         while (result.size < limit && (mineQueue.isNotEmpty() || friendQueue.isNotEmpty())) {
-            friendQueue.removeFirstOrNull()?.let(::add)
-            mineQueue.removeFirstOrNull()?.let(::add)
+            friendQueue.removeFirstOrNull()?.let { add(it, friendId) }
+            mineQueue.removeFirstOrNull()?.let { add(it, ME) }
         }
         // Spread shared songs through the mix rather than front-loading them.
         val ordered = result.values.toMutableList()
@@ -151,6 +170,7 @@ object BlendMixGenerator {
             sharedCount = sharedPicked.size,
             day = day,
             friendInputCount = friendByKey.size,
+            contributors = sideOf,
         )
     }
 
@@ -264,8 +284,80 @@ object BlendMixGenerator {
             sharedCount = sharedPicked.size,
             day = day,
             friendInputCount = friendInputCount,
+            sharedSongIds = sharedPicked.mapTo(HashSet()) { it.value.id },
         )
     }
+}
+
+/**
+ * What one mood looks like in your library, used to build a mood blend from everyone's songs.
+ *
+ * Friends' songs arrive with only a title and artist (no genre, no audio features), so they
+ * can't be scored directly. A friend's song fits the mood when:
+ * 1. your copy of the same song fits it (or, if your copy was rated and doesn't fit, it doesn't), or
+ * 2. it fits on its own (title words, any tags it has), or
+ * 3. at least [BlendMixGenerator.ARTIST_MOOD_SHARE] of your rated songs by that artist fit it.
+ *
+ * Build one with [BlendMixGenerator.moodLens]; it holds only keys and a capped pick list, not the library.
+ */
+class BlendMoodLens internal constructor(
+    private val threshold: Double,
+    private val fit: (Song) -> Double,
+    /** Song key -> does your (rated) copy fit. */
+    private val verdicts: Map<String, Boolean>,
+    /** Artist key -> share of your rated songs by them that fit (only artists with at least one fit). */
+    private val artistShare: Map<String, Float>,
+    /** Your library songs that fit, best fit first (tops up your side of the blend). */
+    val libraryPicks: List<Song>,
+) {
+    fun fits(song: Song): Boolean {
+        verdicts[BlendMixGenerator.songKey(song)]?.let { return it }
+        if (fit(song) >= threshold) return true
+        val artist = BlendMixGenerator.artistKey(song.displayArtist)
+        return artist.isNotEmpty() && (artistShare[artist] ?: 0f) >= BlendMixGenerator.ARTIST_MOOD_SHARE
+    }
+}
+
+/**
+ * Builds the [BlendMoodLens] for one mood from your whole library.
+ * @param fit the mood score of a song (0.0 exactly = nothing known about it, so it isn't rated).
+ * @param threshold the score a song needs to fit.
+ */
+fun BlendMixGenerator.moodLens(library: List<Song>, threshold: Double, fit: (Song) -> Double): BlendMoodLens {
+    val verdicts = HashMap<String, Boolean>()
+    val rated = HashMap<String, Int>()
+    val fitting = HashMap<String, Int>()
+    val picks = ArrayList<Pair<Song, Double>>()
+    for (song in library) {
+        val score = fit(song)
+        // No tags and no measurements: nothing to judge it by, so it neither counts for nor against.
+        if (score == 0.0) continue
+        val ok = score >= threshold
+        val key = songKey(song)
+        verdicts[key] = (verdicts[key] ?: false) || ok
+        val artist = artistKey(song.displayArtist)
+        if (artist.isNotEmpty()) {
+            rated[artist] = (rated[artist] ?: 0) + 1
+            if (ok) fitting[artist] = (fitting[artist] ?: 0) + 1
+        }
+        if (ok) picks += song to score
+    }
+    val share = fitting.mapValues { (artist, n) -> n.toFloat() / (rated[artist] ?: n).coerceAtLeast(1) }
+    val bestPicks = picks.sortedByDescending { it.second }.take(MOOD_LIBRARY_PICKS_FOR_LENS).map { it.first }
+    return BlendMoodLens(threshold, fit, verdicts, share, bestPicks)
+}
+
+private const val MOOD_LIBRARY_PICKS_FOR_LENS = 300
+
+/**
+ * Your side of a mood blend: the songs you play most that fit the mood, topped up with your
+ * library's best fits until there are about [size].
+ */
+fun BlendMixGenerator.mineForMood(mine: List<Song>, lens: BlendMoodLens, size: Int = BlendMixGenerator.MOOD_MY_SIDE): List<Song> {
+    val played = mine.filter(lens::fits)
+    if (played.size >= size) return played
+    val seen = played.mapTo(HashSet()) { songKey(it) }
+    return played + lens.libraryPicks.filter { seen.add(songKey(it)) }.take(size - played.size)
 }
 
 /** Takes one song from each list in turn (a, b, c, a, b, c, …) until all are used. */

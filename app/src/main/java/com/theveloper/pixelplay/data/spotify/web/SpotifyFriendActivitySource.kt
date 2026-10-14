@@ -41,6 +41,31 @@ class SpotifyFriendActivitySource @Inject constructor(
 
     private val profileLookups = Semaphore(3)
 
+    /**
+     * Song lengths by track id, so the history can tell a resume from a replay. The feed doesn't
+     * carry them; one search per new song (cached, -1 = not found, retried after an hour).
+     */
+    private data class KnownLength(val ms: Long, val at: Long)
+    private val lengths = java.util.concurrent.ConcurrentHashMap<String, KnownLength>()
+    private val lengthLookups = Semaphore(1)
+
+    private suspend fun lengthOf(trackId: String, title: String, artist: String, now: Long): Long? {
+        lengths[trackId]?.let { known ->
+            if (known.ms > 0) return known.ms
+            if (now - known.at < 60 * 60_000L) return null
+        }
+        return lengthLookups.withPermit {
+            try {
+                val found = library.searchTracks("$title $artist".trim(), limit = 5)
+                    .firstOrNull { it.id == trackId }?.durationMs?.toLong()?.takeIf { it > 0 }
+                lengths[trackId] = KnownLength(found ?: -1L, now)
+                if (lengths.size > 500) lengths.keys.take(100).forEach(lengths::remove)
+                found
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { lengths[trackId] = KnownLength(-1L, now); null }
+        }
+    }
+
     override suspend fun poll(): List<FriendActivityReport> {
         if (!session.hasSession) return emptyList()
         val now = System.currentTimeMillis()
@@ -60,7 +85,7 @@ class SpotifyFriendActivitySource @Inject constructor(
                         avatarUrl = friend.avatarUrl,
                         track = a?.let {
                             FriendTrack(title = it.title, artist = it.artist, coverUrl = it.coverUrl, trackUri = it.trackUri,
-                                durationMs = null, playedAt = it.timestamp)
+                                durationMs = lengthOf(it.trackId, it.title, it.artist, now), playedAt = it.timestamp, album = it.album)
                         },
                         // The live feed says so directly; the old buddy list only has a start time,
                         // so a song that started in the last few minutes counts as playing.
@@ -70,7 +95,11 @@ class SpotifyFriendActivitySource @Inject constructor(
                             val known = stats[p.id]?.takeIf { it.count >= 0 && now - it.at < STATS_TTL_MS }
                             FriendPublicPlaylist(remoteId = p.id, source = MusicSources.SPOTIFY, title = p.title,
                                 coverUrl = p.coverUrl, trackCount = known?.count ?: p.totalTracks,
-                                durationMs = known?.durationMs?.takeIf { it > 0 })
+                                durationMs = known?.durationMs?.takeIf { it > 0 },
+                                collaborative = p.collaborative,
+                                ownerName = p.ownerName.ifBlank { null },
+                                saves = p.saves,
+                                description = p.description)
                         }
                     )
                 }
@@ -78,7 +107,11 @@ class SpotifyFriendActivitySource @Inject constructor(
         }
     }
 
-    /** Reads a few uncounted playlists per poll (all their songs, so count and length are exact). */
+    /**
+     * Counts a few uncounted playlists per poll. The count comes from the first page; the length is
+     * only worked out for playlists small enough to read whole (it used to download every song of
+     * every friend's playlist, which on big ones wasted a lot of memory every poll).
+     */
     private suspend fun countMissing(reports: List<FriendActivityReport>, now: Long) = coroutineScope {
         val missing = reports.flatMap { it.publicPlaylists.orEmpty() }
             .map { it.remoteId }.distinct()
@@ -88,8 +121,8 @@ class SpotifyFriendActivitySource @Inject constructor(
             async {
                 statLookups.withPermit {
                     try {
-                        val tracks = library.playlistTracks(id)
-                        stats[id] = PlaylistStats(tracks.size, tracks.sumOf { it.durationMs.toLong() }, System.currentTimeMillis())
+                        val (count, durationMs) = library.playlistSummary(id)
+                        stats[id] = PlaylistStats(count, durationMs ?: 0L, System.currentTimeMillis())
                     } catch (e: CancellationException) { throw e }
                     catch (_: Exception) { stats[id] = PlaylistStats(-1, 0, System.currentTimeMillis() - STATS_TTL_MS + 30 * 60_000L) } // unknown; retry in 30 min
                 }

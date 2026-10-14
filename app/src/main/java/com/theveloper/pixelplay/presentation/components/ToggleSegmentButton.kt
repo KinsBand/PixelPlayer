@@ -52,7 +52,9 @@ fun ToggleSegmentButton(
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
     painter: Painter,
-    contentDesc: String
+    contentDesc: String,
+    /** Extra modifier for the icon only (e.g. the shuffle spin). */
+    iconModifier: Modifier = Modifier
 ) {
     ToggleSegmentButtonContainer(
         modifier = modifier,
@@ -73,7 +75,7 @@ fun ToggleSegmentButton(
             painter = painter,
             contentDescription = contentDesc,
             tint = iconTint,
-            modifier = Modifier.size(24.dp)
+            modifier = Modifier.size(24.dp).then(iconModifier)
         )
     }
 }

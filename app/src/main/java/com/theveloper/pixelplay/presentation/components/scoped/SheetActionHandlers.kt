@@ -9,6 +9,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavHostController
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.presentation.components.QueueSourceLink
 import com.theveloper.pixelplay.presentation.navigation.Screen
 import com.theveloper.pixelplay.presentation.navigation.navigateSafelyReplacing
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
@@ -25,7 +26,9 @@ internal data class SheetActionHandlers(
     val onLaunchSaveQueueOverlay: (List<Song>, String, (String, Set<String>) -> Unit) -> Unit,
     val onNavigateToAlbum: (Song) -> Unit,
     val onNavigateToArtist: (Song) -> Unit,
-    val onNavigateToGenre: (Song) -> Unit
+    val onNavigateToGenre: (Song) -> Unit,
+    /** Opens the page the queue came from (album, playlist, artist, Friends). */
+    val onOpenQueueSource: (QueueSourceLink) -> Unit
 )
 
 @OptIn(UnstableApi::class)
@@ -82,12 +85,15 @@ internal fun rememberSheetActionHandlers(
             playerViewModelState.value.collapsePlayerSheet()
             queueSheetControllerState.value.animate(false)
             sheetModalOverlayControllerState.value.updateSelectedSongForInfo(null)
-            if (song.albumId != -1L) {
+            // Library albums open by id; cloud songs, streams and unindexed files (albumId -1)
+            // open by album title + artist.
+            Screen.AlbumDetail.createRouteForSong(song)?.let { route ->
                 navController.navigateSafelyReplacing(
-                    route = Screen.AlbumDetail.createRoute(song.albumId),
+                    route = route,
                     patternToPop = Screen.AlbumDetail.route
                 )
             }
+            Unit
         }
     }
     val onNavigateToArtist = remember(scope, navController) {
@@ -125,6 +131,24 @@ internal fun rememberSheetActionHandlers(
         }
     }
 
+    val onOpenQueueSource = remember(scope, navController) {
+        { link: QueueSourceLink ->
+            scope.launch {
+                sheetMotionControllerState.value.snapCollapsed(sheetCollapsedTargetYState.value)
+            }
+            playerViewModelState.value.collapsePlayerSheet()
+            queueSheetControllerState.value.animate(false)
+            sheetModalOverlayControllerState.value.updateSelectedSongForInfo(null)
+            val pattern = link.patternToPop
+            if (pattern != null) {
+                navController.navigateSafelyReplacing(route = link.route, patternToPop = pattern)
+            } else {
+                navController.navigateSafely(link.route)
+            }
+            Unit
+        }
+    }
+
     return SheetActionHandlers(
         openQueueSheet = openQueueSheet,
         animateQueueSheet = animateQueueSheet,
@@ -135,6 +159,7 @@ internal fun rememberSheetActionHandlers(
         onLaunchSaveQueueOverlay = onLaunchSaveQueueOverlay,
         onNavigateToAlbum = onNavigateToAlbum,
         onNavigateToArtist = onNavigateToArtist,
-        onNavigateToGenre = onNavigateToGenre
+        onNavigateToGenre = onNavigateToGenre,
+        onOpenQueueSource = onOpenQueueSource
     )
 }

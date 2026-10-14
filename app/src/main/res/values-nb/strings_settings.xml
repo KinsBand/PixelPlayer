@@ -168,9 +168,9 @@
     <string name="settings_language_turkish">Tyrkisk</string>
     <string name="settings_app_theme_title">App-tema</string>
     <string name="settings_app_theme_subtitle">Bytt mellom lyst, mÃ¸rkt eller fÃ¸lg systemets utseende.</string>
-    <string name="settings_theme_light">Lyst tema</string>
-    <string name="settings_theme_dark">MÃ¸rkt tema</string>
-    <string name="settings_theme_follow_system">FÃ¸lg system</string>
+    <string name="settings_theme_light">Lyst</string>
+    <string name="settings_theme_dark">Mørkt</string>
+    <string name="settings_theme_follow_system">System</string>
     <string name="settings_smooth_corners_title">Bruk glatte hjÃ¸rner</string>
     <string name="settings_smooth_corners_subtitle">Bruker kompleks formede hjÃ¸rner for Ã¥ forbedre estetikken, men kan pÃ¥virke ytelsen pÃ¥ eldre enheter</string>
     <string name="settings_disable_blur_all_over_title">Deaktiver slÃ¸ringseffekter</string>

@@ -8,5 +8,7 @@ enum class SearchFilterType {
     SONGS,
     ALBUMS,
     ARTISTS,
-    PLAYLISTS
+    PLAYLISTS,
+    /** Spotify people (and friends) by name, username, profile link or spotify:user: URI. */
+    PROFILES
 }

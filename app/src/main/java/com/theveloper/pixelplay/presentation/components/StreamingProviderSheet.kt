@@ -36,6 +36,7 @@ fun StreamingProviderSheet(
     val providerSegmentContainerShape = RoundedCornerShape(20.dp)
     val providerSegmentItemShape = RoundedCornerShape(8.dp)
 
+    val dismissSheetAnimated = rememberAnimatedSheetDismiss(sheetState, onDismissRequest)
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = sheetState,
@@ -92,7 +93,7 @@ fun StreamingProviderSheet(
                         shape = providerSegmentItemShape,
                         onClick = {
                             onNavigateToSpotify()
-                            onDismissRequest()
+                            dismissSheetAnimated()
                         }
                     )
 
@@ -104,7 +105,7 @@ fun StreamingProviderSheet(
                         shape = providerSegmentItemShape,
                         onClick = {
                             onNavigateToYouTubeMusic()
-                            onDismissRequest()
+                            dismissSheetAnimated()
                         }
                     )
                 }

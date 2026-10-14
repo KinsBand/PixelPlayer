@@ -46,9 +46,15 @@ fun AppSidebarDrawer(
 ) {
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = false,
+        // Swipe-to-open stays off (it fights the Home pager), but once the drawer is open
+        // it can be swiped closed like any M3 drawer.
+        gesturesEnabled = drawerState.isOpen,
         drawerContent = {
+            // Passing drawerState gives the sheet M3's predictive-back handling: Back (button
+            // or edge swipe) closes the drawer with its animation instead of falling through
+            // to the screen behind it / closing the app from Home.
             ModalDrawerSheet(
+                drawerState = drawerState,
                 modifier = Modifier
                     .width(300.dp)
                     .fillMaxHeight()

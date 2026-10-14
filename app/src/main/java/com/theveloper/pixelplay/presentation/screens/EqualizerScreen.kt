@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import com.theveloper.pixelplay.presentation.navigation.popBackStackSafely
 import android.annotation.SuppressLint
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -172,19 +173,21 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.material.icons.rounded.Headphones
 import com.theveloper.pixelplay.presentation.components.AutoEqSheet
-import com.theveloper.pixelplay.presentation.components.AuditionBar
 import com.theveloper.pixelplay.presentation.components.FineTuneDialog
 import com.theveloper.pixelplay.presentation.components.EducationalFrequencyMarkers
-import com.theveloper.pixelplay.presentation.components.HardwareOutputCard
-import com.theveloper.pixelplay.presentation.components.DspAudiophileSection
 import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun EqualizerScreen(
     navController: NavController? = null,
-    onBackClick: () -> Unit = { navController?.popBackStack() },
+    onBackClick: () -> Unit = { navController?.popBackStackSafely() },
     playerViewModel: PlayerViewModel = hiltViewModel(),
     equalizerViewModel: EqualizerViewModel = hiltViewModel()
 ) {
@@ -211,7 +214,6 @@ fun EqualizerScreen(
     val targetColorScheme = sheetThemeState.albumColorScheme
 
     // Sheet States
-    var genrePresetQuery by rememberSaveable { mutableStateOf("") }
     var showCustomPresetsSheet by remember { mutableStateOf(false) }
     var showReorderSheet by remember { mutableStateOf(false) }
     var showSaveDialog by remember { mutableStateOf(false) }
@@ -294,305 +296,248 @@ fun EqualizerScreen(
     ) { if (it) 0.dp else 40.dp }
     
     val lazyListState = rememberLazyListState()
+    val systemVolume by equalizerViewModel.systemVolume.collectAsStateWithLifecycle()
+    val volumeBoostDb by equalizerViewModel.volumeBoostDb.collectAsStateWithLifecycle()
+    val audioSessionId by equalizerViewModel.audioSessionId.collectAsStateWithLifecycle()
 
     MaterialTheme(
         colorScheme = targetColorScheme,
         typography = MaterialTheme.typography,
         shapes = MaterialTheme.shapes
     ) {
-        PixelPlayStatusBarStyle(color = targetColorScheme.surface)
+        val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+        val topBarHeight = 64.dp + statusBarHeight
 
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.surface)
-                .graphicsLayer {
-                    alpha = contentAlpha
-                    translationY = contentOffset.toPx()
-                }
         ) {
-            Scaffold(
-                containerColor = Color.Transparent,
-                topBar = {
-                    Row(
+            LazyColumn(
+                state = lazyListState,
+                contentPadding = PaddingValues(
+                    top = topBarHeight + 8.dp,
+                    bottom = MiniPlayerHeight + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 24.dp
+                ),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        alpha = contentAlpha
+                        translationY = contentOffset.toPx()
+                    }
+            ) {
+                item(key = "adapt_to_genre") {
+                    Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .statusBarsPadding()
-                            .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .clip(RoundedCornerShape(24.dp))
                     ) {
-                        FilledIconButton(
-                            onClick = onBackClick,
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                                contentColor = MaterialTheme.colorScheme.onSurface
-                            )
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                                contentDescription = stringResource(R.string.common_back)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(16.dp))
-
-                        Text(
-                            text = stringResource(R.string.settings_category_equalizer_title),
-                            style = MaterialTheme.typography.titleLarge,
-                            fontFamily = GoogleSansRounded,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1f)
-                        )
-
-                        // AutoEq headphone profiles button
-                        FilledIconButton(
-                            onClick = { equalizerViewModel.setAutoEqSheetVisible(true) },
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                                contentColor = MaterialTheme.colorScheme.onSurface
-                            )
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Headphones,
-                                contentDescription = stringResource(R.string.equalizer_autoeq_title)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(8.dp))
-
-                        // Save Preset button: shown only when custom/unpreset values are detected
-                        val isUnpreset = remember(uiState.bandLevels, uiState.allAvailablePresets) {
-                            uiState.allAvailablePresets.none { it.bandLevels == uiState.bandLevels }
-                        }
-
-                        AnimatedVisibility(
-                            visible = isUnpreset,
-                            enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
-                                    scaleIn(initialScale = 0.8f, animationSpec = spring(stiffness = Spring.StiffnessMediumLow)),
-                            exit = fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
-                                   scaleOut(targetScale = 0.8f, animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                FilledIconButton(
-                                    onClick = { showSaveDialog = true },
-                                    colors = IconButtonDefaults.filledIconButtonColors(
-                                        containerColor = targetColorScheme.primary,
-                                        contentColor = targetColorScheme.onPrimary
-                                    )
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Save,
-                                        contentDescription = stringResource(R.string.common_save)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(12.dp))
+                        SwitchSettingItem(
+                            title = stringResource(R.string.equalizer_adapt_genre_title),
+                            subtitle = when {
+                                !uiState.isEnabled -> stringResource(R.string.equalizer_adapt_genre_off_hint)
+                                uiState.adaptToGenre -> stringResource(
+                                    R.string.equalizer_adapt_genre_active,
+                                    uiState.currentPreset.displayName
+                                )
+                                else -> stringResource(R.string.equalizer_adapt_genre_desc)
+                            },
+                            checked = uiState.adaptToGenre,
+                            onCheckedChange = equalizerViewModel::setAdaptToGenre,
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Rounded.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.secondary
+                                )
                             }
-                        }
-
-                        // Power toggle
-                        val isEnabled = uiState.isEnabled
-                        val powerButtonCorner by animateIntAsState(
-                            targetValue = if (isEnabled) 50 else 12,
-                            label = "PowerButtonShape"
                         )
-
-                        FilledIconToggleButton(
-                            checked = isEnabled,
-                            onCheckedChange = { equalizerViewModel.toggleEqualizer() },
-                            shape = RoundedCornerShape(powerButtonCorner),
-                            colors = IconButtonDefaults.filledIconToggleButtonColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                                contentColor = MaterialTheme.colorScheme.onSurface,
-                                checkedContainerColor = targetColorScheme.primary,
-                                checkedContentColor = targetColorScheme.onPrimary
-                            )
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.PowerSettingsNew,
-                                contentDescription = if (isEnabled) {
-                                    stringResource(R.string.equalizer_disable_cd)
-                                } else {
-                                    stringResource(R.string.equalizer_enable_cd)
-                                }
-                            )
-                        }
                     }
                 }
-            ) { paddingValues ->
-                LazyColumn(
-                    state = lazyListState,
-                    contentPadding = PaddingValues(
-                        top = paddingValues.calculateTopPadding() + 8.dp,
-                        bottom = MiniPlayerHeight + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 20.dp
-                    ),
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    item(key = "adapt_to_genre") {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Adapt to song genre", style = MaterialTheme.typography.titleMedium)
-                                Text(
-                                    if (!uiState.isEnabled) "Enable the equalizer to hear adaptation"
-                                    else if (uiState.adaptToGenre) "Active: ${uiState.currentPreset.displayName}"
-                                    else "Follows each song's genre; unknown tags use Flat",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Switch(checked = uiState.adaptToGenre,
-                                onCheckedChange = equalizerViewModel::setAdaptToGenre)
-                        }
-                    }
-                    item(key = "genre_presets") {
-                        Text("Genre presets", style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.padding(horizontal = 20.dp))
-                        androidx.compose.material3.OutlinedTextField(
-                            value = genrePresetQuery,
-                            onValueChange = { genrePresetQuery = it },
-                            placeholder = { Text("Find a genre") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
-                        )
-                        val genres = remember(genrePresetQuery) {
-                            val query = genrePresetQuery.trim()
-                            val alias = com.theveloper.pixelplay.data.equalizer.GenreEqualizerPresets.forGenre(query).name
-                            com.theveloper.pixelplay.data.equalizer.GenreEqualizerPresets.all.filter {
-                                it.displayName.contains(query, ignoreCase = true) || it.name == alias
-                            }
-                        }
-                        androidx.compose.foundation.lazy.LazyRow(
-                            contentPadding = PaddingValues(horizontal = 20.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            items(genres.size, key = { genres[it].name }) { index ->
-                                val preset = genres[index]
-                                FilterChip(
-                                    selected = uiState.currentPreset.name == preset.name,
-                                    onClick = { equalizerViewModel.selectPreset(preset) },
-                                    label = { Text(preset.displayName) }
-                                )
-                            }
-                        }
-                        if (genres.isEmpty()) Text("No matching genre", modifier = Modifier.padding(horizontal = 20.dp))
-                    }
-                    item(key = "preset_tabs") {
-                        // All presets: Filter out raw "custom" entry from tabs, replaced by saved Custom presets
-                        val visiblePresets = remember(uiState.accessiblePresets) {
-                            uiState.accessiblePresets.filter { it.name != "custom" }
-                        }
-                        
-                        PresetTabsRow(
-                            presets = visiblePresets,
-                            selectedPreset = uiState.currentPreset,
-                            onPresetSelected = {
-                                equalizerViewModel.selectPreset(it) 
-                            },
-                            onEditClick = { showReorderSheet = true }
-                        )
+
+                item(key = "presets_header") {
+                    EqualizerSectionHeader(stringResource(R.string.equalizer_section_presets))
+                }
+                item(key = "preset_tabs") {
+                    // All presets: Filter out raw "custom" entry from tabs, replaced by saved Custom presets
+                    val visiblePresets = remember(uiState.accessiblePresets) {
+                        uiState.accessiblePresets.filter { it.name != "custom" }
                     }
 
-                    // A/B Auditioning Bar
-                    item(key = "audition_bar") {
-                        AuditionBar(
-                            auditionState = uiState.auditionState,
-                            onSelectSlot = { equalizerViewModel.setAuditionSlot(it) },
-                            onCopyToSlot = { equalizerViewModel.copyCurrentToAuditionSlot(it) },
-                            onToggleLoudnessComp = { equalizerViewModel.setAuditionLoudnessComp(it) }
-                        )
-                    }
-                    
-                    // Band Sliders (Hybrid: frequency response graph above + grouped sliders below)
-                    item(key = "band_sliders") {
-                        BandSlidersSection(
-                            bandLevels = uiState.bandLevels,
-                            isEnabled = uiState.isEnabled,
-                            onBandLevelChanged = { bandId, level ->
-                                equalizerViewModel.setBandLevel(bandId, level)
-                            },
-                            onOpenFineTune = { bandIndex ->
-                                equalizerViewModel.openFineTuneBand(bandIndex)
-                            },
-                            targetColorScheme = targetColorScheme,
-                            isPlaying = stablePlayerState.isPlaying
-                        )
-                    }
+                    PresetTabsRow(
+                        presets = visiblePresets,
+                        selectedPreset = uiState.currentPreset,
+                        onPresetSelected = {
+                            equalizerViewModel.selectPreset(it)
+                        },
+                        onEditClick = { showReorderSheet = true }
+                    )
+                }
 
-                    // Phase 2: Pro Audiophile DSP Engine Section
-                    item(key = "dsp_audiophile") {
-                        DspAudiophileSection(
-                            autoPreampEnabled = uiState.autoPreampEnabled,
-                            manualPreampDb = uiState.manualPreampDb,
-                            effectivePreampDb = uiState.effectivePreampDb,
-                            dspEngineEnabled = uiState.dspEngineEnabled,
-                            isParametricMode = uiState.isParametricMode,
-                            parametricBands = uiState.parametricBands,
-                            subsonicEnabled = uiState.subsonicEnabled,
-                            subsonicCutoffHz = uiState.subsonicCutoffHz,
-                            ultrasonicEnabled = uiState.ultrasonicEnabled,
-                            ultrasonicCutoffHz = uiState.ultrasonicCutoffHz,
-                            crossfeedStrength = uiState.crossfeedStrength,
-                            limiterEnabled = uiState.limiterEnabled,
-                            softSaturationEnabled = uiState.softSaturationEnabled,
-                            onAutoPreampToggled = { equalizerViewModel.setAutoPreampEnabled(it) },
-                            onManualPreampChanged = { equalizerViewModel.setManualPreampDb(it) },
-                            onDspEngineToggled = { equalizerViewModel.setDspEngineEnabled(it) },
-                            onParametricModeToggled = { equalizerViewModel.setParametricMode(it) },
-                            onUpdateParametricBand = { equalizerViewModel.updateParametricBand(it) },
-                            onAddParametricBand = { equalizerViewModel.addParametricBand() },
-                            onRemoveParametricBand = { equalizerViewModel.removeParametricBand(it) },
-                            onSubsonicFilterToggled = { enabled, hz -> equalizerViewModel.setSubsonicFilter(enabled, hz) },
-                            onUltrasonicFilterToggled = { enabled, hz -> equalizerViewModel.setUltrasonicFilter(enabled, hz) },
-                            onCrossfeedChanged = { equalizerViewModel.setCrossfeedStrength(it) },
-                            onLimiterSettingsChanged = { limiter, sat -> equalizerViewModel.setLimiterSettings(limiter, sat) }
-                        )
-                    }
+                item(key = "bands_header") {
+                    EqualizerSectionHeader(stringResource(R.string.equalizer_section_bands))
+                }
+                // Band Sliders (graph / live spectrum above + grouped sliders below)
+                item(key = "band_sliders") {
+                    BandSlidersSection(
+                        bandLevels = uiState.bandLevels,
+                        isEnabled = uiState.isEnabled,
+                        onBandLevelChanged = { bandId, level ->
+                            equalizerViewModel.setBandLevel(bandId, level)
+                        },
+                        onOpenFineTune = { bandIndex ->
+                            equalizerViewModel.openFineTuneBand(bandIndex)
+                        },
+                        targetColorScheme = targetColorScheme,
+                        isPlaying = stablePlayerState.isPlaying,
+                        audioSessionId = audioSessionId
+                    )
+                }
 
-                    // Phase 1: Hardware Output Device Card
-                    item(key = "hardware_output") {
-                        HardwareOutputCard(
-                            device = uiState.currentOutputDevice,
-                            currentPresetName = uiState.currentPreset.displayName,
-                            devicePresetMap = uiState.devicePresetMap,
-                            autoSwitchEnabled = uiState.autoSwitchDeviceEnabled,
-                            onToggleAutoSwitch = { equalizerViewModel.setAutoSwitchDeviceEnabled(it) },
-                            onAssignPresetToDevice = { equalizerViewModel.assignCurrentPresetToCurrentDevice() }
-                        )
-                    }
-                    
-                    // Effect Controls
-                    item(key = "effect_controls") {
-                        EffectControlsSection(
-                            bassBoostEnabled = uiState.bassBoostEnabled,
-                            bassBoostStrength = uiState.bassBoostStrength, // Now Float
-                            virtualizerEnabled = uiState.virtualizerEnabled,
-                            virtualizerStrength = uiState.virtualizerStrength, // Now Float
-                            loudnessEnabled = uiState.loudnessEnhancerEnabled,
-                            loudnessStrength = uiState.loudnessEnhancerStrength, // Now Float
-                            isBassBoostSupported = uiState.isBassBoostSupported,
-                            isVirtualizerSupported = uiState.isVirtualizerSupported,
-                            isLoudnessEnhancerSupported = uiState.isLoudnessEnhancerSupported,
-                            isBassBoostDismissed = uiState.isBassBoostDismissed,
-                            isVirtualizerDismissed = uiState.isVirtualizerDismissed,
-                            isLoudnessDismissed = uiState.isLoudnessDismissed,
-                            onBassBoostEnabledChange = { equalizerViewModel.setBassBoostEnabled(it) },
-                            onBassBoostStrengthChange = { equalizerViewModel.setBassBoostStrength(it.roundToInt()) },
-                            onVirtualizerEnabledChange = { equalizerViewModel.setVirtualizerEnabled(it) },
-                            onVirtualizerStrengthChange = { equalizerViewModel.setVirtualizerStrength(it.roundToInt()) },
-                            onLoudnessEnabledChange = { equalizerViewModel.setLoudnessEnhancerEnabled(it) },
-                            onLoudnessStrengthChange = { equalizerViewModel.setLoudnessEnhancerStrength(it.roundToInt()) },
-                            onDismissBassBoost = { equalizerViewModel.setBassBoostDismissed(true) },
-                            onDismissVirtualizer = { equalizerViewModel.setVirtualizerDismissed(true) },
-                            onDismissLoudness = { equalizerViewModel.setLoudnessDismissed(true) }
-                        )
-                    }
+                item(key = "effects_header") {
+                    EqualizerSectionHeader(stringResource(R.string.equalizer_section_effects))
+                }
+                item(key = "effect_controls") {
+                    EffectControlsSection(
+                        bassBoostEnabled = uiState.bassBoostEnabled,
+                        bassBoostStrength = uiState.bassBoostStrength,
+                        virtualizerEnabled = uiState.virtualizerEnabled,
+                        virtualizerStrength = uiState.virtualizerStrength,
+                        loudnessEnabled = uiState.loudnessEnhancerEnabled,
+                        loudnessStrength = uiState.loudnessEnhancerStrength,
+                        isBassBoostSupported = uiState.isBassBoostSupported,
+                        isVirtualizerSupported = uiState.isVirtualizerSupported,
+                        isLoudnessEnhancerSupported = uiState.isLoudnessEnhancerSupported,
+                        isBassBoostDismissed = uiState.isBassBoostDismissed,
+                        isVirtualizerDismissed = uiState.isVirtualizerDismissed,
+                        isLoudnessDismissed = uiState.isLoudnessDismissed,
+                        onBassBoostEnabledChange = { equalizerViewModel.setBassBoostEnabled(it) },
+                        onBassBoostStrengthChange = { equalizerViewModel.setBassBoostStrength(it.roundToInt()) },
+                        onVirtualizerEnabledChange = { equalizerViewModel.setVirtualizerEnabled(it) },
+                        onVirtualizerStrengthChange = { equalizerViewModel.setVirtualizerStrength(it.roundToInt()) },
+                        onLoudnessEnabledChange = { equalizerViewModel.setLoudnessEnhancerEnabled(it) },
+                        onLoudnessStrengthChange = { equalizerViewModel.setLoudnessEnhancerStrength(it.roundToInt()) },
+                        onDismissBassBoost = { equalizerViewModel.setBassBoostDismissed(true) },
+                        onDismissVirtualizer = { equalizerViewModel.setVirtualizerDismissed(true) },
+                        onDismissLoudness = { equalizerViewModel.setLoudnessDismissed(true) }
+                    )
+                }
+
+                // Playback engine: one volume slider that goes past the device maximum.
+                item(key = "engine_header") {
+                    EqualizerSectionHeader(stringResource(R.string.equalizer_section_volume))
+                }
+                item(key = "extreme_volume") {
+                    ExtremeVolumeCard(
+                        systemVolume = systemVolume,
+                        boostDb = volumeBoostDb,
+                        maxBoostDb = equalizerViewModel.maxVolumeBoostDb,
+                        onLevelChange = equalizerViewModel::setOutputLevel,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
                 }
             }
+
+            // Solid header like the Settings pages, so content never scrolls under a bare title.
+            CollapsibleCommonTopBar(
+                title = stringResource(R.string.settings_category_equalizer_title),
+                collapseFraction = 1f,
+                headerHeight = topBarHeight,
+                onBackClick = onBackClick,
+                collapsedTitleEndPadding = 164.dp,
+                actions = {
+                    // AutoEq headphone profiles button
+                    FilledIconButton(
+                        onClick = { equalizerViewModel.setAutoEqSheetVisible(true) },
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                            contentColor = MaterialTheme.colorScheme.onSurface
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Headphones,
+                            contentDescription = stringResource(R.string.equalizer_autoeq_title)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(4.dp))
+
+                    // Save Preset button: shown only when custom/unpreset values are detected
+                    val isUnpreset = remember(uiState.bandLevels, uiState.allAvailablePresets) {
+                        uiState.allAvailablePresets.none { it.bandLevels == uiState.bandLevels }
+                    }
+
+                    AnimatedVisibility(
+                        visible = isUnpreset,
+                        enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
+                                scaleIn(initialScale = 0.8f, animationSpec = spring(stiffness = Spring.StiffnessMediumLow)),
+                        exit = fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) +
+                               scaleOut(targetScale = 0.8f, animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            FilledIconButton(
+                                onClick = { showSaveDialog = true },
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = targetColorScheme.primary,
+                                    contentColor = targetColorScheme.onPrimary
+                                )
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Save,
+                                    contentDescription = stringResource(R.string.common_save)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
+                        }
+                    }
+
+                    // Power toggle
+                    val isEnabled = uiState.isEnabled
+                    val powerButtonCorner by animateIntAsState(
+                        targetValue = if (isEnabled) 50 else 12,
+                        label = "PowerButtonShape"
+                    )
+
+                    FilledIconToggleButton(
+                        checked = isEnabled,
+                        onCheckedChange = { equalizerViewModel.toggleEqualizer() },
+                        shape = RoundedCornerShape(powerButtonCorner),
+                        colors = IconButtonDefaults.filledIconToggleButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                            contentColor = MaterialTheme.colorScheme.onSurface,
+                            checkedContainerColor = targetColorScheme.primary,
+                            checkedContentColor = targetColorScheme.onPrimary
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.PowerSettingsNew,
+                            contentDescription = if (isEnabled) {
+                                stringResource(R.string.equalizer_disable_cd)
+                            } else {
+                                stringResource(R.string.equalizer_enable_cd)
+                            }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(12.dp))
+                }
+            )
         }
     }
+}
+
+/** Section label in the Settings style (labelMedium, bold, primary). */
+@Composable
+private fun EqualizerSectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier
+            .padding(start = 28.dp, end = 28.dp, top = 20.dp, bottom = 8.dp)
+            .semantics { heading() }
+    )
 }
 
 // EqualizerTopBar removed, replaced by CollapsibleCommonTopBar
@@ -695,7 +640,8 @@ private fun BandSlidersSection(
     onBandLevelChanged: (Int, Int) -> Unit,
     onOpenFineTune: (Int) -> Unit = {},
     targetColorScheme: ColorScheme,
-    isPlaying: Boolean
+    isPlaying: Boolean,
+    audioSessionId: Int
 ) {
     val frequencies = EqualizerPreset.BAND_FREQUENCIES
     
@@ -719,7 +665,8 @@ private fun BandSlidersSection(
                 onBandLevelChanged = onBandLevelChanged,
                 onOpenFineTune = onOpenFineTune,
                 targetColorScheme = targetColorScheme,
-                isPlaying = isPlaying
+                isPlaying = isPlaying,
+                audioSessionId = audioSessionId
             )
         }
     }
@@ -1507,7 +1454,8 @@ private fun HybridBandSliders(
     onBandLevelChanged: (Int, Int) -> Unit,
     onOpenFineTune: (Int) -> Unit = {},
     targetColorScheme: ColorScheme,
-    isPlaying: Boolean
+    isPlaying: Boolean,
+    audioSessionId: Int
 ) {
     val bandBass = stringResource(R.string.equalizer_band_bass)
     val bandLowMids = stringResource(R.string.equalizer_band_low_mids)
@@ -1524,12 +1472,12 @@ private fun HybridBandSliders(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(220.dp)
-                .padding(horizontal = 4.dp)
-                .clip(RoundedCornerShape(24.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                .padding(horizontal = 12.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainer)
                 .padding(16.dp)
         ) {
-            // Header Row: Frequency Response title + Visualizer Toggle Button + Live status badge
+            // Header: title for the current view + Curve / Spectrum switch
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1538,92 +1486,32 @@ private fun HybridBandSliders(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+                AnimatedContent(
+                    targetState = showRealtimeVisualizer,
+                    transitionSpec = { fadeIn(tween(180)).togetherWith(fadeOut(tween(120))) },
+                    label = "GraphTitle"
+                ) { spectrum ->
                     Text(
-                        text = if (showRealtimeVisualizer) {
+                        text = if (spectrum) {
                             stringResource(R.string.equalizer_visualizer_realtime)
                         } else {
                             stringResource(R.string.equalizer_frequency_response)
                         },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = targetColorScheme.primary
+                        color = targetColorScheme.primary,
+                        maxLines = 1
                     )
-
-                    // Button right of the frequency response text
-                    IconButton(
-                        onClick = { showRealtimeVisualizer = !showRealtimeVisualizer },
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(
-                                if (showRealtimeVisualizer) targetColorScheme.primaryContainer
-                                else MaterialTheme.colorScheme.surfaceContainerHigh
-                            )
-                    ) {
-                        Icon(
-                            imageVector = if (showRealtimeVisualizer) Icons.AutoMirrored.Rounded.ShowChart else Icons.Rounded.GraphicEq,
-                            contentDescription = if (showRealtimeVisualizer) {
-                                stringResource(R.string.equalizer_switch_to_response_curve)
-                            } else {
-                                stringResource(R.string.equalizer_switch_to_realtime_visualizer)
-                            },
-                            tint = if (showRealtimeVisualizer) targetColorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
                 }
 
-                // Live status pill when visualizer is active
-                AnimatedVisibility(
-                    visible = showRealtimeVisualizer,
-                    enter = fadeIn() + expandHorizontally(),
-                    exit = fadeOut() + shrinkHorizontally()
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (isEnabled && isPlaying) targetColorScheme.primary.copy(alpha = 0.15f)
-                                else MaterialTheme.colorScheme.surfaceContainerHigh,
-                        modifier = Modifier.padding(start = 4.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            val pulseAlpha by rememberInfiniteTransition(label = "LivePulse").animateFloat(
-                                initialValue = 0.4f,
-                                targetValue = 1f,
-                                animationSpec = infiniteRepeatable(
-                                    animation = tween(800, easing = LinearEasing),
-                                    repeatMode = RepeatMode.Reverse
-                                ),
-                                label = "PulseAlpha"
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .size(6.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        if (isEnabled && isPlaying) targetColorScheme.primary.copy(alpha = pulseAlpha)
-                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                                    )
-                            )
-                            Text(
-                                text = if (isEnabled && isPlaying) stringResource(R.string.equalizer_live_audio) else stringResource(R.string.equalizer_preview_mode),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 10.sp,
-                                color = if (isEnabled && isPlaying) targetColorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
+                GraphModeSwitch(
+                    spectrumSelected = showRealtimeVisualizer,
+                    onSelect = { showRealtimeVisualizer = it },
+                    selectedColor = targetColorScheme.primary,
+                    onSelectedColor = targetColorScheme.onPrimary
+                )
             }
-             
+
             Box(modifier = Modifier.fillMaxSize().padding(top = 28.dp)) {
                 AnimatedContent(
                     targetState = showRealtimeVisualizer,
@@ -1638,12 +1526,12 @@ private fun HybridBandSliders(
                     label = "FrequencyVisualizerContent"
                 ) { isVisualizer ->
                     if (isVisualizer) {
-                        RealtimeFrequencyAudioVisualizer(
-                            bandLevels = bandLevels,
-                            isEnabled = isEnabled,
+                        EqualizerSpectrum(
+                            audioSessionId = audioSessionId,
                             isPlaying = isPlaying,
-                            targetColorScheme = targetColorScheme,
-                            frequencies = frequencies
+                            barColor = targetColorScheme.primary,
+                            peakColor = targetColorScheme.tertiary,
+                            modifier = Modifier.fillMaxSize()
                         )
                     } else {
                         HybridFrequencyResponseGraph(
@@ -1958,231 +1846,77 @@ private fun HybridFrequencyResponseGraph(
      }
 }
 
+/** Small two-segment pill: response curve or live spectrum. */
 @Composable
-private fun RealtimeFrequencyAudioVisualizer(
-    bandLevels: List<Int>,
-    isEnabled: Boolean,
-    isPlaying: Boolean,
-    targetColorScheme: ColorScheme,
-    frequencies: List<String>,
-    modifier: Modifier = Modifier
+private fun GraphModeSwitch(
+    spectrumSelected: Boolean,
+    onSelect: (Boolean) -> Unit,
+    selectedColor: Color,
+    onSelectedColor: Color
 ) {
-    val primaryColor = targetColorScheme.primary
-    val tertiaryColor = targetColorScheme.tertiary
-    val surfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
-    val gridColor = surfaceVariant.copy(alpha = 0.15f)
+    Row(
+        modifier = Modifier
+            .height(32.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            .padding(3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        GraphModeSegment(
+            icon = Icons.AutoMirrored.Rounded.ShowChart,
+            label = stringResource(R.string.equalizer_mode_curve),
+            selected = !spectrumSelected,
+            selectedColor = selectedColor,
+            onSelectedColor = onSelectedColor,
+            onClick = { onSelect(false) }
+        )
+        GraphModeSegment(
+            icon = Icons.Rounded.GraphicEq,
+            label = stringResource(R.string.equalizer_visualizer_realtime),
+            selected = spectrumSelected,
+            selectedColor = selectedColor,
+            onSelectedColor = onSelectedColor,
+            onClick = { onSelect(true) }
+        )
+    }
+}
 
-    // Hardware-accelerated continuous waveform & phase clock
-    val infiniteTransition = rememberInfiniteTransition(label = "RealtimeAudioVisualizerClock")
-    val time by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = (2f * Math.PI).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(2800, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "AudioPhaseClock"
+@Composable
+private fun GraphModeSegment(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    selected: Boolean,
+    selectedColor: Color,
+    onSelectedColor: Color,
+    onClick: () -> Unit
+) {
+    val container by animateColorAsState(
+        targetValue = if (selected) selectedColor else Color.Transparent,
+        animationSpec = tween(200),
+        label = "GraphModeContainer"
     )
-
-    // Beat pulse for dynamic low-end punch
-    val beatPulse by infiniteTransition.animateFloat(
-        initialValue = 0.82f,
-        targetValue = 1.22f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(450, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "BeatPulse"
+    val content by animateColorAsState(
+        targetValue = if (selected) onSelectedColor else MaterialTheme.colorScheme.onSurfaceVariant,
+        animationSpec = tween(200),
+        label = "GraphModeContent"
     )
-
-    androidx.compose.foundation.Canvas(modifier = modifier.fillMaxSize()) {
-        val count = bandLevels.size.coerceAtLeast(1)
-        val bandWidth = size.width / count
-        val trackHeight = size.height * 0.72f
-        val topOffset = size.height * 0.12f
-        val baseY = topOffset + trackHeight
-
-        // 1. Draw horizontal dB reference grid lines (-10dB, -5dB, 0dB, +5dB, +10dB)
-        val gridLevels = listOf(-10, -5, 0, 5, 10)
-        gridLevels.forEach { lvl ->
-            val norm = ((lvl - (-15f)) / (15f - -15f)).coerceIn(0f, 1f)
-            val y = topOffset + ((1f - norm) * trackHeight)
-            drawLine(
-                color = if (lvl == 0) gridColor.copy(alpha = 0.35f) else gridColor,
-                start = Offset(0f, y),
-                end = Offset(size.width, y),
-                strokeWidth = if (lvl == 0) 1.5.dp.toPx() else 1.dp.toPx(),
-                cap = StrokeCap.Round,
-                pathEffect = if (lvl == 0) null else androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(8f, 8f), 0f)
-            )
-        }
-
-        // 2. Compute live real-time audio points across all frequency bands
-        val points = ArrayList<Offset>(count)
-        val barRects = ArrayList<Pair<Offset, Offset>>(count) // (topLeft, bottomRight)
-        val bandGains = ArrayList<Float>(count)
-
-        for (i in 0 until count) {
-            val bandLevel = bandLevels.getOrElse(i) { 0 }
-            bandGains.add(bandLevel.toFloat())
-
-            // Frequency-specific natural audio oscillation
-            // Bass bands (lower index): deep rhythmic thumps
-            // Mid bands: rich harmonic cycles
-            // High bands: fast transients and shimmering air
-            val normIndex = i.toFloat() / (count - 1).coerceAtLeast(1)
-            val speed = 1.2f + (normIndex * 3.5f)
-            val phaseOffset = i * 0.75f
-
-            val rawOscillation = if (isPlaying) {
-                // Multi-harmonic synthesized audio signal
-                val primaryWave = Math.sin((time * speed + phaseOffset).toDouble()).toFloat()
-                val subWave = Math.cos((time * (speed * 0.5f) + phaseOffset * 1.5f).toDouble()).toFloat()
-                val rhythmFactor = if (i < 3) beatPulse else 1f
-                ((Math.abs(primaryWave) * 0.6f + Math.abs(subWave) * 0.4f) * rhythmFactor).coerceIn(0.15f, 1.0f)
-            } else {
-                // Gentle resting ambient shimmer when paused
-                0.22f + 0.08f * Math.sin((time * 0.8f + phaseOffset).toDouble()).toFloat()
-            }
-
-            // Real-time slider effect on audio:
-            // When slider is 0dB: unity gain (1.0x)
-            // When slider is +15dB: boosted (up to 2.35x)
-            // When slider is -15dB: cut/attenuated (down to ~0.12x)
-            val sliderGain = if (isEnabled) {
-                (1f + (bandLevel / 15f) * 1.15f).coerceIn(0.12f, 2.35f)
-            } else {
-                1.0f
-            }
-
-            val dynamicEnergy = (rawOscillation * sliderGain).coerceIn(0.04f, 1.1f)
-            val barHeight = (dynamicEnergy * trackHeight).coerceIn(6.dp.toPx(), trackHeight)
-
-            val centerX = (bandWidth * i) + (bandWidth / 2f)
-            val barTopY = (baseY - barHeight).coerceAtLeast(topOffset * 0.5f)
-
-            points.add(Offset(centerX, barTopY))
-
-            val halfBarWidth = (bandWidth * 0.32f).coerceIn(4.dp.toPx(), 16.dp.toPx())
-            barRects.add(
-                Pair(
-                    Offset(centerX - halfBarWidth, barTopY),
-                    Offset(centerX + halfBarWidth, baseY)
-                )
-            )
-        }
-
-        // 3. Draw ambient vertical glow lanes for bands with positive gain
-        for (i in 0 until count) {
-            val gain = bandGains[i]
-            if (isEnabled && gain > 0f) {
-                val alpha = (gain / 15f) * 0.15f
-                val colLeft = bandWidth * i
-                drawRect(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(primaryColor.copy(alpha = alpha), Color.Transparent),
-                        startY = topOffset,
-                        endY = baseY
-                    ),
-                    topLeft = Offset(colLeft, topOffset),
-                    size = Size(bandWidth, trackHeight)
-                )
-            }
-        }
-
-        // 4. Draw continuous glowing audio envelope wave connecting the peaks
-        if (points.isNotEmpty()) {
-            val wavePath = Path()
-            val fillPath = Path()
-
-            wavePath.moveTo(points[0].x, points[0].y)
-            fillPath.moveTo(points[0].x, baseY)
-            fillPath.lineTo(points[0].x, points[0].y)
-
-            for (i in 0 until points.size - 1) {
-                val p0 = points[maxOf(0, i - 1)]
-                val p1 = points[i]
-                val p2 = points[i + 1]
-                val p3 = points[minOf(points.size - 1, i + 2)]
-
-                val cp1X = p1.x + (p2.x - p0.x) * 0.22f
-                val cp1Y = p1.y + (p2.y - p0.y) * 0.22f
-                val cp2X = p2.x - (p3.x - p1.x) * 0.22f
-                val cp2Y = p2.y - (p3.y - p1.y) * 0.22f
-
-                wavePath.cubicTo(cp1X, cp1Y, cp2X, cp2Y, p2.x, p2.y)
-                fillPath.cubicTo(cp1X, cp1Y, cp2X, cp2Y, p2.x, p2.y)
-            }
-
-            fillPath.lineTo(points.last().x, baseY)
-            fillPath.close()
-
-            // Translucent glowing fill under wave
-            drawPath(
-                path = fillPath,
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        (if (isEnabled) primaryColor else surfaceVariant).copy(alpha = if (isPlaying) 0.35f else 0.18f),
-                        Color.Transparent
-                    ),
-                    startY = topOffset,
-                    endY = baseY
-                )
-            )
-
-            // Outer glow / stroke of the active audio energy line
-            drawPath(
-                path = wavePath,
-                color = if (isEnabled) primaryColor else surfaceVariant.copy(alpha = 0.5f),
-                style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
-            )
-        }
-
-        // 5. Draw the real-time audio spectrum bars with gradient & floating peak caps
-        val cornerRadius = CornerRadius(6.dp.toPx(), 6.dp.toPx())
-        for (i in 0 until count) {
-            val (topLeft, bottomRight) = barRects[i]
-            val barW = bottomRight.x - topLeft.x
-            val barH = bottomRight.y - topLeft.y
-            val gain = bandGains[i]
-
-            // Vibrant gradient tailored to slider boost/cut
-            val barGradient = if (isEnabled) {
-                val topColor = if (gain > 0f) tertiaryColor else primaryColor
-                Brush.verticalGradient(
-                    colors = listOf(topColor, primaryColor.copy(alpha = 0.6f)),
-                    startY = topLeft.y,
-                    endY = bottomRight.y
-                )
-            } else {
-                Brush.verticalGradient(
-                    colors = listOf(surfaceVariant.copy(alpha = 0.4f), surfaceVariant.copy(alpha = 0.15f)),
-                    startY = topLeft.y,
-                    endY = bottomRight.y
-                )
-            }
-
-            // Spectrum Bar
-            drawRoundRect(
-                brush = barGradient,
-                topLeft = topLeft,
-                size = Size(barW, barH),
-                cornerRadius = cornerRadius
-            )
-
-            // Floating Peak Cap Line
-            val capY = (topLeft.y - 4.dp.toPx()).coerceAtLeast(topOffset * 0.3f)
-            val capColor = if (isEnabled) {
-                if (gain > 0f) tertiaryColor else Color.White
-            } else surfaceVariant.copy(alpha = 0.7f)
-
-            drawLine(
-                color = capColor,
-                start = Offset(topLeft.x - 1.dp.toPx(), capY),
-                end = Offset(bottomRight.x + 1.dp.toPx(), capY),
-                strokeWidth = 2.dp.toPx(),
-                cap = StrokeCap.Round
-            )
-        }
+    Row(
+        modifier = Modifier
+            .fillMaxHeight()
+            .clip(CircleShape)
+            .background(container)
+            .selectable(selected = selected, role = Role.Tab, onClick = onClick)
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Icon(imageVector = icon, contentDescription = null, tint = content, modifier = Modifier.size(16.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = content,
+            maxLines = 1
+        )
     }
 }

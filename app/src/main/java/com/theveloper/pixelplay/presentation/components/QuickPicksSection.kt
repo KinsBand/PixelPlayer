@@ -1,7 +1,10 @@
 package com.theveloper.pixelplay.presentation.components
 
+import com.theveloper.pixelplay.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,20 +13,31 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.gestures.snapping.SnapPosition
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.animation.togetherWith
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,7 +60,15 @@ fun QuickPicksSection(
     onSongMoreClick: (Song) -> Unit,
     modifier: Modifier = Modifier,
     title: String = "Quick picks",
-    maxPages: Int = 5
+    /** Optional caption under the title (e.g. a mood fallback note). */
+    subtitle: String? = null,
+    /** Changing this crossfades the rows (e.g. the Home mood); same key = in-place update. */
+    contentKey: Any? = null,
+    maxPages: Int = 5,
+    /** Shuffle-plays the picks; null hides the button beside the title. */
+    onShuffleClick: (() -> Unit)? = null,
+    /** Hold Shuffle: schedule the shuffle with Soon. Null = tap only. */
+    onShuffleLongClick: (() -> Unit)? = null
 ) {
     if (songs.isEmpty()) return
 
@@ -55,32 +77,88 @@ fun QuickPicksSection(
             .filter { it.isNotEmpty() }
             .take(maxPages)
     }
-    val listState = rememberLazyListState()
-
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
-
-        LazyRow(
-            state = listState,
-            flingBehavior = rememberSnapFlingBehavior(listState),
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        // Title (and caption) on the left, shuffle on the right of the same row.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            items(count = pages.size, key = { index -> "quick_pick_page_$index" }) { index ->
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                if (subtitle != null) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            if (onShuffleClick != null) {
+                // Same button as Fresh Finds' Shuffle: tap = shuffle (with the spin), hold = Soon.
+                com.theveloper.pixelplay.presentation.components.subcomps.ShuffleSoonButton(
+                    label = androidx.compose.ui.res.stringResource(R.string.home_shuffle_label),
+                    onClick = onShuffleClick,
+                    onLongClick = onShuffleLongClick,
+                    longClickLabel = androidx.compose.ui.res.stringResource(R.string.home_shuffle_soon_hold)
+                )
+            }
+        }
+
+        val reducedMotion = com.theveloper.pixelplay.ui.theme.rememberSystemReducedMotion()
+        androidx.compose.animation.AnimatedContent(
+            targetState = contentKey to pages,
+            contentKey = { it.first },
+            transitionSpec = {
+                if (reducedMotion) {
+                    androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
+                } else {
+                    androidx.compose.animation.fadeIn(
+                        androidx.compose.animation.core.tween(
+                            com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium1,
+                            easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate
+                        )
+                    ) togetherWith androidx.compose.animation.fadeOut(
+                        androidx.compose.animation.core.tween(
+                            com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort3,
+                            easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate
+                        )
+                    )
+                }
+            },
+            label = "quickPicksContent"
+        ) { (targetContentKey, shownPages) ->
+            // One pager state per mood, so a crossfade never shares a state between two rows and a
+            // new mood starts from the first page.
+            val pagerState = androidx.compose.runtime.key(targetContentKey) {
+                rememberPagerState(initialPage = 0) { shownPages.size }
+            }
+            LaunchedEffect(targetContentKey) {
+                pagerState.scrollToPage(0)
+            }
+            HorizontalPager(
+                state = pagerState,
+                contentPadding = PaddingValues(start = 16.dp, end = 40.dp),
+                pageSpacing = 10.dp,
+                snapPosition = SnapPosition.Start,
+                modifier = Modifier.fillMaxWidth(),
+                key = { index -> "quick_pick_page_$index" }
+            ) { pageIndex ->
                 Column(
-                    modifier = Modifier.fillParentMaxWidth(0.88f),
+                    modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    pages[index].forEach { song ->
+                    shownPages[pageIndex].forEach { song ->
                         QuickPickRow(
                             song = song,
                             isCurrent = song.id == currentSongId,
@@ -96,6 +174,7 @@ fun QuickPicksSection(
 }
 
 /** One song row. Shared with [RecentlyPicksSection] so both lists read identically. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun QuickPickRow(
     song: Song,
@@ -103,7 +182,13 @@ internal fun QuickPickRow(
     isPlaying: Boolean,
     onClick: () -> Unit,
     onMoreClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** Replaces the default "artist · N plays" line (e.g. a "why" line or a year). */
+    subtitle: String? = null,
+    /** Small round picture over the cover's corner (e.g. the friend who played it). */
+    badgeImageUrl: String? = null,
+    /** Extra action reachable from TalkBack (e.g. "Not for me"); hold always opens the options. */
+    secondaryAction: Pair<String, () -> Unit>? = null,
 ) {
     val colors = MaterialTheme.colorScheme
 
@@ -111,10 +196,22 @@ internal fun QuickPickRow(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
+            .songStartFeedback(song.id, RoundedCornerShape(14.dp))
+            .offlineVeil(song, RoundedCornerShape(14.dp))
             .background(
                 if (isCurrent) colors.primaryContainer.copy(alpha = 0.45f) else colors.surface
             )
-            .clickable(onClick = onClick)
+            // No ⋮ button: hold the row for the song's options.
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onMoreClick,
+                onLongClickLabel = "Song options"
+            )
+            .then(
+                if (secondaryAction != null) Modifier.semantics {
+                    customActions = listOf(CustomAccessibilityAction(secondaryAction.first) { secondaryAction.second(); true })
+                } else Modifier
+            )
             .padding(horizontal = 6.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -126,6 +223,16 @@ internal fun QuickPickRow(
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.size(52.dp)
             )
+            if (badgeImageUrl != null) {
+                SmartImage(
+                    model = badgeImageUrl,
+                    contentDescription = null,
+                    shape = androidx.compose.foundation.shape.CircleShape,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .size(20.dp)
+                )
+            }
             if (isCurrent && isPlaying) {
                 Box(
                     modifier = Modifier
@@ -152,23 +259,11 @@ internal fun QuickPickRow(
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = quickPickSubtitle(song),
+                text = subtitle ?: quickPickSubtitle(song),
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
-            )
-        }
-
-        IconButton(
-            onClick = onMoreClick,
-            modifier = Modifier.size(36.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.MoreVert,
-                contentDescription = "More actions for ${song.title}",
-                tint = colors.onSurfaceVariant,
-                modifier = Modifier.size(20.dp)
             )
         }
     }

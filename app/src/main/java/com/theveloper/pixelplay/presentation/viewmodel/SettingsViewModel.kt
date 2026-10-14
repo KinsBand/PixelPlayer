@@ -61,14 +61,14 @@ data class SettingsUiState(
     val launchTab: String = LaunchTab.HOME,
     val keepPlayingInBackground: Boolean = true,
     val disableCastAutoplay: Boolean = false,
-    val pauseOnVolumeZero: Boolean = false,
+    val pauseOnVolumeZero: Boolean = true,
     val resumeOnHeadsetReconnect: Boolean = false,
     val showQueueHistory: Boolean = true,
     val isCrossfadeEnabled: Boolean = false,
     val hiFiModeEnabled: Boolean = false,
     val hiFiModeDeviceSupported: Boolean = true,
     val crossfadeDuration: Int = 2000,
-    val persistentShuffleEnabled: Boolean = false,
+    val persistentShuffleEnabled: Boolean = true,
     val folderBackGestureNavigation: Boolean = true,
     val lyricsSourcePreference: LyricsSourcePreference = LyricsSourcePreference.EMBEDDED_FIRST,
     val autoScanLrcFiles: Boolean = false,
@@ -106,7 +106,8 @@ data class SettingsUiState(
     val replayGainEnabled: Boolean = false,
     val replayGainUseAlbumGain: Boolean = false,
     val isSafeTokenLimitEnabled: Boolean = true,
-    val showScrollbar: Boolean = true
+    val showScrollbar: Boolean = true,
+    val showPracticeMode: Boolean = true
 )
 
 // Helper classes for consolidated combine() collectors to reduce coroutine overhead
@@ -124,7 +125,8 @@ private sealed interface SettingsUiUpdate {
         val libraryNavigationMode: String,
         val carouselStyle: String,
         val launchTab: String,
-        val showPlayerFileInfo: Boolean
+        val showPlayerFileInfo: Boolean,
+        val showPracticeMode: Boolean
     ) : SettingsUiUpdate
 
     data class Group2(
@@ -183,7 +185,8 @@ class SettingsViewModel @Inject constructor(
     private val lyricsRepository: LyricsRepository,
     private val musicRepository: MusicRepository,
     private val backupManager: BackupManager,
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val trainingSetExporter: com.theveloper.pixelplay.data.lyrics.training.TrainingSetExporter
 ) : ViewModel() {
 
     // ─── Core UI state ────────────────────────────────────────────────────────
@@ -410,6 +413,12 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun setShowPracticeMode(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setShowPracticeMode(enabled)
+        }
+    }
+
     fun setCollagePattern(pattern: CollagePattern) {
         viewModelScope.launch {
             userPreferencesRepository.setCollagePattern(pattern)
@@ -570,6 +579,82 @@ class SettingsViewModel @Inject constructor(
     fun setLyricsAutoSyncEnabled(enabled: Boolean) {
         viewModelScope.launch {
             userPreferencesRepository.setLyricsAutoSyncEnabled(enabled)
+        }
+    }
+
+    /** On-device word and letter sync for line-synced lyrics. On by default. */
+    val lyricsWordAlignEnabled: StateFlow<Boolean> = userPreferencesRepository.lyricsWordAlignEnabledFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
+    fun setLyricsWordAlignEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setLyricsWordAlignEnabled(enabled)
+        }
+    }
+
+    /** Let the word-sync model download by itself on mobile data too (otherwise Wi-Fi only). */
+    val lyricsWordAlignMobileData: StateFlow<Boolean> = userPreferencesRepository.lyricsWordAlignMobileDataFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    fun setLyricsWordAlignMobileData(allowed: Boolean) {
+        com.theveloper.pixelplay.data.lyrics.align.LyricsWordAligner.get()?.models?.allowMobileData = allowed
+        viewModelScope.launch {
+            userPreferencesRepository.setLyricsWordAlignMobileData(allowed)
+        }
+    }
+
+    /** The word-sync model's download state (not downloaded / progress / ready), live. */
+    val wordSyncModelState: StateFlow<com.theveloper.pixelplay.data.lyrics.align.AlignmentModelManager.ModelState?> =
+        (com.theveloper.pixelplay.data.lyrics.align.LyricsWordAligner.get()?.models?.state
+            ?: kotlinx.coroutines.flow.flowOf(null))
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    /** True when the phone is on mobile data right now (to warn before a 95 MB download). */
+    fun isOnMobileData(): Boolean =
+        com.theveloper.pixelplay.data.lyrics.align.LyricsWordAligner.get()?.models?.isOnMobileData() == true
+
+    fun downloadWordSyncModel() {
+        com.theveloper.pixelplay.data.lyrics.align.LyricsWordAligner.get()?.downloadModel()
+    }
+
+    fun cancelWordSyncModelDownload() {
+        com.theveloper.pixelplay.data.lyrics.align.LyricsWordAligner.get()?.cancelModelDownload()
+    }
+
+    fun deleteWordSyncModel() {
+        com.theveloper.pixelplay.data.lyrics.align.LyricsWordAligner.get()?.deleteModel()
+    }
+
+    // ─── Word-sync training data export ───────────────────────────────────────
+
+    /** null = idle; running shows progress; done shows the result line. */
+    data class TrainingExportState(val running: Boolean, val done: Int = 0, val total: Int = 0, val message: String? = null)
+
+    private val _trainingExport = MutableStateFlow<TrainingExportState?>(null)
+    val trainingExport: StateFlow<TrainingExportState?> = _trainingExport.asStateFlow()
+
+    /** Copies downloaded songs that have synced lyrics, plus their .lrc, to Download/PixelPlay-training. */
+    fun exportTrainingSet(again: Boolean = false) {
+        if (_trainingExport.value?.running == true) return
+        viewModelScope.launch {
+            if (again) trainingSetExporter.resetExported()
+            _trainingExport.value = TrainingExportState(running = true)
+            val message = try {
+                val r = trainingSetExporter.export { done, total ->
+                    _trainingExport.value = TrainingExportState(running = true, done = done, total = total)
+                }
+                buildString {
+                    append("${r.exported} new song${if (r.exported == 1) "" else "s"} exported to ${r.folder}")
+                    if (r.alreadyExported > 0) append(" · ${r.alreadyExported} already there")
+                    if (r.noSyncedLyrics > 0) append(" · ${r.noSyncedLyrics} without synced lyrics")
+                    if (r.failed > 0) append(" · ${r.failed} failed")
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                "Export failed: ${e.message ?: "unknown error"}"
+            }
+            _trainingExport.value = TrainingExportState(running = false, message = message)
         }
     }
 
@@ -753,6 +838,23 @@ class SettingsViewModel @Inject constructor(
     val miniPlayerSongTransition: StateFlow<Boolean> = userPreferencesRepository.miniPlayerSongTransitionFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
+    val miniPlayerSwipeChangesSong: StateFlow<Boolean> = userPreferencesRepository.miniPlayerSwipeChangesSongFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
+    fun setMiniPlayerSwipeChangesSong(enabled: Boolean) {
+        viewModelScope.launch { userPreferencesRepository.setMiniPlayerSwipeChangesSong(enabled) }
+    }
+
+    val upNextNotification: StateFlow<Boolean> = userPreferencesRepository.upNextNotificationFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val showPracticeMode: StateFlow<Boolean> = userPreferencesRepository.showPracticeModeFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
+    fun setUpNextNotification(enabled: Boolean) {
+        viewModelScope.launch { userPreferencesRepository.setUpNextNotification(enabled) }
+    }
+
     val tapBackgroundClosesPlayer: StateFlow<Boolean> = userPreferencesRepository.tapBackgroundClosesPlayerFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
@@ -832,7 +934,8 @@ class SettingsViewModel @Inject constructor(
                 userPreferencesRepository.libraryNavigationModeFlow,
                 userPreferencesRepository.carouselStyleFlow,
                 userPreferencesRepository.launchTabFlow,
-                userPreferencesRepository.showPlayerFileInfoFlow
+                userPreferencesRepository.showPlayerFileInfoFlow,
+                userPreferencesRepository.showPracticeModeFlow
             ) { values ->
                 SettingsUiUpdate.Group1(
                     appRebrandDialogShown = values[0] as Boolean,
@@ -847,7 +950,8 @@ class SettingsViewModel @Inject constructor(
                     libraryNavigationMode = values[9] as String,
                     carouselStyle = values[10] as String,
                     launchTab = values[11] as String,
-                    showPlayerFileInfo = values[12] as Boolean
+                    showPlayerFileInfo = values[12] as Boolean,
+                    showPracticeMode = values[13] as Boolean
                 )
             }.collect { update ->
                 _uiState.update { state ->
@@ -864,7 +968,8 @@ class SettingsViewModel @Inject constructor(
                         libraryNavigationMode = update.libraryNavigationMode,
                         carouselStyle = update.carouselStyle,
                         launchTab = update.launchTab,
-                        showPlayerFileInfo = update.showPlayerFileInfo
+                        showPlayerFileInfo = update.showPlayerFileInfo,
+                        showPracticeMode = update.showPracticeMode
                     )
                 }
             }

@@ -26,13 +26,22 @@ object SpotifyQueries {
     /** No default hash: read from the web player on first use. */
     const val SEARCH_TRACKS = "searchTracks"
     const val ADD_TO_PLAYLIST = "addToPlaylist"
+    /** People search (no default hash: read from the web player on first use). */
+    const val SEARCH_USERS = "searchUsers"
+    /** Artist search, to find an artist's Spotify id (no default hash: read from the web player). */
+    const val SEARCH_ARTISTS = "searchArtists"
+    /** An artist's page: playlists, related artists, concerts, merch (no default hash). */
+    const val ARTIST_OVERVIEW = "queryArtistOverview"
 
     val defaults = mapOf(
         LIBRARY to "390c78e5b951029bad359785e69b07b536a509c581cbcd0aded5e5067f187455",
         LIBRARY_TRACKS to "087278b20b743578a6262c2b0b4bcd20d879c503cc359a2285baf083ef944240",
         PLAYLIST to "cd2275433b29f7316176e7b5b5e098ae7744724e1a52d63549c76636b3257749",
         PROFILE to "53bcb064f6cd18c23f752bc324a791194d20df612d8e1239c735144ab0399ced",
-        TRACK to "612585ae06ba435ad26369870deaae23b5c8800a256cd8a57e08eddc25a37294"
+        TRACK to "612585ae06ba435ad26369870deaae23b5c8800a256cd8a57e08eddc25a37294",
+        // Seen in the open-source Grayjay Spotify plugin; if Spotify has rotated it, the
+        // web-player lookup (now including lazily loaded chunks) finds the current one.
+        ARTIST_OVERVIEW to "da986392124383827dc03cbb3d66c1de81225244b6e20f8d78f9f802cc43df6e"
     )
 }
 
@@ -49,6 +58,26 @@ class SpotifyPathfinder @Inject constructor(
     companion object {
         const val QUERY_URL = "https://api-partner.spotify.com/pathfinder/v2/query"
         private val JSON = "application/json".toMediaType()
+        /** Smallest gap between two requests, so bulk work (exports, syncs) doesn't trip 429s. */
+        private const val MIN_GAP_MS = 120L
+        /** 429 retries before giving up; each waits Retry-After (capped) or 2 s, 4 s, 8 s. */
+        private const val MAX_RATE_LIMIT_RETRIES = 3
+        private const val MAX_RETRY_AFTER_S = 30L
+    }
+
+    // Paces every request through this client (one Spotify session, one budget).
+    private val paceLock = kotlinx.coroutines.sync.Mutex()
+    @Volatile private var lastRequestAt = 0L
+
+    private suspend fun pace() {
+        paceLock.lock()
+        try {
+            val wait = lastRequestAt + MIN_GAP_MS - System.currentTimeMillis()
+            if (wait > 0) delay(wait)
+            lastRequestAt = System.currentTimeMillis()
+        } finally {
+            paceLock.unlock()
+        }
     }
 
     /** Runs a persisted query and returns its `data` object. */
@@ -97,11 +126,13 @@ class SpotifyPathfinder @Inject constructor(
         send(method, url, jsonBody)
     }
 
-    /** One request; refreshes the token once on 401 and backs off once on 429. */
+    /** One request; refreshes the token once on 401 and backs off (up to 3 times) on 429. */
     private suspend fun send(method: String, url: String, jsonBody: String?): String {
         var refreshed = false
-        var waited = false
+        var rateLimitRetries = 0
         while (true) {
+            pace()
+            val waited = rateLimitRetries >= MAX_RATE_LIMIT_RETRIES
             val token = session.token(force = refreshed)
             val builder = Request.Builder().url(url)
                 .header("Authorization", "Bearer $token")
@@ -112,13 +143,16 @@ class SpotifyPathfinder @Inject constructor(
             session.clientId.takeIf { it.isNotBlank() }?.let { builder.header("Client-Id", it) }
             when (method) {
                 "POST" -> builder.post((jsonBody ?: "{}").toRequestBody(JSON))
+                "PUT" -> builder.put((jsonBody ?: "{}").toRequestBody(JSON))
+                "DELETE" -> if (jsonBody != null) builder.delete(jsonBody.toRequestBody(JSON)) else builder.delete()
                 else -> builder.get()
             }
             val result = http.newCall(builder.build()).execute().use { response ->
                 when {
                     response.code == 401 && !refreshed -> null
                     response.code == 429 && !waited -> {
-                        val retryAfter = response.header("Retry-After")?.toLongOrNull()?.coerceIn(1, 10) ?: 3
+                        val backoff = 2L shl rateLimitRetries // 2, 4, 8 s
+                        val retryAfter = response.header("Retry-After")?.toLongOrNull()?.coerceIn(1, MAX_RETRY_AFTER_S) ?: backoff
                         -retryAfter
                     }
                     !response.isSuccessful -> throw SpotifyWebException(when (response.code) {
@@ -133,7 +167,7 @@ class SpotifyPathfinder @Inject constructor(
             }
             when (result) {
                 null -> { refreshed = true }
-                is Long -> { waited = true; delay(-result * 1000) }
+                is Long -> { rateLimitRetries++; delay(-result * 1000) }
                 is String -> return result
             }
         }

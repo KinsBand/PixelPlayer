@@ -32,7 +32,8 @@ class AiStateHolder @Inject constructor(
     private val playlistPreferencesRepository: PlaylistPreferencesRepository,
     private val dailyMixStateHolder: DailyMixStateHolder,
     private val notificationManager: AiNotificationManager,
-    private val aiHandler: com.theveloper.pixelplay.data.ai.AiHandler
+    private val aiHandler: com.theveloper.pixelplay.data.ai.AiHandler,
+    private val nanoLyricsTranslator: com.theveloper.pixelplay.data.ai.nano.NanoLyricsTranslator,
 ) {
     // State
     // AI State Management: Observables for tracking background generation progress
@@ -285,38 +286,12 @@ class AiStateHolder @Inject constructor(
     }
 
     suspend fun translateLyrics(lyricsText: String): Result<String> {
-        return try {
-            val targetLanguage = context.resources.configuration.locales[0].displayLanguage
-            val prompt = """
-<task>Translate song lyrics into $targetLanguage.</task>
-
-<rules>
-- Preserve ALL timestamps [mm:ss.xx] exactly — never modify, merge, or drop them.
-- Output TWO lines per original line: the original, then the translation with the same timestamp.
-- NEVER add explanations, labels, numbering, section headers, or formatting.
-- NEVER remove, merge, split, or reorder lines.
-- If lyrics are ALREADY mostly in $targetLanguage, output ONLY: ALREADY_IN_TARGET_LANGUAGE
-</rules>
-
-<format>
-[original timestamp] original text
-[same timestamp] translated text
-</format>
-
-<lyrics>
-$lyricsText
-</lyrics>
-            """.trimIndent()
-            
-            val response = aiHandler.generateContent(
-                prompt = prompt,
-                type = AiSystemPromptType.GENERAL,
-                temperature = 0.1f
-            )
-            Result.success(response)
-        } catch (e: Exception) {
-            Result.failure(e)
+        // On-device Gemini Nano: words only, a few lines at a time, timestamps put back in code.
+        if (nanoLyricsTranslator.isReady) {
+            val language = context.resources.configuration.locales[0].displayLanguage
+            return nanoLyricsTranslator.translate(lyricsText, language)
         }
+        return Result.failure(IllegalStateException(com.theveloper.pixelplay.data.ai.nano.NanoLyricsTranslator.NOT_READY))
     }
 
     fun onCleared() {

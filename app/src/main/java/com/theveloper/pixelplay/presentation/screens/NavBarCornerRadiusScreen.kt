@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import com.theveloper.pixelplay.presentation.navigation.popBackStackSafely
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -85,8 +86,8 @@ fun NavBarCornerRadiusScreen(
     NavBarCornerRadiusContent(
         initialRadius = uiState.navBarCornerRadius.toFloat(),
         onRadiusChange = { settingsViewModel.setNavBarCornerRadius(it) },
-        onDone = { navController.popBackStack() },
-        onBack = { navController.popBackStack() },
+        onDone = { navController.popBackStackSafely() },
+        onBack = { navController.popBackStackSafely() },
         isFullWidth = isFullWidth,
         isCompactMode = uiState.navBarCompactMode
     )

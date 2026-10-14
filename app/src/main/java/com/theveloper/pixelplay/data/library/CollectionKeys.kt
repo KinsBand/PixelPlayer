@@ -35,6 +35,8 @@ object CollectionKeys {
     private val releaseSuffix = Regex("""\s*[-–—]\s*(?:single|ep|remastered(?:\s+\d{4})?|\d{4}\s+remaster(?:ed)?)\s*$""", RegexOption.IGNORE_CASE)
     private val nonAlnum = Regex("""[^\p{L}\p{N}]+""")
     private val marks = Regex("""\p{Mn}+""")
+    /** Compiled once: these keys run for every song in the library. */
+    private val whitespace = Regex("\\s+")
 
     /**
      * Artist name without channel decorations: "Drake - Topic", "DrakeVEVO", "Drake (Official)"
@@ -69,7 +71,22 @@ object CollectionKeys {
         normalizeArtist(albumArtist) + "|" + normalizeAlbum(album)
 
     fun isPlaceholderAlbum(album: String?): Boolean =
-        album.isNullOrBlank() || album.trim().lowercase(Locale.ROOT) in placeholderAlbums
+        album.isNullOrBlank() || album.trim().lowercase(Locale.ROOT) in placeholderAlbums ||
+            isNotAnAlbumName(album)
+
+    /**
+     * Text from a YouTube Music row that ended up in the album field but is not an album: a
+     * duration ("0:36", "1:05:12") or a count ("1.2M views", "345K plays"). Some list layouts put
+     * these where the album usually is.
+     */
+    fun isNotAnAlbumName(text: String?): Boolean {
+        val t = text?.trim().orEmpty()
+        if (t.isEmpty()) return false
+        return durationText.matches(t) || countText.matches(t)
+    }
+
+    private val durationText = Regex("\\d{1,2}(:\\d{2}){1,2}")
+    private val countText = Regex("[\\d.,]+\\s*[KMBkmb]?\\s+(views?|plays?|listens?)", RegexOption.IGNORE_CASE)
 
     fun downloadArtistId(name: String): Long = DOWNLOAD_ARTIST_BASE + (fnv1a64("a:" + normalizeArtist(name)) and HASH_MASK)
 
@@ -92,7 +109,7 @@ object CollectionKeys {
             .replace("&", " and ")
             .let { nonAlnum.replace(it, " ") }
             .trim()
-            .replace(Regex("\\s+"), " ")
+            .replace(whitespace, " ")
     }
 
     private fun fnv1a64(value: String): Long {

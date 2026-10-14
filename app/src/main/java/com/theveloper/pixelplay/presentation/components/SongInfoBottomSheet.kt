@@ -1,6 +1,8 @@
 package com.theveloper.pixelplay.presentation.components
 
 import androidx.compose.material.icons.rounded.School
+import androidx.compose.material.icons.rounded.Radio
+import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.MoreVert
 import android.app.Activity
 import android.content.ActivityNotFoundException
@@ -13,6 +15,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.snap
@@ -32,6 +35,10 @@ import androidx.compose.runtime.withFrameNanos
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -59,8 +66,14 @@ import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.Phone
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.animation.togetherWith
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material3.*
@@ -106,6 +119,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.TransformOrigin
 import com.theveloper.pixelplay.presentation.screens.TabAnimation
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
+import com.theveloper.pixelplay.ui.theme.MotionTokens
 import com.theveloper.pixelplay.utils.AudioMetaUtils
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.sp
@@ -155,6 +169,24 @@ fun SongInfoBottomSheet(
     removeFromListTrigger: () -> Unit,
     /** Show Delete even for songs with no file on the device (Your Music deletes every copy). */
     alwaysShowDelete: Boolean = false,
+    /** Starts a Song Radio seeded by this song (plays it, then queues similar songs). Null disables the button. */
+    onStartSongRadio: ((Song) -> Unit)? = null,
+    /**
+     * Starts multi-select on the list this menu was opened from, with this song ticked.
+     * Cards open this menu on hold, so this is how lists enter selection mode. Null hides it.
+     */
+    onSelect: (() -> Unit)? = null,
+    /** Radio: the Map button next to Website. Null hides it. */
+    onShowStationOnMap: ((com.theveloper.pixelplay.data.radio.RadioStation) -> Unit)? = null,
+    /** For the Soon slider's view of Up next (hold Next). Null, or [onAddSoon] null = no Soon. */
+    soonPlayer: com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel? = null,
+    /** Soon confirmed: this song after the k-th song of Up next. */
+    onAddSoon: ((afterUpcoming: Int) -> Unit)? = null,
+    /**
+     * Extra line under the artist in the header, e.g. "‹Friend› is listening now" when the menu
+     * was opened from a friend's song. Null = nothing extra.
+     */
+    headerExtra: (@Composable () -> Unit)? = null,
     songInfoViewModel: SongInfoBottomSheetViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -164,9 +196,8 @@ fun SongInfoBottomSheet(
     val errorShareSongFormat = stringResource(R.string.song_info_error_share_song)
     var showEditSheet by remember { mutableStateOf(false) }
     var showArtistPicker by remember { mutableStateOf(false) }
-    var showTonePickerDialog by remember { mutableStateOf(false) }
-    var showShareOptionsDialog by remember { mutableStateOf(false) }
-    var toneConfirmationTarget by remember { mutableStateOf<ToneTarget?>(null) }
+    var showTonePickerSheet by remember { mutableStateOf(false) }
+    var showShareSheet by remember { mutableStateOf(false) }
     var pendingTonePermissionSong by remember { mutableStateOf<Song?>(null) }
     var pendingTonePermissionTarget by remember { mutableStateOf<ToneTarget?>(null) }
     val audioMeta by songInfoViewModel.audioMeta.collectAsStateWithLifecycle()
@@ -174,19 +205,21 @@ fun SongInfoBottomSheet(
 
     // Artists offered in the picker. Local songs use library artists; online songs usually have no
     // library entries, so fall back to the names parsed from the artist string.
-    val parsedArtistNames = remember(song.displayArtist) {
-        song.displayArtist.split(",", "/", "&", ";", " feat. ", " ft. ", " with ")
-            .map { it.trim() }
-            .filter { it.isNotEmpty() && it != "<unknown>" }
-            .distinct()
+    // (Shared with the queue's playing card: player/SongArtists.kt.)
+    val pickerArtists = remember(resolvedArtists, song.displayArtist) {
+        com.theveloper.pixelplay.presentation.components.player.pickerArtistsFor(song, resolvedArtists)
     }
-    val pickerArtists = remember(resolvedArtists, parsedArtistNames) {
-        resolvedArtists.ifEmpty {
-            if (parsedArtistNames.size > 1) {
-                parsedArtistNames.map { Artist(id = it.hashCode().toLong(), name = it, songCount = 0) }
-            } else emptyList()
-        }
-    }
+    // Radio: the menu is about the station (presets, website, radio favourites); song-file
+    // things (download, delete, length, tag editing) don't apply to a live stream.
+    val radioStation = remember(song.id) { com.theveloper.pixelplay.data.radio.RadioPlayback.stationFor(context, song) }
+    val isRadio = radioStation != null
+    val radioStore = remember { com.theveloper.pixelplay.data.radio.RadioStore.get(context) }
+    val radioFavorites by radioStore.favorites.collectAsStateWithLifecycle()
+    val radioPresets by radioStore.presets.collectAsStateWithLifecycle()
+    val effectiveIsFavorite = if (radioStation != null) radioFavorites.any { it.uuid == radioStation.uuid } else isFavorite
+    val effectiveToggleFavorite: () -> Unit =
+        if (radioStation != null) ({ radioStore.toggleFavorite(radioStation) }) else onToggleFavorite
+
     val openArtist: (Artist) -> Unit = { artist ->
         // Local library artists open by id; online artists (no library entry) open by name.
         if (song.isLocal && artist.id > 0L) onNavigateToArtistById(artist.id)
@@ -194,6 +227,8 @@ fun SongInfoBottomSheet(
     }
     val onArtistClick: () -> Unit = {
         when {
+            // A radio station has no artist page.
+            com.theveloper.pixelplay.data.radio.RadioPlayback.isRadio(song) -> Unit
             pickerArtists.size > 1 -> showArtistPicker = true
             pickerArtists.size == 1 -> openArtist(pickerArtists.first())
             else -> onNavigateToArtist()
@@ -360,6 +395,7 @@ fun SongInfoBottomSheet(
         heightAnimationEnabled = true
     }
 
+    val dismissSheetAnimated = rememberAnimatedSheetDismiss(sheetState, onDismiss)
     ModalBottomSheet(
         onDismissRequest = {
             android.util.Log.d("PixelPlayerDebug", "ModalBottomSheet: onDismissRequest called, showEditSheet=$showEditSheet")
@@ -404,14 +440,17 @@ fun SongInfoBottomSheet(
                                     .fillMaxHeight(),
                                 verticalArrangement = Arrangement.Center
                             ) {
+                                // One line: long titles scroll sideways instead of wrapping.
+                                val reducedMotion = com.theveloper.pixelplay.ui.theme.rememberSystemReducedMotion()
                                 Text(
                                     text = song.title,
                                     style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.Bold,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
+                                    maxLines = 1,
+                                    overflow = if (reducedMotion) TextOverflow.Ellipsis else TextOverflow.Clip,
                                     lineHeight = 24.sp,
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = if (reducedMotion) Modifier.fillMaxWidth()
+                                        else Modifier.fillMaxWidth().basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1200)
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
@@ -428,8 +467,35 @@ fun SongInfoBottomSheet(
                                             onClick = onArtistClick
                                         )
                                 )
+                                if (headerExtra != null) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    headerExtra()
+                                }
                             }
-                            val isEditable = remember(song) { songInfoViewModel.isSongEditable(song) }
+                            if (onSelect != null) {
+                                FilledTonalIconButton(
+                                    modifier = Modifier.size(46.dp),
+                                    shape = CircleShape,
+                                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceBright,
+                                        contentColor = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    onClick = {
+                                        // Slide the menu away, then start selecting in the list.
+                                        scope.launch { sheetState.hide() }.invokeOnCompletion {
+                                            onDismiss()
+                                            onSelect()
+                                        }
+                                    },
+                                ) {
+                                    Icon(
+                                        modifier = Modifier.size(22.dp),
+                                        imageVector = Icons.Rounded.Checklist,
+                                        contentDescription = "Select songs"
+                                    )
+                                }
+                            }
+                            val isEditable = remember(song) { songInfoViewModel.isSongEditable(song) } && !isRadio
                             if (isEditable) {
                                 FilledTonalIconButton(
                                     modifier = Modifier.size(46.dp),
@@ -462,8 +528,13 @@ fun SongInfoBottomSheet(
                             isPageTransitioning = false
                         }
                     }
-                    val sizeAnimationSpec = if (heightAnimationEnabled && isPageTransitioning) {
-                        tween<androidx.compose.ui.unit.IntSize>(durationMillis = 280, easing = FastOutSlowInEasing)
+                    // Options <-> Info: the sheet's height follows the page with a smooth, non-bouncy
+                    // spring the whole way (no late snap), so the buttons glide instead of dropping.
+                    val sizeAnimationSpec = if (heightAnimationEnabled) {
+                        androidx.compose.animation.core.spring<androidx.compose.ui.unit.IntSize>(
+                            dampingRatio = androidx.compose.animation.core.Spring.DampingRatioNoBouncy,
+                            stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow
+                        )
                     } else {
                         androidx.compose.animation.core.snap()
                     }
@@ -508,80 +579,149 @@ fun SongInfoBottomSheet(
                                                 }
                                             }
                                         }
+                                        // Hold Next → Soon (radio stations too: they queue like songs).
+                                        val canSoon = soonPlayer != null && onAddSoon != null
+                                        var soonOpen by androidx.compose.runtime.saveable.rememberSaveable(song.id) { mutableStateOf(false) }
+                                        androidx.activity.compose.BackHandler(enabled = soonOpen) { soonOpen = false }
                                         QueuePlaylistNextActionsRow(
                                             onAddToQueue = { closeAfterSuccess(onAddToQueue) },
                                             onAddToPlayList = onAddToPlayList,
-                                            onAddNextToQueue = { closeAfterSuccess(onAddNextToQueue) }
+                                            onAddNextToQueue = { closeAfterSuccess(onAddNextToQueue) },
+                                            onNextLongClick = if (canSoon) ({ soonOpen = !soonOpen }) else null,
+                                            soonOpen = soonOpen
                                         )
 
-                                        PracticeActionRow(song = song)
-
-                                        val isCloudSong = remember(song) { songInfoViewModel.isCloudSong(song) }
-                                        val downloadStateMap by songInfoViewModel.downloadUiState.collectAsStateWithLifecycle()
-                                        val downloadProgressState = downloadStateMap[song.id]
-                                        val downloadedIds by songInfoViewModel.downloadedIds.collectAsStateWithLifecycle()
-                                        val isThisDownloading = remember(downloadProgressState) {
-                                            when (downloadProgressState) {
-                                                is com.theveloper.pixelplay.data.youtube.DownloadProgress.Resolving,
-                                                is com.theveloper.pixelplay.data.youtube.DownloadProgress.Downloading,
-                                                is com.theveloper.pixelplay.data.youtube.DownloadProgress.Tagging,
-                                                is com.theveloper.pixelplay.data.youtube.DownloadProgress.Scanning -> true
-                                                else -> false
-                                            }
-                                        }
-                                        // Same source of truth as the tick (DownloadDone badge) next to the title:
-                                        // song.downloadState == DOWNLOADED. A just-finished download also counts.
-                                        val isAlreadyDownloaded = song.isDownloaded || song.id in downloadedIds ||
-                                            downloadProgressState is com.theveloper.pixelplay.data.youtube.DownloadProgress.Completed
-                                        // Only offer "Download Song" for online songs that aren't downloaded yet.
-                                        if (isCloudSong && !isAlreadyDownloaded) {
-
-                                            FilledTonalButton(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .heightIn(min = 66.dp),
-                                                colors = ButtonDefaults.filledTonalButtonColors(
-                                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                                ),
-                                                enabled = !isThisDownloading,
-                                                contentPadding = PaddingValues(horizontal = 10.dp),
-                                                shape = CircleShape,
-                                                onClick = { songInfoViewModel.downloadSong(song) }
-                                            ) {
-                                                if (isThisDownloading) {
-                                                    CircularProgressIndicator(
-                                                        modifier = Modifier.size(20.dp),
-                                                        strokeWidth = 2.dp,
-                                                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                                                    )
-                                                    Spacer(Modifier.width(8.dp))
-                                                    Text(
-                                                        text = "Downloading...",
-                                                        fontWeight = FontWeight.Bold
-                                                    )
+                                        // Hold Next → Soon: the "after which song" slider takes the place of these rows.
+                                        androidx.compose.animation.AnimatedContent(
+                                            targetState = soonOpen && canSoon,
+                                            transitionSpec = {
+                                                if (targetState) {
+                                                    (androidx.compose.animation.slideInVertically(tween(com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium2, easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate)) { it } +
+                                                        androidx.compose.animation.fadeIn(tween(com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium2, easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate))) togetherWith
+                                                        androidx.compose.animation.fadeOut(tween(com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort3, easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate))
                                                 } else {
-                                                    Icon(
-                                                        Icons.Rounded.Download,
-                                                        contentDescription = "Download Song"
-                                                    )
-                                                    Spacer(Modifier.width(8.dp))
-                                                    Text(
-                                                        text = "Download Song",
-                                                        fontWeight = FontWeight.Bold
+                                                    androidx.compose.animation.fadeIn(tween(com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium1, easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate)) togetherWith
+                                                        (androidx.compose.animation.slideOutVertically(tween(com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort4, easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate)) { it } +
+                                                            androidx.compose.animation.fadeOut(tween(com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort4, easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate)))
+                                                }
+                                            },
+                                            label = "songOptionsSoon"
+                                        ) { showSoon ->
+                                            val soonVm = soonPlayer
+                                            val addSoon = onAddSoon
+                                            if (showSoon && soonVm != null && addSoon != null) {
+                                                Box(
+                                                    Modifier
+                                                        .fillMaxWidth()
+                                                        .clip(RoundedCornerShape(16.dp))
+                                                        .background(MaterialTheme.colorScheme.surfaceContainer)
+                                                ) {
+                                                    PlaylistSoonPanel(
+                                                        playerViewModel = soonVm,
+                                                        onBack = { soonOpen = false },
+                                                        onConfirm = { k -> closeAfterSuccess { addSoon(k) } },
+                                                        forSong = song,
                                                     )
                                                 }
+                                            } else {
+                                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                                if (radioStation != null) {
+                                                    RadioPracticeRow()
+                                                    com.theveloper.pixelplay.presentation.screens.radio.RadioPresetPicker(
+                                                        station = radioStation,
+                                                        presets = radioPresets,
+                                                        onSetPreset = { slot ->
+                                                            radioStore.setPreset(slot, radioStation)
+                                                            Toast.makeText(context, "Saved to preset ${slot + 1}", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    )
+                                                    // Website, with a map button to its right (opens the Radio map on the station).
+                                                    com.theveloper.pixelplay.presentation.screens.radio.RadioWebsiteMapRow(
+                                                        station = radioStation,
+                                                        onWebsite = {
+                                                            com.theveloper.pixelplay.presentation.screens.radio.openStationHomepage(context, radioStation)
+                                                        },
+                                                        onMap = onShowStationOnMap?.let { show ->
+                                                            {
+                                                                scope.launch { sheetState.hide() }.invokeOnCompletion {
+                                                                    onDismiss()
+                                                                    show(radioStation)
+                                                                }
+                                                            }
+                                                        }
+                                                    )
+                                                } else {
+                                                    val isCloudSong = remember(song) { songInfoViewModel.isCloudSong(song) }
+                                                    val downloadStateMap by songInfoViewModel.downloadUiState.collectAsStateWithLifecycle()
+                                                    val downloadProgressState = downloadStateMap[song.id]
+                                                    val downloadedIds by songInfoViewModel.downloadedIds.collectAsStateWithLifecycle()
+                                                    val isThisDownloading = remember(downloadProgressState) {
+                                                        when (downloadProgressState) {
+                                                            is com.theveloper.pixelplay.data.youtube.DownloadProgress.Resolving,
+                                                            is com.theveloper.pixelplay.data.youtube.DownloadProgress.Downloading,
+                                                            is com.theveloper.pixelplay.data.youtube.DownloadProgress.Tagging,
+                                                            is com.theveloper.pixelplay.data.youtube.DownloadProgress.Scanning -> true
+                                                            else -> false
+                                                        }
+                                                    }
+                                                    // Local files and finished downloads are both "on this device".
+                                                    // A just-finished download also counts.
+                                                    val isOnDevice = song.isLocalOrDownloaded || song.id in downloadedIds ||
+                                                        downloadProgressState is com.theveloper.pixelplay.data.youtube.DownloadProgress.Completed
+                                                    val downloadButtonState = when {
+                                                        isOnDevice -> SongDownloadButtonState.Downloaded
+                                                        isThisDownloading -> SongDownloadButtonState.Downloading
+                                                        isCloudSong -> SongDownloadButtonState.Available
+                                                        // Streams with no download path (e.g. Drive): shown, but disabled.
+                                                        else -> SongDownloadButtonState.Unavailable
+                                                    }
+
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(top = 8.dp),
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        PracticeActionButton(
+                                                            song = song,
+                                                            modifier = Modifier.weight(1f)
+                                                        )
+                                                        // Icon-only Download sits between Practice and Radio.
+                                                        // Songs already on the phone (or that can't be downloaded) skip it.
+                                                        if (downloadButtonState == SongDownloadButtonState.Available ||
+                                                            downloadButtonState == SongDownloadButtonState.Downloading
+                                                        ) {
+                                                            SongDownloadButton(
+                                                                state = downloadButtonState,
+                                                                onClick = { songInfoViewModel.downloadSong(song) }
+                                                            )
+                                                        }
+                                                        SongRadioButton(
+                                                            enabled = onStartSongRadio != null,
+                                                            modifier = Modifier.weight(1f),
+                                                            onClick = {
+                                                                val start = onStartSongRadio ?: return@SongRadioButton
+                                                                scope.launch { sheetState.hide() }.invokeOnCompletion {
+                                                                    onDismiss()
+                                                                    start(song)
+                                                                }
+                                                            }
+                                                        )
+                                                    }
+                                                }
+
+                                                BottomActionsRow(
+                                                    isFavorite = effectiveIsFavorite,
+                                                    onPlaySong = onPlaySong,
+                                                    onToggleFavorite = effectiveToggleFavorite,
+                                                    onShareClick = { showShareSheet = true },
+                                                    playButtonShape = playButtonShape,
+                                                    evenCornerRadiusElems = evenCornerRadiusElems
+                                                )
+                                            }
                                             }
                                         }
-
-                                        BottomActionsRow(
-                                            isFavorite = isFavorite,
-                                            onPlaySong = onPlaySong,
-                                            onToggleFavorite = onToggleFavorite,
-                                            onShareClick = { showShareOptionsDialog = true },
-                                            playButtonShape = playButtonShape,
-                                            evenCornerRadiusElems = evenCornerRadiusElems
-                                        )
 
                                         Spacer(Modifier.height(80.dp))
                                     }
@@ -608,12 +748,14 @@ fun SongInfoBottomSheet(
                                         val gatheredSong by songInfoViewModel.detailsSong.collectAsStateWithLifecycle()
                                         val details = gatheredSong?.takeIf { it.id == song.id } ?: song
                                         val localFilePath by songInfoViewModel.localFilePath.collectAsStateWithLifecycle()
+                                        val refreshingMetadata by songInfoViewModel.refreshingMetadata.collectAsStateWithLifecycle()
+                                        val notAvailable = stringResource(R.string.metadata_not_available)
 
-                                        // 1. Duration
-                                        MetadataItemCard(
+                                        // 1. Duration (a live station has none)
+                                        if (!isRadio) MetadataItemCard(
                                             icon = Icons.Rounded.Schedule,
                                             title = stringResource(R.string.song_info_duration_label),
-                                            subtitle = if (details.duration > 0) formatDuration(details.duration) else "\u2013"
+                                            subtitle = if (details.duration > 0) formatDuration(details.duration) else notAvailable
                                         )
 
                                         // 2. Genre
@@ -623,7 +765,7 @@ fun SongInfoBottomSheet(
                                         MetadataItemCard(
                                             icon = Icons.Rounded.MusicNote,
                                             title = stringResource(R.string.song_info_genre_label),
-                                            subtitle = effectiveGenre ?: stringResource(R.string.song_info_unknown_genre),
+                                            subtitle = effectiveGenre ?: notAvailable,
                                             onClick = if (effectiveGenre != null) {
                                                 onNavigateToGenre
                                             } else null
@@ -634,7 +776,7 @@ fun SongInfoBottomSheet(
                                         MetadataItemCard(
                                             icon = Icons.Rounded.Album,
                                             title = stringResource(R.string.song_info_album_label),
-                                            subtitle = effectiveAlbum ?: stringResource(R.string.common_unknown_album),
+                                            subtitle = effectiveAlbum ?: notAvailable,
                                             onClick = if (effectiveAlbum != null) {
                                                 onNavigateToAlbum
                                             } else null
@@ -645,16 +787,16 @@ fun SongInfoBottomSheet(
                                         MetadataItemCard(
                                             icon = Icons.Rounded.Person,
                                             title = stringResource(R.string.song_info_artist_label),
-                                            subtitle = effectiveArtist ?: stringResource(R.string.common_unknown_artist),
+                                            subtitle = effectiveArtist ?: notAvailable,
                                             onClick = if (effectiveArtist != null) onArtistClick else null
                                         )
 
                                         // 5. Song info
-                                        if (!audioMetaLabel.isNullOrBlank()) {
+                                        if (!isRadio) {
                                             MetadataItemCard(
                                                 icon = Icons.Rounded.Info,
                                                 title = stringResource(R.string.song_info_audio_format_label),
-                                                subtitle = audioMetaLabel
+                                                subtitle = audioMetaLabel?.takeIf { it.isNotBlank() } ?: notAvailable
                                             )
                                         }
 
@@ -678,6 +820,51 @@ fun SongInfoBottomSheet(
                                                     ).show()
                                                 }
                                             )
+                                        }
+
+                                        // Wrong or corrupted details: look everything up again, ignoring the cache.
+                                        if (!isRadio) {
+                                            androidx.compose.material3.OutlinedButton(
+                                                onClick = { songInfoViewModel.refreshMetadata(details) },
+                                                enabled = !refreshingMetadata,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(top = 4.dp)
+                                                    .heightIn(min = 48.dp)
+                                            ) {
+                                                androidx.compose.animation.AnimatedContent(
+                                                    targetState = refreshingMetadata,
+                                                    transitionSpec = {
+                                                        androidx.compose.animation.fadeIn(
+                                                            androidx.compose.animation.core.tween(
+                                                                com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium1,
+                                                                easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate
+                                                            )
+                                                        ) togetherWith androidx.compose.animation.fadeOut(
+                                                            androidx.compose.animation.core.tween(
+                                                                com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort3,
+                                                                easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate
+                                                            )
+                                                        )
+                                                    },
+                                                    label = "refreshMetadataIcon"
+                                                ) { busy ->
+                                                    if (busy) {
+                                                        androidx.compose.material3.CircularProgressIndicator(
+                                                            strokeWidth = 2.dp,
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
+                                                    } else {
+                                                        Icon(
+                                                            androidx.compose.material.icons.Icons.Rounded.Refresh,
+                                                            contentDescription = null,
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
+                                                    }
+                                                }
+                                                Spacer(Modifier.width(8.dp))
+                                                Text(stringResource(R.string.song_info_refresh_metadata))
+                                            }
                                         }
 
                                         Spacer(Modifier.height(88.dp))
@@ -732,13 +919,13 @@ fun SongInfoBottomSheet(
                     // Middle Delete Button — only for songs that exist on the device
                     // (local files or downloaded songs, i.e. the ones showing the tick).
                     // Online / not-downloaded songs have nothing to delete.
-                    if (alwaysShowDelete || song.isLocalOrDownloaded) IconButton(
+                    if (!isRadio && (alwaysShowDelete || song.isLocalOrDownloaded)) IconButton(
                         onClick = {
                             (context as? Activity)?.let { activity ->
                                 onDeleteFromDevice(activity, song) { result ->
                                     if (result) {
                                         removeFromListTrigger()
-                                        onDismiss()
+                                        dismissSheetAnimated()
                                     }
                                 }
                             }
@@ -827,12 +1014,50 @@ fun SongInfoBottomSheet(
         )
     }
 
-    if (showShareOptionsDialog) {
-        ShareOptionsDialog(
-            song = song,
-            onDismiss = { showShareOptionsDialog = false },
+    fun shareText(text: String) {
+        try {
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+            }
+            context.startActivity(Intent.createChooser(intent, shareChooserTitle))
+        } catch (e: Exception) {
+            Toast.makeText(
+                context,
+                errorShareSongFormat.format(e.localizedMessage ?: ""),
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    fun copyAndShareLink(label: String, url: String) {
+        try {
+            context.getSystemService(ClipboardManager::class.java)
+                ?.setPrimaryClip(ClipData.newPlainText(label, url))
+            Toast.makeText(context, "Link copied to clipboard", Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {
+            // Clipboard can be unavailable (e.g. work profile restrictions); still offer the share sheet.
+        }
+        shareText(url)
+    }
+
+    if (showShareSheet) {
+        val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
+        val songSchemePair by remember(song.albumArtUriString) {
+            songInfoViewModel.albumColorSchemeFlow(song.albumArtUriString)
+        }.collectAsStateWithLifecycle()
+        // Same filled-in metadata the Details tab shows (online songs often arrive with a blank
+        // album/genre or a placeholder like "YouTube Music"); the raw song is only the fallback.
+        val gatheredShareSong by songInfoViewModel.detailsSong.collectAsStateWithLifecycle()
+        val shareSong = gatheredShareSong?.takeIf { it.id == song.id } ?: song
+        ShareSongSheet(
+            song = shareSong,
+            palette = songSchemePair?.let { if (isDarkTheme) it.dark else it.light },
+            onDismiss = { showShareSheet = false },
+            onShareText = ::shareText,
+            onShareLink = ::copyAndShareLink,
+            onSetAsSound = { showTonePickerSheet = true },
             onShareFile = {
-                showShareOptionsDialog = false
                 try {
                     val shareIntent = Intent(Intent.ACTION_SEND).apply {
                         type = "audio/*"
@@ -853,240 +1078,18 @@ fun SongInfoBottomSheet(
                     ).show()
                 }
             },
-            onSetAsSound = {
-                showShareOptionsDialog = false
-                showTonePickerDialog = true
-            }
         )
     }
 
-    if (showTonePickerDialog) {
-        ToneTargetPickerDialog(
-            onDismiss = { showTonePickerDialog = false },
+    if (showTonePickerSheet) {
+        TonePickerSheet(
+            onDismiss = { showTonePickerSheet = false },
             onTargetSelected = { target ->
-                showTonePickerDialog = false
-                toneConfirmationTarget = target
-            }
-        )
-    }
-
-    toneConfirmationTarget?.let { target ->
-        ToneConfirmationDialog(
-            song = song,
-            target = target,
-            onDismiss = { toneConfirmationTarget = null },
-            onConfirm = {
-                toneConfirmationTarget = null
+                showTonePickerSheet = false
+                showShareSheet = false
                 setCurrentSongAsTone(target)
             }
         )
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ToneTargetPickerDialog(
-    onDismiss: () -> Unit,
-    onTargetSelected: (ToneTarget) -> Unit,
-) {
-    BasicAlertDialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = AbsoluteSmoothCornerShape(
-                cornerRadiusTR = 32.dp,
-                smoothnessAsPercentBR = 60,
-                cornerRadiusBR = 32.dp,
-                smoothnessAsPercentTL = 60,
-                cornerRadiusTL = 32.dp,
-                smoothnessAsPercentBL = 60,
-                cornerRadiusBL = 32.dp,
-                smoothnessAsPercentTR = 60,
-            ),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 6.dp,
-        ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    ToneDialogIcon(target = null)
-                    Text(
-                        text = stringResource(R.string.song_info_tone_picker_title),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-                Text(
-                    text = stringResource(R.string.song_info_tone_picker_body),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                Column(
-                    modifier = Modifier.clip(RoundedCornerShape(22.dp)),
-                    verticalArrangement = Arrangement.spacedBy(3.dp),
-                ) {
-                    ToneTarget.values().forEach { target ->
-                        ToneTargetOption(
-                            target = target,
-                            onClick = { onTargetSelected(target) },
-                        )
-                    }
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    TextButton(onClick = onDismiss) {
-                        Text(stringResource(R.string.common_cancel))
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ToneTargetOption(
-    target: ToneTarget,
-    onClick: () -> Unit,
-) {
-    ListItem(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape = RoundedCornerShape(4.dp))
-            .clickable(onClick = onClick),
-        colors = ListItemDefaults.colors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-        ),
-        leadingContent = {
-            ToneDialogIcon(
-                target = target,
-                modifier = Modifier.size(42.dp),
-                iconModifier = Modifier.size(22.dp),
-            )
-        },
-        headlineContent = {
-            Text(
-                text = stringResource(target.titleResId),
-                fontWeight = FontWeight.SemiBold,
-            )
-        },
-        supportingContent = {
-            Text(stringResource(target.subtitleResId))
-        },
-    )
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ToneConfirmationDialog(
-    song: Song,
-    target: ToneTarget,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit,
-) {
-    BasicAlertDialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = AbsoluteSmoothCornerShape(
-                cornerRadiusTR = 32.dp,
-                smoothnessAsPercentBR = 60,
-                cornerRadiusBR = 32.dp,
-                smoothnessAsPercentTL = 60,
-                cornerRadiusTL = 32.dp,
-                smoothnessAsPercentBL = 60,
-                cornerRadiusBL = 32.dp,
-                smoothnessAsPercentTR = 60,
-            ),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 6.dp,
-        ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    ToneDialogIcon(target = target)
-                    Text(
-                        text = stringResource(R.string.song_info_tone_confirm_title),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-                Text(
-                    text = stringResource(
-                        R.string.song_info_tone_confirm_body,
-                        song.title,
-                        stringResource(target.confirmLabelResId),
-                    ),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    TextButton(onClick = onDismiss) {
-                        Text(stringResource(R.string.common_cancel))
-                    }
-                    FilledTonalButton(onClick = onConfirm) {
-                        Text(stringResource(R.string.song_info_tone_confirm_action))
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ToneDialogIcon(
-    target: ToneTarget?,
-    modifier: Modifier = Modifier.size(56.dp),
-    iconModifier: Modifier = Modifier.size(28.dp),
-) {
-    Box(
-        modifier = modifier
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.secondaryContainer),
-        contentAlignment = Alignment.Center,
-    ) {
-        when (target) {
-            ToneTarget.Ringtone -> Icon(
-                imageVector = Icons.Rounded.MusicNote,
-                contentDescription = null,
-                modifier = iconModifier,
-                tint = MaterialTheme.colorScheme.onSecondaryContainer,
-            )
-            ToneTarget.Notification -> Icon(
-                painter = painterResource(R.drawable.rounded_notifications_active_24),
-                contentDescription = null,
-                modifier = iconModifier,
-                tint = MaterialTheme.colorScheme.onSecondaryContainer,
-            )
-            ToneTarget.Alarm -> Icon(
-                painter = painterResource(R.drawable.rounded_alarm_24),
-                contentDescription = null,
-                modifier = iconModifier,
-                tint = MaterialTheme.colorScheme.onSecondaryContainer,
-            )
-            null -> Icon(
-                painter = painterResource(R.drawable.rounded_notifications_active_24),
-                contentDescription = null,
-                modifier = iconModifier,
-                tint = MaterialTheme.colorScheme.onSecondaryContainer,
-            )
-        }
     }
 }
 
@@ -1145,27 +1148,6 @@ private fun RingtoneActionButton(
         }
     }
 }
-
-private val ToneTarget.titleResId: Int
-    get() = when (this) {
-        ToneTarget.Ringtone -> R.string.song_info_tone_ringtone_title
-        ToneTarget.Notification -> R.string.song_info_tone_notification_title
-        ToneTarget.Alarm -> R.string.song_info_tone_alarm_title
-    }
-
-private val ToneTarget.subtitleResId: Int
-    get() = when (this) {
-        ToneTarget.Ringtone -> R.string.song_info_tone_ringtone_subtitle
-        ToneTarget.Notification -> R.string.song_info_tone_notification_subtitle
-        ToneTarget.Alarm -> R.string.song_info_tone_alarm_subtitle
-    }
-
-private val ToneTarget.confirmLabelResId: Int
-    get() = when (this) {
-        ToneTarget.Ringtone -> R.string.song_info_tone_ringtone_label
-        ToneTarget.Notification -> R.string.song_info_tone_notification_label
-        ToneTarget.Alarm -> R.string.song_info_tone_alarm_label
-    }
 
 @Composable
 private fun MetadataItemCard(
@@ -1227,152 +1209,435 @@ private fun MetadataItemCard(
     }
 }
 
+private fun shareSearchQuery(song: Song): String =
+    Uri.encode(listOfNotNull(song.title, shareMetaOrNull(song.displayArtist)).joinToString(" "))
+
+/**
+ * A metadata value worth sharing, or null for blanks and the placeholders online sources fill
+ * in ("<unknown>", "Unknown Artist", "YouTube Music" as an album/genre, ...).
+ */
+internal fun shareMetaOrNull(value: String?): String? {
+    val v = value?.trim().orEmpty()
+    if (v.isEmpty()) return null
+    val lower = v.lowercase()
+    if (lower in SHARE_META_PLACEHOLDERS) return null
+    return v
+}
+
+private val SHARE_META_PLACEHOLDERS = setOf(
+    "<unknown>", "unknown", "unknown artist", "unknown album", "unknown genre",
+    "youtube music", "youtube", "various artists"
+)
+
+private fun appleMusicUrl(song: Song): String =
+    "https://music.apple.com/us/search?term=${shareSearchQuery(song)}"
+
+private fun spotifyUrl(song: Song): String =
+    if (song.id.startsWith("spotify_")) {
+        "https://open.spotify.com/track/${song.id.removePrefix("spotify_")}"
+    } else {
+        "https://open.spotify.com/search/${shareSearchQuery(song)}"
+    }
+
+private fun youtubeMusicUrl(song: Song): String =
+    song.youtubeId?.takeIf { it.isNotBlank() }
+        ?.let { "https://music.youtube.com/watch?v=$it" }
+        ?: "https://music.youtube.com/search?q=${shareSearchQuery(song)}"
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ShareOptionsDialog(
+private fun ShareSongSheet(
     song: Song,
+    /** The song's album-art colours; falls back to the app theme until it's ready. */
+    palette: androidx.compose.material3.ColorScheme?,
     onDismiss: () -> Unit,
-    onShareFile: () -> Unit,
+    onShareText: (String) -> Unit,
+    onShareLink: (label: String, url: String) -> Unit,
     onSetAsSound: () -> Unit,
+    onShareFile: () -> Unit,
 ) {
-    BasicAlertDialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = AbsoluteSmoothCornerShape(
-                cornerRadiusTR = 32.dp,
-                smoothnessAsPercentBR = 60,
-                cornerRadiusBR = 32.dp,
-                smoothnessAsPercentTL = 60,
-                cornerRadiusTL = 32.dp,
-                smoothnessAsPercentBL = 60,
-                cornerRadiusBL = 32.dp,
-                smoothnessAsPercentTR = 60,
-            ),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 6.dp,
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
-            ) {
+            Text(
+                text = "Share song",
+                style = MaterialTheme.typography.headlineSmall,
+                fontFamily = GoogleSansRounded,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 6.dp),
+            )
+
+            // 1. Genre + Album quick-share cards. A value that isn't known is left out rather
+            // than shown blank / "Unknown"; the other card then takes the whole row.
+            val shareGenre = shareMetaOrNull(song.genre)
+            val shareAlbum = shareMetaOrNull(song.album)
+            val shareArtist = shareMetaOrNull(song.displayArtist) ?: shareMetaOrNull(song.artist)
+            if (shareGenre != null || shareAlbum != null) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.secondaryContainer),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Share,
-                            contentDescription = null,
-                            modifier = Modifier.size(28.dp),
-                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    if (shareGenre != null) {
+                        ShareMetaCard(
+                            label = "Genre",
+                            value = shareGenre,
+                            modifier = Modifier.weight(1f),
+                            onClick = { onShareText(shareGenre) },
                         )
                     }
-                    Column {
-                        Text(
-                            text = stringResource(R.string.song_info_share_title),
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold,
+                    if (shareAlbum != null) {
+                        ShareMetaCard(
+                            label = "Album",
+                            value = shareAlbum,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                onShareText(if (shareArtist != null) "$shareAlbum - $shareArtist" else shareAlbum)
+                            },
                         )
-                        Text(
-                            text = song.title,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-
-                Column(
-                    modifier = Modifier.clip(RoundedCornerShape(22.dp)),
-                    verticalArrangement = Arrangement.spacedBy(3.dp),
-                ) {
-                    ListItem(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(4.dp))
-                            .clickable(onClick = onShareFile),
-                        colors = ListItemDefaults.colors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        ),
-                        leadingContent = {
-                            Box(
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.secondaryContainer),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Share,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(22.dp),
-                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                )
-                            }
-                        },
-                        headlineContent = {
-                            Text(
-                                text = stringResource(R.string.song_info_share_action_file),
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        },
-                        supportingContent = {
-                            Text(stringResource(R.string.song_info_share_action_file_desc))
-                        },
-                    )
-
-                    ListItem(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(4.dp))
-                            .clickable(onClick = onSetAsSound),
-                        colors = ListItemDefaults.colors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        ),
-                        leadingContent = {
-                            Box(
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.secondaryContainer),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(
-                                    painter = painterResource(R.drawable.rounded_notifications_active_24),
-                                    contentDescription = null,
-                                    modifier = Modifier.size(22.dp),
-                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                )
-                            }
-                        },
-                        headlineContent = {
-                            Text(
-                                text = stringResource(R.string.song_info_share_action_sound),
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        },
-                        supportingContent = {
-                            Text(stringResource(R.string.song_info_share_action_sound_desc))
-                        },
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    TextButton(onClick = onDismiss) {
-                        Text(stringResource(R.string.common_cancel))
                     }
                 }
             }
+
+            // 2. Title | Combined | Artist card
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier.padding(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    ShareMarqueeSegment(
+                        label = "Title",
+                        value = song.title,
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.Start,
+                        onClick = { onShareText(song.title) },
+                    )
+                    FilledTonalIconButton(
+                        onClick = { onShareText(if (shareArtist != null) "${song.title} - $shareArtist" else song.title) },
+                        modifier = Modifier.size(48.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Share,
+                            contentDescription = "Share title and artist",
+                        )
+                    }
+                    if (shareArtist != null) {
+                        ShareMarqueeSegment(
+                            label = "Artist",
+                            value = shareArtist,
+                            modifier = Modifier.weight(1f),
+                            horizontalAlignment = Alignment.End,
+                            onClick = { onShareText(shareArtist) },
+                        )
+                    }
+                }
+            }
+
+            // 3. Streaming links: just the service icon on a rounded square in the song's colours.
+            val scheme = palette ?: MaterialTheme.colorScheme
+            val tileColor by androidx.compose.animation.animateColorAsState(scheme.primaryContainer, label = "shareTileBg")
+            val tileIconColor by androidx.compose.animation.animateColorAsState(scheme.onPrimaryContainer, label = "shareTileFg")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                StreamingLinkCard(
+                    iconRes = R.drawable.ic_source_apple_music,
+                    description = "Share Apple Music link",
+                    containerColor = tileColor,
+                    iconColor = tileIconColor,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onShareLink("Apple Music", appleMusicUrl(song)) },
+                )
+                StreamingLinkCard(
+                    iconRes = R.drawable.ic_source_spotify,
+                    description = "Share Spotify link",
+                    containerColor = tileColor,
+                    iconColor = tileIconColor,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onShareLink("Spotify", spotifyUrl(song)) },
+                )
+                StreamingLinkCard(
+                    iconRes = R.drawable.ic_source_youtube_music,
+                    description = "Share YouTube Music link",
+                    containerColor = tileColor,
+                    iconColor = tileIconColor,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onShareLink("YouTube Music", youtubeMusicUrl(song)) },
+                )
+            }
+
+            // 4. Set as sound (bell) + Share audio, which fills the rest of the row.
+            val shareAudioColor by androidx.compose.animation.animateColorAsState(scheme.primary, label = "shareAudioBg")
+            val onShareAudioColor by androidx.compose.animation.animateColorAsState(scheme.onPrimary, label = "shareAudioFg")
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FilledTonalIconButton(
+                    onClick = onSetAsSound,
+                    modifier = Modifier.size(56.dp),
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = tileColor,
+                        contentColor = tileIconColor,
+                    ),
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.rounded_notifications_active_24),
+                        contentDescription = stringResource(R.string.song_info_cd_set_sound_as),
+                    )
+                }
+                androidx.compose.material3.Button(
+                    onClick = onShareFile,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(56.dp),
+                    shape = CircleShape,
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = shareAudioColor,
+                        contentColor = onShareAudioColor,
+                    ),
+                    contentPadding = PaddingValues(horizontal = 20.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.AudioFile,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = "Share audio",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontFamily = GoogleSansRounded,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShareMetaCard(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = modifier,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ShareMarqueeSegment(
+    label: String,
+    value: String,
+    horizontalAlignment: Alignment.Horizontal,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        horizontalAlignment = horizontalAlignment,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE),
+        )
+    }
+}
+
+@Composable
+private fun StreamingLinkCard(
+    @androidx.annotation.DrawableRes iconRes: Int,
+    description: String,
+    containerColor: Color,
+    iconColor: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(20.dp),
+        color = containerColor,
+        contentColor = iconColor,
+        modifier = modifier
+            .height(64.dp)
+            .semantics { contentDescription = description },
+    ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+            Icon(
+                painter = painterResource(iconRes),
+                contentDescription = null,
+                tint = iconColor,
+                modifier = Modifier.size(28.dp),
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TonePickerSheet(
+    onDismiss: () -> Unit,
+    onTargetSelected: (ToneTarget) -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = "Set as sound",
+                style = MaterialTheme.typography.headlineSmall,
+                fontFamily = GoogleSansRounded,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 6.dp),
+            )
+
+            // Ringtone (full width)
+            Surface(
+                onClick = { onTargetSelected(ToneTarget.Ringtone) },
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(88.dp),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 24.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Phone,
+                        contentDescription = null,
+                        modifier = Modifier.size(32.dp),
+                    )
+                    Text(
+                        text = "Ringtone",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+
+            // Alarm + Notification
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                ToneOptionCard(
+                    label = "Alarm",
+                    iconRes = R.drawable.rounded_alarm_24,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onTargetSelected(ToneTarget.Alarm) },
+                )
+                ToneOptionCard(
+                    label = "Notification",
+                    iconRes = R.drawable.rounded_notifications_active_24,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onTargetSelected(ToneTarget.Notification) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ToneOptionCard(
+    label: String,
+    iconRes: Int,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        modifier = modifier.height(88.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                painter = painterResource(iconRes),
+                contentDescription = null,
+                modifier = Modifier.size(26.dp),
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
         }
     }
 }
@@ -1589,8 +1854,23 @@ private fun BottomActionsRow(
 private fun QueuePlaylistNextActionsRow(
     onAddToQueue: () -> Unit,
     onAddToPlayList: () -> Unit,
-    onAddNextToQueue: () -> Unit
+    onAddNextToQueue: () -> Unit,
+    /** Hold Next → Soon. Null = no long-press. */
+    onNextLongClick: (() -> Unit)? = null,
+    /** Soon slider showing: Next is tinted. */
+    soonOpen: Boolean = false
 ) {
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val holdForSoonLabel = stringResource(R.string.action_row_next_hold_soon)
+    val soonOpenState = stringResource(R.string.action_row_soon_open_state)
+    val nextContainer by animateColorAsState(
+        if (soonOpen) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.tertiary,
+        tween(durationMillis = 200), label = "NextContainer"
+    )
+    val nextContent by animateColorAsState(
+        if (soonOpen) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onTertiary,
+        tween(durationMillis = 200), label = "NextContent"
+    )
     val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
     var clickPending by remember { mutableStateOf(false) }
 
@@ -1760,51 +2040,127 @@ private fun QueuePlaylistNextActionsRow(
             }
         }
 
-        // Right: Next
-        FilledTonalButton(
+        // Right: Next (hold for Soon). A Surface, since FilledTonalButton has no long-press;
+        // the same interaction source keeps the press-weight animation.
+        Surface(
             modifier = Modifier
                 .weight(weightNext)
-                .heightIn(min = 66.dp),
-            colors = ButtonDefaults.filledTonalButtonColors(
-                containerColor = MaterialTheme.colorScheme.tertiary,
-                contentColor = MaterialTheme.colorScheme.onTertiary
-            ),
-            contentPadding = PaddingValues(horizontal = 6.dp),
+                .heightIn(min = 66.dp)
+                .clip(CircleShape)
+                .combinedClickable(
+                    interactionSource = nextInteractionSource,
+                    indication = androidx.compose.material3.ripple(),
+                    role = androidx.compose.ui.semantics.Role.Button,
+                    onLongClickLabel = if (onNextLongClick != null) holdForSoonLabel else null,
+                    onLongClick = onNextLongClick?.let { longClick ->
+                        {
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                            longClick()
+                        }
+                    },
+                    onClick = {
+                        if (clickPending) return@combinedClickable
+                        clickPending = true
+                        nextVisualPressed = true
+                        coroutineScope.launch {
+                            kotlinx.coroutines.delay(180)
+                            nextVisualPressed = false
+                            clickPending = false
+                            onAddNextToQueue()
+                        }
+                    }
+                )
+                .semantics { if (soonOpen) stateDescription = soonOpenState },
             shape = CircleShape,
-            interactionSource = nextInteractionSource,
-            onClick = {
-                if (clickPending) return@FilledTonalButton
-                clickPending = true
-                nextVisualPressed = true
-                android.util.Log.d("PixelPlayerDebug", "QueuePlaylistNextActionsRow: Next clicked")
-                coroutineScope.launch {
-                    kotlinx.coroutines.delay(180)
-                    nextVisualPressed = false
-                    clickPending = false
-                    onAddNextToQueue()
+            color = nextContainer,
+            contentColor = nextContent
+        ) {
+            // While the Soon slider is open, Next reads "Soon" (slides through; back on close).
+            val reducedMotion = com.theveloper.pixelplay.ui.theme.rememberSystemReducedMotion()
+            androidx.compose.animation.AnimatedContent(
+                targetState = soonOpen,
+                transitionSpec = {
+                    if (reducedMotion) {
+                        androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
+                    } else {
+                        (androidx.compose.animation.slideInVertically(tween(MotionTokens.DurationShort4, easing = MotionTokens.EmphasizedDecelerate)) { it / 2 } +
+                            androidx.compose.animation.fadeIn(tween(MotionTokens.DurationShort4, easing = MotionTokens.EmphasizedDecelerate))) togetherWith
+                            (androidx.compose.animation.slideOutVertically(tween(MotionTokens.DurationShort2, easing = MotionTokens.EmphasizedAccelerate)) { -it / 2 } +
+                                androidx.compose.animation.fadeOut(tween(MotionTokens.DurationShort2, easing = MotionTokens.EmphasizedAccelerate)))
+                    }
+                },
+                contentAlignment = Alignment.Center,
+                label = "songOptionsNextLabel"
+            ) { showingSoon ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 6.dp)
+                ) {
+                    Icon(
+                        modifier = Modifier.size(18.dp),
+                        imageVector = if (showingSoon) Icons.Rounded.Schedule else Icons.AutoMirrored.Filled.QueueMusic,
+                        contentDescription = stringResource(if (showingSoon) R.string.playlist_option_soon else R.string.song_info_cd_queue_next)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    TightWrapText(
+                        text = stringResource(if (showingSoon) R.string.playlist_option_soon else R.string.song_info_action_queue_next),
+                        overflow = TextOverflow.Ellipsis,
+                        maxLines = 1,
+                        lineHeight = 16.sp,
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = GoogleSansRounded
+                        )
+                    )
                 }
             }
+        }
+    }
+}
+
+/**
+ * "Add to Practice" while radio plays: works on the song that's on (the newest one the
+ * station named or Listen caught). How this should work in the end is still to be decided;
+ * for now it adds that song, or says to catch it first.
+ */
+@Composable
+private fun RadioPracticeRow() {
+    val context = LocalContext.current
+    val nowPlaying = remember { com.theveloper.pixelplay.data.radio.RadioNowPlaying.get(context) }
+    val session by nowPlaying.session.collectAsStateWithLifecycle()
+    val latest = session.firstOrNull()
+    if (latest != null) {
+        PracticeActionRow(song = latest.toSong())
+    } else {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .clickable { nowPlaying.listen() }
+                .padding(horizontal = 18.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(
-                    modifier = Modifier.size(18.dp),
-                    imageVector = Icons.AutoMirrored.Filled.QueueMusic,
-                    contentDescription = stringResource(R.string.song_info_cd_queue_next)
+            Icon(
+                imageVector = Icons.Rounded.School,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.tertiary
+            )
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = "Add current song to Practice",
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold, fontFamily = GoogleSansRounded)
                 )
-                Spacer(Modifier.width(4.dp))
-                TightWrapText(
-                    text = stringResource(R.string.song_info_action_queue_next),
-                    overflow = TextOverflow.Ellipsis,
-                    maxLines = 1,
-                    lineHeight = 16.sp,
-                    style = MaterialTheme.typography.labelLarge.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = GoogleSansRounded
-                    )
+                Text(
+                    text = "Tap to Listen for the song first",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -1882,3 +2238,169 @@ private fun PracticeActionRow(song: Song) {
     }
 }
 
+// ── Song menu action row: Practice · Song Radio · Download ────────────────────────────────
+
+private val SongActionButtonHeight = 48.dp
+
+/** Short stage names that fit a one-third-width button. */
+private val com.theveloper.pixelplay.data.practice.PracticeStage.shortLabel: String
+    get() = when (this) {
+        com.theveloper.pixelplay.data.practice.PracticeStage.WANT -> "Want"
+        com.theveloper.pixelplay.data.practice.PracticeStage.LEARNING -> "Learning"
+        com.theveloper.pixelplay.data.practice.PracticeStage.FINISHED -> "Done"
+    }
+
+@Composable
+private fun SongActionLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold, fontFamily = GoogleSansRounded),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
+    )
+}
+
+/**
+ * Condensed Practice button. Not in Practice yet: one tap adds it to Want to learn.
+ * Already in Practice: shows the stage, and a tap opens the menu to move it on (next stage
+ * first), move it anywhere else, or remove it.
+ */
+@Composable
+private fun PracticeActionButton(song: Song, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val store = remember { com.theveloper.pixelplay.data.practice.PracticeStore.get(context) }
+    val entries by store.entries.collectAsStateWithLifecycle()
+    val stage = entries.firstOrNull { it.songId == song.id }?.stage
+    var menuOpen by remember { mutableStateOf(false) }
+    val containerColor by animateColorAsState(
+        targetValue = if (stage == null) MaterialTheme.colorScheme.secondaryContainer
+        else MaterialTheme.colorScheme.tertiaryContainer,
+        label = "practiceButtonContainer"
+    )
+    val contentColor by animateColorAsState(
+        targetValue = if (stage == null) MaterialTheme.colorScheme.onSecondaryContainer
+        else MaterialTheme.colorScheme.onTertiaryContainer,
+        label = "practiceButtonContent"
+    )
+    Box(modifier = modifier) {
+        FilledTonalButton(
+            onClick = {
+                if (stage == null) store.add(song.id, song.title, song.artist) else menuOpen = true
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(SongActionButtonHeight),
+            shape = CircleShape,
+            colors = ButtonDefaults.filledTonalButtonColors(
+                containerColor = containerColor,
+                contentColor = contentColor
+            ),
+            contentPadding = PaddingValues(horizontal = 10.dp)
+        ) {
+            Icon(Icons.Rounded.School, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            androidx.compose.animation.AnimatedContent(
+                targetState = stage?.shortLabel ?: "Practice",
+                label = "practiceButtonLabel"
+            ) { label -> SongActionLabel(label) }
+        }
+        DropdownMenu(expanded = menuOpen && stage != null, onDismissRequest = { menuOpen = false }) {
+            val current = stage ?: return@DropdownMenu
+            val next = current.next
+            if (next != null) {
+                DropdownMenuItem(
+                    text = { Text("Move to ${next.label}", fontWeight = FontWeight.Bold) },
+                    onClick = { menuOpen = false; store.move(song.id, next) }
+                )
+            }
+            com.theveloper.pixelplay.data.practice.PracticeStage.entries
+                .filter { it != current && it != next }
+                .forEach { target ->
+                    DropdownMenuItem(
+                        text = { Text("Move to ${target.label}") },
+                        onClick = { menuOpen = false; store.move(song.id, target) }
+                    )
+                }
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Remove from Practice") },
+                onClick = { menuOpen = false; store.remove(song.id) }
+            )
+        }
+    }
+}
+
+/** Starts a Spotify-style radio seeded by the song. */
+@Composable
+private fun SongRadioButton(
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    FilledTonalButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.height(SongActionButtonHeight),
+        shape = CircleShape,
+        colors = ButtonDefaults.filledTonalButtonColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+        ),
+        contentPadding = PaddingValues(horizontal = 10.dp)
+    ) {
+        Icon(Icons.Rounded.Radio, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        SongActionLabel("Radio")
+    }
+}
+
+private enum class SongDownloadButtonState { Available, Downloading, Downloaded, Unavailable }
+
+@Composable
+private fun SongDownloadButton(
+    state: SongDownloadButtonState,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isAvailable = state == SongDownloadButtonState.Available
+    val label = when (state) {
+        SongDownloadButtonState.Downloading -> "Saving"
+        SongDownloadButtonState.Downloaded -> "Downloaded"
+        else -> "Download"
+    }
+    FilledTonalIconButton(
+        onClick = onClick,
+        enabled = isAvailable,
+        modifier = modifier.size(SongActionButtonHeight),
+        shape = CircleShape,
+        colors = IconButtonDefaults.filledTonalIconButtonColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            disabledContainerColor = if (state == SongDownloadButtonState.Unavailable) {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerHighest
+            },
+            disabledContentColor = if (state == SongDownloadButtonState.Unavailable) {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            }
+        )
+    ) {
+        androidx.compose.animation.AnimatedContent(
+            targetState = state,
+            label = "downloadButtonState"
+        ) { target ->
+            when (target) {
+                SongDownloadButtonState.Downloading -> CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = LocalContentColor.current
+                )
+                SongDownloadButtonState.Downloaded -> Icon(Icons.Rounded.DownloadDone, contentDescription = label, modifier = Modifier.size(20.dp))
+                else -> Icon(Icons.Rounded.Download, contentDescription = label, modifier = Modifier.size(20.dp))
+            }
+        }
+    }
+}

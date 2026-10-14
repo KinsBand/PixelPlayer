@@ -20,7 +20,7 @@
     <string name="equalizer_effect_not_supported_device">Not supported on this device</string>
     <string name="equalizer_volume">Volume</string>
     <string name="equalizer_frequency_response">Frequency Response</string>
-    <string name="equalizer_visualizer_realtime">Real-Time Spectrum</string>
+    <string name="equalizer_visualizer_realtime">Spectrum</string>
     <string name="equalizer_switch_to_realtime_visualizer">Switch to real-time audio visualizer</string>
     <string name="equalizer_switch_to_response_curve">Switch to frequency response curve</string>
     <string name="equalizer_live_audio">Live Audio</string>
@@ -116,4 +116,30 @@
     <string name="equalizer_limiter">True Peak Limiter</string>
     <string name="equalizer_limiter_desc">Soft analog-style saturation prevents digital clipping crackle</string>
     <string name="equalizer_soft_saturation">Soft Saturation</string>
+
+    <!-- Spectrum -->
+    <string name="equalizer_mode_curve">Curve</string>
+    <string name="equalizer_spectrum_permission">Spectrum reads PixelPlayer\'s own audio output live. Android asks for microphone access for this.</string>
+    <string name="equalizer_spectrum_allow">Allow</string>
+    <string name="equalizer_spectrum_open_settings">Open settings</string>
+    <string name="equalizer_spectrum_unavailable">Spectrum isn\'t available on this audio output</string>
+    <string name="equalizer_spectrum_idle">Play something to see the spectrum</string>
+
+    <!-- Sections -->
+    <string name="equalizer_section_presets">Presets</string>
+    <string name="equalizer_section_bands">Bands</string>
+    <string name="equalizer_section_effects">Effects</string>
+    <string name="equalizer_section_volume">Playback engine</string>
+    <string name="equalizer_adapt_genre_title">Adapt to song genre</string>
+    <string name="equalizer_adapt_genre_off_hint">Enable the equalizer to hear adaptation</string>
+    <string name="equalizer_adapt_genre_active">Active: %1$s</string>
+    <string name="equalizer_adapt_genre_desc">Follows each song\'s genre; unknown tags use Flat</string>
+
+    <!-- Extreme volume -->
+    <string name="equalizer_volume_title">Volume</string>
+    <string name="equalizer_volume_subtitle">Media volume. Drag past 100% for Extreme.</string>
+    <string name="equalizer_volume_extreme">Extreme</string>
+    <string name="equalizer_volume_extreme_subtitle">Extreme +%1$.1f dB above max</string>
+    <string name="equalizer_volume_extreme_state">%1$d%%, Extreme +%2$.1f dB</string>
+    <string name="equalizer_volume_extreme_warning">Loud and can distort. A limiter stops clipping, but go easy on your ears and speakers.</string>
 </resources>

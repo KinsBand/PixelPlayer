@@ -227,7 +227,6 @@ class DebugPerformanceReportCollector @Inject constructor(
 
     private fun collectControllers(metrics: PerformanceMetrics.Snapshot): ControllerSection =
         ControllerSection(
-            widgetActive = metrics.widgetActive,
             androidAutoActive = metrics.controllers.any { it.isAndroidAuto },
             connectedControllers = metrics.controllers.map {
                 ConnectedController(it.packageName, it.isAndroidAuto)

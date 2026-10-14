@@ -68,8 +68,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import com.theveloper.pixelplay.presentation.components.statusOutlineTrace
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -120,6 +123,8 @@ import com.theveloper.pixelplay.data.worker.SyncManager
 import com.theveloper.pixelplay.data.worker.SyncProgress
 import com.theveloper.pixelplay.presentation.components.AllFilesAccessDialog
 import com.theveloper.pixelplay.presentation.components.AppSidebarDrawer
+import com.theveloper.pixelplay.presentation.components.BottomDeckSheet
+import com.theveloper.pixelplay.presentation.components.BottomDeckSheetSurface
 import com.theveloper.pixelplay.presentation.components.CrashReportDialog
 import com.theveloper.pixelplay.presentation.components.DismissUndoBar
 import com.theveloper.pixelplay.presentation.components.DrawerDestination
@@ -159,6 +164,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import kotlin.math.roundToInt
+import com.theveloper.pixelplay.ui.theme.MotionTokens
 
 import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 import com.theveloper.pixelplay.presentation.utils.AppHapticsConfig
@@ -169,6 +175,7 @@ import javax.annotation.concurrent.Immutable
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
 
 
 @Immutable
@@ -199,6 +206,10 @@ class MainActivity : ComponentActivity() {
     lateinit var themePreferencesRepository: ThemePreferencesRepository
     @Inject
     lateinit var syncManager: SyncManager
+    @Inject
+    lateinit var discordPresence: com.theveloper.pixelplay.data.presence.DiscordPresenceManager
+    @Inject
+    lateinit var offlineAvailability: com.theveloper.pixelplay.data.offline.OfflineAvailability
     @Inject
     lateinit var songDownloadManager: SongDownloadManager
     @Inject
@@ -241,6 +252,11 @@ class MainActivity : ComponentActivity() {
             window.isNavigationBarContrastEnforced = false
         }
         super.onCreate(savedInstanceState)
+        // Discord status (Social SDK) needs the activity; no-op in builds without the SDK.
+        com.theveloper.pixelplay.data.presence.DiscordSocialSdkBridge.attachActivity(this)
+        // A new Activity: rebuild the Discord client so the status works after reopening the app
+        // (the old client was tied to the destroyed Activity).
+        discordPresence.onHostActivityChanged()
         com.theveloper.pixelplay.utils.HighRefreshRate.apply(this)
 
         // MD3 Optimization: Release Splash Screen immediately to render UI skeleton.
@@ -318,8 +334,11 @@ class MainActivity : ComponentActivity() {
                     ) {
                         playerViewModel.startContinuousMix(com.theveloper.pixelplay.data.MixFlavor.NORMAL)
                     }
+                    // Mix it in: while a mix runs, the mix picks friend songs itself (by fit, at
+                    // the chosen share); turns are only used without a mix or in Take turns.
+                    val mixRunning = playerViewModel.activeMixFlavor.value != null
                     val pick = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                        friendsInRoomController.sync(song, upcoming)
+                        friendsInRoomController.sync(song, upcoming, mixRunning)
                     } ?: return@collectLatest
                     playerViewModel.addFriendSongNext(pick)
                 } catch (e: kotlinx.coroutines.CancellationException) {
@@ -328,6 +347,22 @@ class MainActivity : ComponentActivity() {
                     // Never let the background friend mixing take the app down.
                     android.util.Log.w("FriendsInRoom", "sync failed", e)
                 } }
+        }
+
+        // Who's in the room, the mode, the share, or newly fetched friend playlists changed: a
+        // running mix re-balances with a gentle swap.
+        lifecycleScope.launch {
+            kotlinx.coroutines.flow.combine(
+                friendsInRoomController.selected,
+                friendsInRoomController.mode,
+                friendsInRoomController.share,
+                friendsInRoomController.roomCacheVersion
+            ) { ids, mode, share, version -> listOf(ids, mode, share, version) }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect {
+                    if (playerViewModel.activeMixFlavor.value != null) playerViewModel.nudgeMix("friends updated")
+                }
         }
 
         setContent {
@@ -409,10 +444,22 @@ class MainActivity : ComponentActivity() {
             }
             val downloadingSongIds by downloadingSongIdsFlow.collectAsStateWithLifecycle(initialValue = emptySet())
 
+            val connectivityUi = remember {
+                com.theveloper.pixelplay.presentation.components.ConnectivityUi(
+                    isOnline = playerViewModel.isOnline,
+                    flips = playerViewModel.connectivityFlips,
+                    offlinePlayableIds = offlineAvailability.playableIds,
+                    blurDisabled = playerViewModel.disableBlurAllOver
+                )
+            }
+            // Read only by song cards (State, not its value), so this doesn't recompose here.
+            val songStartState = playerViewModel.songStart.collectAsStateWithLifecycle()
             CompositionLocalProvider(
+                com.theveloper.pixelplay.presentation.components.subcomps.LocalSongStartRequest provides songStartState,
                 LocalShowScrollbar provides showScrollbar,
                 LocalDownloadingSongIds provides downloadingSongIds,
-                com.theveloper.pixelplay.presentation.components.LocalDownloadProgressMap provides songDownloadManager.downloadProgressMap
+                com.theveloper.pixelplay.presentation.components.LocalDownloadProgressMap provides songDownloadManager.downloadProgressMap,
+                com.theveloper.pixelplay.presentation.components.LocalConnectivityUi provides connectivityUi
             ) {
                 PixelPlayTheme(
                     darkTheme = useDarkTheme
@@ -754,18 +801,36 @@ class MainActivity : ComponentActivity() {
         val commonNavItems = remember {
             persistentListOf(
                 BottomNavItem("Home", R.string.nav_bar_home, R.drawable.rounded_home_24, R.drawable.home_24_rounded_filled, Screen.Home),
+                BottomNavItem("Radio", R.string.nav_bar_radio, R.drawable.rounded_radio_24, R.drawable.rounded_radio_filled_24, Screen.Radio),
                 BottomNavItem("Search", R.string.nav_bar_search, R.drawable.rounded_search_24, R.drawable.rounded_search_24, Screen.Search),
+                BottomNavItem("Friends", R.string.nav_bar_friends, R.drawable.rounded_group_24, R.drawable.rounded_group_filled_24, Screen.Friends),
                 BottomNavItem("Library", R.string.nav_bar_library, R.drawable.rounded_library_music_24, R.drawable.round_library_music_24, Screen.Library)
             )
         }
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentRoute = navBackStackEntry?.destination?.route
+        // Activity-scoped: only a distinct Boolean is collected, so the 30 s presence clock
+        // doesn't recompose MainUI unless someone actually comes online / goes offline.
+        val friendsViewModel: com.theveloper.pixelplay.presentation.viewmodel.FriendsViewModel =
+            androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel()
+        val hasFriendsOnline by friendsViewModel.hasFriendsOnline.collectAsStateWithLifecycle()
+        // Keep friend activity polling (10–30 s, shared with the Friends screen) whenever the app
+        // is in the foreground, so the online dot on the Friends tab is right on every screen.
+        // Stops in the background (STARTED), so it costs nothing while the app isn't visible.
+        val friendsPollingLifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+        LaunchedEffect(friendsViewModel, friendsPollingLifecycleOwner) {
+            friendsPollingLifecycleOwner.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                friendsViewModel.polling.collect { }
+            }
+        }
 
         // Leaving Search for another tab: whatever is in the search bar is kept as a recent
         // search and the bar is emptied. Opening a result (album, artist, playlist…) doesn't
         // count as leaving, so Back still returns to the same results.
         LaunchedEffect(currentRoute) {
-            if (currentRoute == Screen.Home.route || currentRoute == Screen.Library.route) {
+            if (com.theveloper.pixelplay.presentation.navigation.isMainRootRoute(currentRoute) &&
+                currentRoute != Screen.Search.route
+            ) {
                 val typed = playerViewModel.searchQuery.trim()
                 if (typed.isNotEmpty()) {
                     playerViewModel.onSearchQuerySubmitted(typed)
@@ -779,6 +844,7 @@ class MainActivity : ComponentActivity() {
             setOf(
                 Screen.Settings.route,
                 Screen.Accounts.route,
+                Screen.Profile.route,
                 Screen.PlaylistDetail.route,
                 Screen.DailyMixScreen.route,
                 Screen.RecentlyPlayed.route,
@@ -787,7 +853,6 @@ class MainActivity : ComponentActivity() {
                 Screen.AlbumDetail.route,
                 Screen.ArtistDetail.route,
                 Screen.DJSpace.route,
-                Screen.Radio.route,
                 Screen.NavBarCrRad.route,
                 Screen.About.route,
                 Screen.Stats.route,
@@ -805,9 +870,18 @@ class MainActivity : ComponentActivity() {
                 Screen.WordDelimiterConfig.route
             )
         }
+        // Typing on Search: the bottom nav steps aside so only the keyboard sits under the
+        // results (the query is typed in Search's header).
+        val navHideImeInsets = WindowInsets.ime
+        val navHideDensity = LocalDensity.current
         val shouldHideNavigationBar by remember(currentRoute) {
             derivedStateOf {
+                (currentRoute == Screen.Search.route && navHideImeInsets.getBottom(navHideDensity) > 0) ||
                 com.theveloper.pixelplay.presentation.navigation.NavBarVisibility.hiddenByScreen ||
+                // Scrolling down any screen slides the bar away; scrolling up brings it back.
+                com.theveloper.pixelplay.presentation.navigation.NavBarVisibility.hiddenByScroll ||
+                // A docked sheet (Daily Mix) covers the bottom of the screen: the bar steps aside.
+                BottomDeckSheet.isOpen ||
                 currentRoute?.let { route ->
                     routesWithHiddenNavigationBar.any { hiddenRoute ->
                         if (hiddenRoute.contains("{")) {
@@ -882,14 +956,42 @@ class MainActivity : ComponentActivity() {
         val navBarOccupiedHeight by remember(systemNavBarInset, navBarCompactMode) {
             derivedStateOf { resolveNavBarOccupiedHeight(systemNavBarInset, navBarCompactMode) }
         }
+        // Entering decelerates in; leaving accelerates out and is shorter. Reversing mid-way
+        // retargets from the current value.
         val navBarVisibilityProgressState = animateFloatAsState(
             targetValue = if (shouldHideNavigationBar) 0f else 1f,
-            animationSpec = tween(
-                durationMillis = 220,
-                easing = LinearOutSlowInEasing
-            ),
+            animationSpec = if (shouldHideNavigationBar) {
+                tween(
+                    durationMillis = com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort4,
+                    easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate
+                )
+            } else {
+                tween(
+                    durationMillis = com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium2,
+                    easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate
+                )
+            },
             label = "NavBarVisibilityProgress"
         )
+        // Scroll-hide watcher for every screen; the bar always comes back on a new screen,
+        // when a docked sheet opens or when the player expands.
+        val navScrollDensity = LocalDensity.current
+        val navBarScrollWatcher = remember(navScrollDensity) {
+            com.theveloper.pixelplay.presentation.navigation.NavBarScrollWatcher(with(navScrollDensity) { 24.dp.toPx() })
+        }
+        LaunchedEffect(currentRoute, BottomDeckSheet.isOpen) { navBarScrollWatcher.show() }
+        // Screens that hide the bar by route (artist, album, playlist…) don't scroll-hide it:
+        // otherwise the flag flips there unseen and the mini player replays its move + corner
+        // morph when you navigate back.
+        val routeHidesNavBar = remember(currentRoute) {
+            currentRoute?.let { route ->
+                routesWithHiddenNavigationBar.any { hiddenRoute ->
+                    if (hiddenRoute.contains("{")) route.startsWith(hiddenRoute.substringBefore("{")) else route == hiddenRoute
+                }
+            } ?: false
+        }
+        com.theveloper.pixelplay.presentation.navigation.NavBarVisibility.scrollHideAllowed = !routeHidesNavBar
+        com.theveloper.pixelplay.presentation.navigation.NavBarVisibility.visibilityProgress = navBarVisibilityProgressState
         val navBarVisibilityProgress by navBarVisibilityProgressState
         val visibleNavBarOccupiedHeight by remember(navBarOccupiedHeight, navBarVisibilityProgress) {
             derivedStateOf { navBarOccupiedHeight * navBarVisibilityProgress }
@@ -943,6 +1045,32 @@ class MainActivity : ComponentActivity() {
         val voiceSheetVisible by remember {
             derivedStateOf { voiceSearchIsOpen || voiceSearchDeckCoordinator.isDisplaced }
         }
+
+        // Docked sheets opened by a screen (the Home Daily Mix sheet) sit on top of everything:
+        // the bottom bar hides and the sheet covers the mini player while it's open.
+        val deckSheetOpen = BottomDeckSheet.isOpen
+        val deckSheetCoordinator = rememberVoiceSearchDeckCoordinator(deckSheetOpen)
+        var deckSheetMeasuredPx by remember { mutableIntStateOf(0) }
+        val deckSheetVisible by remember {
+            derivedStateOf { BottomDeckSheet.isOpen || deckSheetCoordinator.isDisplaced }
+        }
+        LaunchedEffect(deckSheetVisible) {
+            if (!deckSheetVisible) BottomDeckSheet.clearIfClosed()
+        }
+        // A barely-there blur on the screen behind an open docked sheet (the Daily Mix sheet),
+        // just enough to set the sheet apart. Read in the draw phase only.
+        val deckSheetBlur = animateFloatAsState(
+            targetValue = if (deckSheetOpen) 1f else 0f,
+            animationSpec = tween(
+                if (deckSheetOpen) MotionTokens.DurationMedium2 else MotionTokens.DurationShort4,
+                easing = if (deckSheetOpen) MotionTokens.EmphasizedDecelerate else MotionTokens.EmphasizedAccelerate
+            ),
+            label = "deckSheetBlur"
+        )
+        // Only one docked sheet at a time: voice search takes the space.
+        LaunchedEffect(voiceSearchIsOpen) {
+            if (voiceSearchIsOpen) BottomDeckSheet.dismiss()
+        }
         val voiceSpeechCapture = rememberVoiceSpeechCapture(
             active = voiceSearchIsOpen && voiceSearchRecognizedSong == null && !voiceSearchIsListening,
             // Words appear live in the search bar as they are spoken.
@@ -951,7 +1079,7 @@ class MainActivity : ComponentActivity() {
                 val cleaned = voiceSearchStateHolder.cleanSpokenQuery(transcript)
                 // Dictation is text only: it fills the search bar. The song card (cover, live
                 // lyrics, like, queue) is reserved for Hum & Sing and Listen matches.
-                playerViewModel.updateSearchQuery(cleaned.ifBlank { transcript })
+                playerViewModel.submitSearch(cleaned.ifBlank { transcript })
             }
         )
         // The transcript is typed into the Search tab's search bar, so opening voice search
@@ -1067,6 +1195,8 @@ class MainActivity : ComponentActivity() {
                             with(density) { navBarElevation.toPx() }
                         }
                         val navBarShapeCache = remember { NavBarShapeCache() }
+                        val navBarTrace = com.theveloper.pixelplay.presentation.components.rememberStatusTrace()
+                        val navBarTraceShape = remember { arrayOf<androidx.compose.ui.graphics.Shape>(RectangleShape) }
 
                         Box(
                             modifier = Modifier
@@ -1129,9 +1259,13 @@ class MainActivity : ComponentActivity() {
                                             else -> animatedNavBarCornerRadius.value
                                         }
                                         shape = navBarShapeCache.get(this, topDp.toPx(), bottomDp.toPx(), useSmoothCorners)
+                                        navBarTraceShape[0] = shape
                                         clip = true
                                         shadowElevation = navBarElevationPx
-                                    },
+                                    }
+                                    // Red/green outline trace on going offline / online, drawn inside
+                                    // the clipped layer and following the animated corners.
+                                    .statusOutlineTrace(navBarTrace) { navBarTraceShape[0] },
                                 color = NavigationBarDefaults.containerColor
                             ) {
                                 PlayerInternalNavigationBar(
@@ -1142,10 +1276,7 @@ class MainActivity : ComponentActivity() {
                                     compactMode = navBarCompactMode,
                                     bottomBarPadding = bottomBarPadding,
                                     onSearchIconDoubleTap = onSearchIconDoubleTap,
-                                    searchQuery = playerViewModel.searchQuery,
-                                    onSearchQueryChange = { playerViewModel.updateSearchQuery(it) },
-                                    onVoiceSearchClick = onNavBarVoiceClick,
-                                    voiceCapture = if (voiceSearchIsOpen) voiceSpeechCapture else null,
+                                    hasFriendsOnline = hasFriendsOnline,
                                     modifier = Modifier.fillMaxSize()
                                 )
                             }
@@ -1178,11 +1309,9 @@ class MainActivity : ComponentActivity() {
                         // above the bottom bar, which itself sits on top of the IME.
                         val bottomMargin = miniPlayerBottomMargin + imeBottomPadding
 
-                        // On the Search screen the mini player must sit flush against the
-                        // search bar (no visual gap).
-                        val spacerPx = with(density) {
-                            (if (currentRoute == Screen.Search.route) 0.dp else MiniPlayerBottomSpacer).toPx()
-                        }
+                        // Search no longer has a bar in the nav bar, so the mini player keeps
+                        // the usual gap on every tab.
+                        val spacerPx = with(density) { MiniPlayerBottomSpacer.toPx() }
                         val bottomMarginPx = with(density) { bottomMargin.toPx() }
                         val rawSheetCollapsedTargetY = calculatePlayerSheetCollapsedTargetY(
                             containerHeightPx = screenHeightPx,
@@ -1200,6 +1329,7 @@ class MainActivity : ComponentActivity() {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
+                                .nestedScroll(navBarScrollWatcher)
                                 .graphicsLayer {
                                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                                         if (disableBlurAllOver) {
@@ -1210,8 +1340,9 @@ class MainActivity : ComponentActivity() {
                                             // Quantize to 2px steps: rebuild the RenderEffect only
                                             // when the blur crosses a step, reuse the cached object
                                             // every other frame.
-                                            val quantizedBlurPx = (fraction * 120f / 2f).roundToInt() * 2f
-                                            renderEffect = blurEffectCache.get(quantizedBlurPx)
+                                            val playerBlurPx = (fraction * 120f / 2f).roundToInt() * 2f
+                                            val deckBlurPx = (deckSheetBlur.value * DeckSheetBlurDp.dp.toPx() / 2f).roundToInt() * 2f
+                                            renderEffect = blurEffectCache.get(maxOf(playerBlurPx, deckBlurPx))
                                         }
                                     }
                                 }
@@ -1222,8 +1353,13 @@ class MainActivity : ComponentActivity() {
                                 paddingValues = innerPadding,
                                 userPreferencesRepository = userPreferencesRepository,
                                 onOpenSidebar = { scope.launch { drawerState.open() } },
-                                onVoiceSearchClick = { voiceSearchStateHolder.openSheet() }
+                                onVoiceSearchClick = { voiceSearchStateHolder.openSheet() },
+                                // Search's header mic: opens voice search, or speaks again while open,
+                                // and shows the live listening state.
+                                onSearchVoiceClick = onNavBarVoiceClick,
+                                searchVoiceCapture = if (voiceSearchIsOpen) voiceSpeechCapture else null
                             )
+
                         }
 
                         val isExpandedOrExpanding by remember {
@@ -1300,9 +1436,64 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
+
+                        // A screen's docked sheet (Daily Mix): drawn above the screens and the
+                        // player, so its chips get every touch and it covers the mini player.
+                        // Opening the full player puts the sheet away.
+                        LaunchedEffect(isExpandedOrExpanding) {
+                            if (isExpandedOrExpanding) BottomDeckSheet.dismiss()
+                        }
+                        val deckSheetContent = BottomDeckSheet.content
+                        if (deckSheetVisible && deckSheetContent != null) {
+                            BackHandler(enabled = deckSheetOpen) { BottomDeckSheet.dismiss() }
+                            BottomDeckSheetSurface(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .onSizeChanged { deckSheetMeasuredPx = it.height }
+                                    .voiceSearchSwipeToDismiss(
+                                        coordinator = deckSheetCoordinator,
+                                        sheetHeightPx = { deckSheetMeasuredPx.toFloat() },
+                                        onDismiss = { BottomDeckSheet.dismiss() },
+                                        // Typing in the sheet: no swipe-to-close.
+                                        enabled = imeBottomPadding == 0.dp
+                                    )
+                                    .graphicsLayer {
+                                        translationY = size.height * (1f - deckSheetCoordinator.progress)
+                                    }
+                            ) {
+                                deckSheetContent()
+                            }
+                        }
+
                         if (voiceSheetVisible) {
                             BackHandler(enabled = voiceSearchIsOpen) {
                                 voiceSearchStateHolder.closeSheet()
+                            }
+                            // Live lyrics follow the music nearby only while the sheet is open and the
+                            // app is on screen (the microphone needs both).
+                            val voiceLiveLyrics by voiceSearchStateHolder.liveLyrics.collectAsStateWithLifecycle()
+                            val liveLyricsLifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+                            var voiceAppVisible by remember { mutableStateOf(true) }
+                            androidx.compose.runtime.DisposableEffect(liveLyricsLifecycleOwner) {
+                                val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                                    when (event) {
+                                        androidx.lifecycle.Lifecycle.Event.ON_START -> voiceAppVisible = true
+                                        androidx.lifecycle.Lifecycle.Event.ON_STOP -> voiceAppVisible = false
+                                        else -> Unit
+                                    }
+                                }
+                                liveLyricsLifecycleOwner.lifecycle.addObserver(observer)
+                                onDispose {
+                                    liveLyricsLifecycleOwner.lifecycle.removeObserver(observer)
+                                    voiceSearchStateHolder.stopLiveLyrics()
+                                }
+                            }
+                            LaunchedEffect(voiceSearchIsOpen, voiceSearchRecognizedSong?.id, voiceSearchSyncedLyrics, voiceAppVisible) {
+                                if (voiceSearchIsOpen && voiceAppVisible && voiceSearchRecognizedSong != null) {
+                                    voiceSearchStateHolder.startLiveLyrics()
+                                } else {
+                                    voiceSearchStateHolder.stopLiveLyrics()
+                                }
                             }
                             VoiceSearchSheet(
                                 modifier = Modifier
@@ -1319,8 +1510,11 @@ class MainActivity : ComponentActivity() {
                                 activeAction = voiceSearchActiveAction,
                                 recognizedSong = voiceSearchRecognizedSong,
                                 syncedLyrics = voiceSearchSyncedLyrics,
+                                liveLyrics = voiceLiveLyrics,
                                 onHumOrSing = { voiceSearchStateHolder.triggerGoogleHumOrSing() },
                                 onListen = { voiceSearchStateHolder.triggerNowPlayingListen() },
+                                shouldExplainResultReader = { voiceSearchStateHolder.shouldExplainResultReader() },
+                                onResultReaderExplained = { voiceSearchStateHolder.markResultReaderExplained() },
                                 onToggleFavorite = { voiceSearchStateHolder.toggleFavorite() },
                                 onPlaySong = { song -> playerViewModel.playSong(song) },
                                 onQueueSong = { song -> playerViewModel.addSelectedToQueue(listOf(song)) },
@@ -1599,3 +1793,6 @@ private class DynamicSmoothCornerShape(
         }
     }
 }
+
+/** How soft the screen behind the Daily Mix sheet gets: hardly visible, just separating. */
+private const val DeckSheetBlurDp = 3f

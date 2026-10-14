@@ -14,12 +14,26 @@ class SpotifyWebLibrary @Inject constructor(private val pathfinder: SpotifyPathf
     data class Profile(val username: String, val displayName: String, val avatarUrl: String?)
 
     suspend fun me(): Profile {
-        val profile = pathfinder.query(SpotifyQueries.PROFILE, JSONObject())
-            .optJSONObject("me")?.optJSONObject("profile") ?: throw SpotifyWebException("Spotify didn't return your profile.")
+        val profile = runCatching {
+            pathfinder.query(SpotifyQueries.PROFILE, JSONObject()).optJSONObject("me")?.optJSONObject("profile")
+        }.getOrNull() ?: return meFromWebApi()
         val result = Profile(
             username = profile.optString("username").ifBlank { profile.optString("uri").substringAfterLast(':') },
             displayName = profile.optString("name"),
             avatarUrl = SpotifyWebParsers.bestImage(profile.optJSONObject("avatar")?.optJSONArray("sources"))
+        )
+        session.rememberProfile(result.username, result.displayName)
+        return result
+    }
+
+    /** Fallback: the web-player token also works on the public Web API's /v1/me. */
+    private suspend fun meFromWebApi(): Profile {
+        val json = JSONObject(pathfinder.rest("GET", "https://api.spotify.com/v1/me"))
+        val images = json.optJSONArray("images")
+        val result = Profile(
+            username = json.optString("id").ifBlank { throw SpotifyWebException("Spotify didn't return your profile.") },
+            displayName = json.optString("display_name"),
+            avatarUrl = images?.optJSONObject(0)?.optString("url")?.ifBlank { null }
         )
         session.rememberProfile(result.username, result.displayName)
         return result
@@ -73,13 +87,70 @@ class SpotifyWebLibrary @Inject constructor(private val pathfinder: SpotifyPathf
     /** Appends tracks to the end of one of your playlists (web player "addToPlaylist"). */
     suspend fun addToPlaylist(playlistId: String, trackIds: List<String>) {
         if (trackIds.isEmpty()) return
-        val uris = JSONArray()
-        trackIds.distinct().forEach { uris.put("spotify:track:$it") }
-        pathfinder.query(SpotifyQueries.ADD_TO_PLAYLIST, JSONObject()
-            .put("uris", uris)
-            .put("playlistUri", "spotify:playlist:$playlistId")
-            .put("newPosition", JSONObject().put("moveType", "BOTTOM_OF_PLAYLIST").put("fromUid", JSONObject.NULL)))
+        // 100 per request: one request with hundreds of songs is refused (400).
+        trackIds.distinct().chunked(100).forEach { chunk ->
+            val uris = JSONArray()
+            chunk.forEach { uris.put("spotify:track:$it") }
+            pathfinder.query(SpotifyQueries.ADD_TO_PLAYLIST, JSONObject()
+                .put("uris", uris)
+                .put("playlistUri", "spotify:playlist:$playlistId")
+                .put("newPosition", JSONObject().put("moveType", "BOTTOM_OF_PLAYLIST").put("fromUid", JSONObject.NULL)))
+        }
     }
+
+    /** Creates a new playlist on the user's Spotify account and returns its ID. */
+    suspend fun createPlaylist(name: String, description: String = "Exported from PixelPlayer"): String {
+        val user = me()
+        val body = JSONObject()
+            .put("name", name.ifBlank { "New Playlist" })
+            .put("description", description)
+            .put("public", false)
+            .toString()
+        // The public Web API often answers web-player tokens with 429 (or 403); the web player's
+        // own playlist service is the fallback, the same calls the Spotify web app makes.
+        val response = try {
+            pathfinder.rest("POST", "https://api.spotify.com/v1/me/playlists", body)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            try {
+                pathfinder.rest("POST", "https://api.spotify.com/v1/users/${user.username}/playlists", body)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                return createPlaylistViaPlaylistService(user.username, name.ifBlank { "New Playlist" }, description)
+            }
+        }
+        return JSONObject(response).getString("id")
+    }
+
+    /** Creates the playlist through spclient (playlist v2) and adds it to the user's library. */
+    private suspend fun createPlaylistViaPlaylistService(username: String, name: String, description: String): String {
+        val attributes = JSONObject()
+            .put("values", JSONObject().put("name", name).put("description", description)
+                .put("formatAttributes", JSONArray()).put("pictureSize", JSONArray()))
+            .put("noValue", JSONArray())
+        val createBody = JSONObject().put("ops", JSONArray().put(
+            JSONObject().put("kind", 6).put("updateListAttributes", JSONObject().put("newAttributes", attributes))
+        ))
+        val created = JSONObject(pathfinder.rest("POST", "https://spclient.wg.spotify.com/playlist/v2/playlist", createBody.toString()))
+        val uri = created.optString("uri").takeIf { it.startsWith("spotify:playlist:") }
+            ?: throw SpotifyWebException("Spotify didn't create the playlist. Try again in a minute.")
+        val item = JSONObject().put("uri", uri).put("attributes", JSONObject()
+            .put("timestamp", System.currentTimeMillis().toString())
+            .put("formatAttributes", JSONArray()).put("availableSignals", JSONArray()))
+        val delta = JSONObject()
+            .put("ops", JSONArray().put(JSONObject().put("kind", 2).put("add", JSONObject().put("items", JSONArray().put(item)).put("addFirst", true))))
+            .put("info", JSONObject().put("source", JSONObject().put("client", 5)))
+        val changes = JSONObject().put("deltas", JSONArray().put(delta))
+            .put("wantResultingRevisions", false).put("wantSyncResult", false).put("nonces", JSONArray())
+        val user = android.net.Uri.encode(username)
+        runCatching {
+            pathfinder.rest("POST", "https://spclient.wg.spotify.com/playlist/v2/user/$user/rootlist/changes", changes.toString())
+        }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+        return uri.removePrefix("spotify:playlist:")
+    }
+
 
     suspend fun playlist(id: String): SpotifyPlaylist {
         val data = pathfinder.query(SpotifyQueries.PLAYLIST, playlistVars(id, 0, 1)).optJSONObject("playlistV2")
@@ -88,10 +159,11 @@ class SpotifyWebLibrary @Inject constructor(private val pathfinder: SpotifyPathf
         return SpotifyWebParsers.playlist(data)
     }
 
-    suspend fun playlistTracks(id: String): List<SpotifyTrack> {
+    /** A playlist's tracks, page by page; stops after [maxTracks] (huge playlists don't fill memory). */
+    suspend fun playlistTracks(id: String, maxTracks: Int = Int.MAX_VALUE): List<SpotifyTrack> {
         val out = mutableListOf<SpotifyTrack>()
         var offset = 0
-        while (true) {
+        while (out.size < maxTracks) {
             val data = pathfinder.query(SpotifyQueries.PLAYLIST, playlistVars(id, offset, 100)).optJSONObject("playlistV2")
                 ?: throw SpotifyWebException("Spotify couldn't find that playlist.", 404)
             if (data.optString("__typename") == "NotFound") throw SpotifyWebException("Spotify couldn't find that playlist. It may be private.", 404)
@@ -104,7 +176,22 @@ class SpotifyWebLibrary @Inject constructor(private val pathfinder: SpotifyPathf
             offset += 100
             if (items.length() == 0 || offset >= content.optInt("totalCount", 0)) break
         }
-        return out
+        return if (out.size > maxTracks) out.subList(0, maxTracks).toList() else out
+    }
+
+    /**
+     * Song count of a playlist from its first page only (Spotify reports the total), plus the total
+     * length when the playlist is small enough to read whole ([maxTracksForDuration]); null otherwise.
+     * Used to label friends' cards without downloading every song of big playlists.
+     */
+    suspend fun playlistSummary(id: String, maxTracksForDuration: Int = 300): Pair<Int, Long?> {
+        val data = pathfinder.query(SpotifyQueries.PLAYLIST, playlistVars(id, 0, 100)).optJSONObject("playlistV2")
+            ?: throw SpotifyWebException("Spotify couldn't find that playlist.", 404)
+        val content = data.optJSONObject("content") ?: return 0 to null
+        val total = content.optInt("totalCount", 0)
+        if (total > maxTracksForDuration) return total to null
+        val tracks = playlistTracks(id, maxTracksForDuration)
+        return total.coerceAtLeast(tracks.size) to tracks.sumOf { it.durationMs.toLong() }.takeIf { it > 0 }
     }
 
     suspend fun likedSongs(): List<SpotifyTrack> {

@@ -224,6 +224,10 @@ class UserPreferencesRepository @Inject constructor(
             val FOLDERS_SOURCE = stringPreferencesKey("folders_source")
             val FOLDER_BACK_GESTURE_NAVIGATION = booleanPreferencesKey("folder_back_gesture_navigation")
             val LIKED_DOWNLOADS_WIFI_ONLY = booleanPreferencesKey("liked_downloads_wifi_only")
+            /** Starred download quality (DownloadQuality name); absent = ask every time. */
+            val PREFERRED_DOWNLOAD_QUALITY = stringPreferencesKey("preferred_download_quality")
+            /** Starred video quality (height in px, e.g. 720); used every time a video loads. */
+            val PREFERRED_VIDEO_QUALITY = androidx.datastore.preferences.core.intPreferencesKey("preferred_video_quality")
             /** "Download all liked songs" was approved but is waiting for Wi-Fi. */
             val LIKED_DOWNLOADS_WAITING_FOR_WIFI = booleanPreferencesKey("liked_downloads_waiting_for_wifi")
             val IS_GENRE_GRID_VIEW = booleanPreferencesKey("is_genre_grid_view")
@@ -240,12 +244,20 @@ class UserPreferencesRepository @Inject constructor(
             val LAUNCH_TAB = stringPreferencesKey("launch_tab")
             val USE_SMOOTH_CORNERS = booleanPreferencesKey("use_smooth_corners")
             val MINI_PLAYER_SONG_TRANSITION = booleanPreferencesKey("mini_player_song_transition")
+            /** Swiping the mini player sideways changes song (true) or dismisses the player (false). */
+            val MINI_PLAYER_SWIPE_CHANGES_SONG = booleanPreferencesKey("mini_player_swipe_changes_song")
+            val UP_NEXT_NOTIFICATION = booleanPreferencesKey("up_next_notification")
             val SHOW_SCROLLBAR = booleanPreferencesKey("show_scrollbar")
+            val SHOW_PRACTICE_MODE = booleanPreferencesKey("show_practice_mode")
+            val SONG_SEARCH_READER_ENABLED = booleanPreferencesKey("song_search_reader_enabled")
+            val CUSTOM_AVATAR_URI = stringPreferencesKey("custom_avatar_uri")
         }
 
         // ─── Cutout Overlay ───
         object CutoutOverlay {
             val ENABLE_CUTOUT_OVERLAY = booleanPreferencesKey("enable_cutout_overlay")
+            /** Tapping the camera hole opens the island (off: the island still shows, taps pass by). */
+            val CUTOUT_TAP_ENABLED = booleanPreferencesKey("cutout_tap_enabled")
         }
 
         // ─── Offline & network policy ───
@@ -286,6 +298,8 @@ class UserPreferencesRepository @Inject constructor(
         object Lyrics {
             val LYRICS_SYNC_OFFSETS = stringPreferencesKey("lyrics_sync_offsets_json")
             val LYRICS_AUTO_SYNC_ENABLED = booleanPreferencesKey("lyrics_auto_sync_enabled")
+            val LYRICS_WORD_ALIGN_ENABLED = booleanPreferencesKey("lyrics_word_align_enabled")
+            val LYRICS_WORD_ALIGN_MOBILE_DATA = booleanPreferencesKey("lyrics_word_align_mobile_data")
             val LYRICS_SOURCE_PREFERENCE = stringPreferencesKey("lyrics_source_preference")
             val AUTO_SCAN_LRC_FILES = booleanPreferencesKey("auto_scan_lrc_files")
             val IMMERSIVE_LYRICS_ENABLED = booleanPreferencesKey("immersive_lyrics_enabled")
@@ -373,6 +387,13 @@ class UserPreferencesRepository @Inject constructor(
         dataStore.edit { it[PreferencesKeys.CutoutOverlay.ENABLE_CUTOUT_OVERLAY] = enabled }
     }
 
+    val cutoutTapEnabledFlow: Flow<Boolean> =
+        pref { it[PreferencesKeys.CutoutOverlay.CUTOUT_TAP_ENABLED] ?: true }
+
+    suspend fun setCutoutTapEnabled(enabled: Boolean) {
+        dataStore.edit { it[PreferencesKeys.CutoutOverlay.CUTOUT_TAP_ENABLED] = enabled }
+    }
+
     val beta05CleanInstallDisclaimerDismissedFlow: Flow<Boolean> =
         pref { it[PreferencesKeys.Onboarding.BETA_05_CLEAN_INSTALL_DISCLAIMER_DISMISSED] ?: false }
 
@@ -411,7 +432,7 @@ class UserPreferencesRepository @Inject constructor(
     }
 
     val persistentShuffleEnabledFlow: Flow<Boolean> =
-        pref { it[PreferencesKeys.Playback.PERSISTENT_SHUFFLE_ENABLED] ?: false }
+        pref { it[PreferencesKeys.Playback.PERSISTENT_SHUFFLE_ENABLED] ?: true }
 
     suspend fun setPersistentShuffleEnabled(enabled: Boolean) {
         dataStore.edit { it[PreferencesKeys.Playback.PERSISTENT_SHUFFLE_ENABLED] = enabled }
@@ -460,7 +481,7 @@ class UserPreferencesRepository @Inject constructor(
     }
 
     val showQueueHistoryFlow: Flow<Boolean> =
-        pref { it[PreferencesKeys.Playback.SHOW_QUEUE_HISTORY] ?: false }
+        pref { it[PreferencesKeys.Playback.SHOW_QUEUE_HISTORY] ?: true }
 
     suspend fun setShowQueueHistory(show: Boolean) {
         dataStore.edit { it[PreferencesKeys.Playback.SHOW_QUEUE_HISTORY] = show }
@@ -501,7 +522,7 @@ class UserPreferencesRepository @Inject constructor(
     }
 
     val pauseOnVolumeZeroFlow: Flow<Boolean> =
-        pref { it[PreferencesKeys.Playback.PAUSE_ON_VOLUME_ZERO] ?: false }
+        pref { it[PreferencesKeys.Playback.PAUSE_ON_VOLUME_ZERO] ?: true }
 
     suspend fun setPauseOnVolumeZero(enabled: Boolean) {
         dataStore.edit { it[PreferencesKeys.Playback.PAUSE_ON_VOLUME_ZERO] = enabled }
@@ -1018,6 +1039,28 @@ class UserPreferencesRepository @Inject constructor(
         dataStore.edit { it[PreferencesKeys.LibraryUi.LIKED_DOWNLOADS_WIFI_ONLY] = enabled }
     }
 
+    /** The starred download quality name (HIGH / MEDIUM / LOW), or null when none is starred. */
+    val preferredDownloadQualityFlow: Flow<String?> =
+        pref { it[PreferencesKeys.LibraryUi.PREFERRED_DOWNLOAD_QUALITY] }
+
+    suspend fun setPreferredDownloadQuality(name: String?) {
+        dataStore.edit {
+            if (name == null) it.remove(PreferencesKeys.LibraryUi.PREFERRED_DOWNLOAD_QUALITY)
+            else it[PreferencesKeys.LibraryUi.PREFERRED_DOWNLOAD_QUALITY] = name
+        }
+    }
+
+    /** Starred video quality as a height (1080, 720…), or null for Auto. */
+    val preferredVideoQualityFlow: Flow<Int?> =
+        pref { it[PreferencesKeys.LibraryUi.PREFERRED_VIDEO_QUALITY] }
+
+    suspend fun setPreferredVideoQuality(height: Int?) {
+        dataStore.edit {
+            if (height == null) it.remove(PreferencesKeys.LibraryUi.PREFERRED_VIDEO_QUALITY)
+            else it[PreferencesKeys.LibraryUi.PREFERRED_VIDEO_QUALITY] = height
+        }
+    }
+
     val likedDownloadsWaitingForWifiFlow: Flow<Boolean> =
         pref { it[PreferencesKeys.LibraryUi.LIKED_DOWNLOADS_WAITING_FOR_WIFI] ?: false }
 
@@ -1098,11 +1141,53 @@ class UserPreferencesRepository @Inject constructor(
         dataStore.edit { it[PreferencesKeys.Navigation.MINI_PLAYER_SONG_TRANSITION] = enabled }
     }
 
+    val miniPlayerSwipeChangesSongFlow: Flow<Boolean> =
+        pref { it[PreferencesKeys.Navigation.MINI_PLAYER_SWIPE_CHANGES_SONG] ?: true }
+
+    suspend fun setMiniPlayerSwipeChangesSong(enabled: Boolean) {
+        dataStore.edit { it[PreferencesKeys.Navigation.MINI_PLAYER_SWIPE_CHANGES_SONG] = enabled }
+    }
+
+    /** A quiet notification listing the next 3 songs in the queue. Off by default. */
+    val upNextNotificationFlow: Flow<Boolean> =
+        pref { it[PreferencesKeys.Navigation.UP_NEXT_NOTIFICATION] ?: false }
+
+    suspend fun setUpNextNotification(enabled: Boolean) {
+        dataStore.edit { it[PreferencesKeys.Navigation.UP_NEXT_NOTIFICATION] = enabled }
+    }
+
     val showScrollbarFlow: Flow<Boolean> =
         pref { it[PreferencesKeys.Navigation.SHOW_SCROLLBAR] ?: true }
 
     suspend fun setShowScrollbar(enabled: Boolean) {
         dataStore.edit { it[PreferencesKeys.Navigation.SHOW_SCROLLBAR] = enabled }
+    }
+
+    val showPracticeModeFlow: Flow<Boolean> =
+        pref { it[PreferencesKeys.Navigation.SHOW_PRACTICE_MODE] ?: true }
+
+    suspend fun setShowPracticeMode(enabled: Boolean) {
+        dataStore.edit { it[PreferencesKeys.Navigation.SHOW_PRACTICE_MODE] = enabled }
+    }
+
+    val songSearchReaderEnabledFlow: Flow<Boolean> =
+        pref { it[PreferencesKeys.Navigation.SONG_SEARCH_READER_ENABLED] ?: true }
+
+    suspend fun setSongSearchReaderEnabled(enabled: Boolean) {
+        dataStore.edit { it[PreferencesKeys.Navigation.SONG_SEARCH_READER_ENABLED] = enabled }
+    }
+
+    val customAvatarUriFlow: Flow<String?> =
+        pref { it[PreferencesKeys.Navigation.CUSTOM_AVATAR_URI] }
+
+    suspend fun setCustomAvatarUri(uri: String?) {
+        dataStore.edit {
+            if (uri != null) {
+                it[PreferencesKeys.Navigation.CUSTOM_AVATAR_URI] = uri
+            } else {
+                it.remove(PreferencesKeys.Navigation.CUSTOM_AVATAR_URI)
+            }
+        }
     }
 
     // ─── Offline & network policy ─────────────────────────────────────────────
@@ -1251,7 +1336,11 @@ class UserPreferencesRepository @Inject constructor(
     suspend fun resetArtistDelimitersToDefault() = setArtistDelimiters(DEFAULT_ARTIST_DELIMITERS)
 
     val artistWordDelimitersFlow: Flow<List<String>> =
-        pref { decodeJsonPref(it, PreferencesKeys.MultiArtist.ARTIST_WORD_DELIMITERS, DEFAULT_ARTIST_WORD_DELIMITERS) }
+        pref {
+            normalizePreviousDefaultWordDelimiters(
+                decodeJsonPref(it, PreferencesKeys.MultiArtist.ARTIST_WORD_DELIMITERS, DEFAULT_ARTIST_WORD_DELIMITERS)
+            )
+        }
 
     suspend fun setArtistWordDelimiters(delimiters: List<String>) {
         dataStore.edit { preferences ->
@@ -1308,6 +1397,29 @@ class UserPreferencesRepository @Inject constructor(
     }
 
     /**
+     * Whether line-synced lyrics get word and letter timing from the song's audio, on the phone
+     * ([com.theveloper.pixelplay.data.lyrics.align.LyricsWordAligner]). On by default; the model
+     * downloads on Wi-Fi only.
+     */
+    val lyricsWordAlignEnabledFlow: Flow<Boolean> =
+        pref { it[PreferencesKeys.Lyrics.LYRICS_WORD_ALIGN_ENABLED] ?: true }
+
+    suspend fun setLyricsWordAlignEnabled(enabled: Boolean) {
+        dataStore.edit { it[PreferencesKeys.Lyrics.LYRICS_WORD_ALIGN_ENABLED] = enabled }
+    }
+
+    /**
+     * Whether the word-sync model may download by itself on mobile data as well as Wi-Fi. Off by
+     * default. (The Download button in Settings works on either regardless.)
+     */
+    val lyricsWordAlignMobileDataFlow: Flow<Boolean> =
+        pref { it[PreferencesKeys.Lyrics.LYRICS_WORD_ALIGN_MOBILE_DATA] ?: false }
+
+    suspend fun setLyricsWordAlignMobileData(allowed: Boolean) {
+        dataStore.edit { it[PreferencesKeys.Lyrics.LYRICS_WORD_ALIGN_MOBILE_DATA] = allowed }
+    }
+
+    /**
      * Offset state for one song: the user's manual offset wins; otherwise the automatic one
      * (when auto-sync is on); otherwise 0.
      */
@@ -1337,6 +1449,10 @@ class UserPreferencesRepository @Inject constructor(
     suspend fun clearLyricsSyncOffset(songId: String) {
         editJsonMap<Int>(PreferencesKeys.Lyrics.LYRICS_SYNC_OFFSETS) { remove(songId) }
     }
+
+    /** The offset the user set for [songId] by hand, or null when there is none. */
+    suspend fun getManualLyricsSyncOffset(songId: String): Int? =
+        lyricsSyncOffsetsFlow.first()[songId]
 
     /** True when the user has set an offset for [songId] by hand. */
     suspend fun hasManualLyricsSyncOffset(songId: String): Boolean =
@@ -1624,15 +1740,25 @@ class UserPreferencesRepository @Inject constructor(
 
     companion object {
         /** Default character delimiters for splitting multi-artist tags. */
-        val DEFAULT_ARTIST_DELIMITERS = listOf(";")
+        /**
+         * Separators that split anywhere (no spaces needed). "&", "/", "+" and "x" are word
+         * separators instead (they need spaces), so "W&W" and "AC/DC" stay whole; real names
+         * with a separator are protected (utils PROTECTED_ARTIST_NAMES), and a separator right
+         * before "the" never splits ("Tyler, the Creator", "Kool & the Gang").
+         */
+        val DEFAULT_ARTIST_DELIMITERS = listOf(";", ",", "|", "、", "，", "；", "／", "＆", "＋")
 
         private val LEGACY_DEFAULT_ARTIST_DELIMITERS = listOf("/", ";", ",", "+", "&")
 
-        /** Default word-based delimiters matched case-insensitively with whitespace boundaries. */
-        val DEFAULT_ARTIST_WORD_DELIMITERS = listOf(
+        /** Earlier defaults; stored copies of these are upgraded to the current defaults. */
+        private val PREVIOUS_DEFAULT_ARTIST_DELIMITERS = listOf(";")
+        private val PREVIOUS_DEFAULT_ARTIST_WORD_DELIMITERS = listOf(
             "featuring", "feat.", "feat", "ft.", "ft",
             "vs.", "vs", "versus", "with", "prod.", "prod"
         )
+
+        /** Default word-based delimiters matched case-insensitively with whitespace boundaries. */
+        val DEFAULT_ARTIST_WORD_DELIMITERS = com.theveloper.pixelplay.utils.DEFAULT_WORD_DELIMITERS
 
         const val DEFAULT_ALBUM_ART_CACHE_LIMIT_MB = 200
     }
@@ -1640,7 +1766,12 @@ class UserPreferencesRepository @Inject constructor(
     // ─── Private utilities ────────────────────────────────────────────────────
 
     private fun normalizeLegacyDefaultArtistDelimiters(delimiters: List<String>): List<String> =
-        if (delimiters == LEGACY_DEFAULT_ARTIST_DELIMITERS) DEFAULT_ARTIST_DELIMITERS else delimiters
+        if (delimiters == LEGACY_DEFAULT_ARTIST_DELIMITERS || delimiters == PREVIOUS_DEFAULT_ARTIST_DELIMITERS) {
+            DEFAULT_ARTIST_DELIMITERS
+        } else delimiters
+
+    private fun normalizePreviousDefaultWordDelimiters(delimiters: List<String>): List<String> =
+        if (delimiters == PREVIOUS_DEFAULT_ARTIST_WORD_DELIMITERS) DEFAULT_ARTIST_WORD_DELIMITERS else delimiters
 
     /** Increments [value] by 1, wrapping back to 0 on overflow. */
     private fun incrementWrapped(value: Int?) =

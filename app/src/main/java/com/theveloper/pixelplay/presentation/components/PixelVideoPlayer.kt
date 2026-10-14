@@ -37,10 +37,24 @@ object VideoPlayerWarmup {
 }
 
 /** One audio handoff per song, retained while choosing alternate performances. */
+/** What the controller drives: the YouTube embed (fallback) or ExoPlayer (quality picker). */
+interface VideoTransport {
+    fun play()
+    fun pause()
+    fun seekToSeconds(seconds: Float)
+}
+
+/** Adapts the YouTube embed's player. */
+class YouTubeTransport(val youTubePlayer: YouTubePlayer) : VideoTransport {
+    override fun play() = youTubePlayer.play()
+    override fun pause() = youTubePlayer.pause()
+    override fun seekToSeconds(seconds: Float) = youTubePlayer.seekTo(seconds)
+}
+
 class SongVideoPlaybackController(
     private val acquireAudio: () -> ((resume: Boolean, resumePositionMs: Long?) -> Unit)?
 ) {
-    var player: YouTubePlayer? = null
+    var player: VideoTransport? = null
     var releaseVideo: (() -> Unit)? = null
     private var releaseAudio: ((resume: Boolean, resumePositionMs: Long?) -> Unit)? = null
 
@@ -49,6 +63,13 @@ class SongVideoPlaybackController(
      * button (and the overlay's centre button) can drive and reflect the video.
      */
     var isPlaying by mutableStateOf(false)
+        internal set
+
+    /**
+     * True while the video is loading or buffering (from a load, a seek or a quality change
+     * until frames play). Both play buttons show a spinner in place of play/pause meanwhile.
+     */
+    var isLoading by mutableStateOf(false)
         internal set
 
     /** Last position the embedded player reported, in ms. Used to automatically resume
@@ -110,7 +131,7 @@ class SongVideoPlaybackController(
         if (current != null && durationMs > 0L) {
             seekTargetMs = target
             seekGuardUntilMs = positionStampMs + SEEK_GUARD_MS
-            current.seekTo(target / 1000f)
+            current.seekToSeconds(target / 1000f)
         } else {
             pendingStartMs = target
         }
@@ -118,6 +139,7 @@ class SongVideoPlaybackController(
 
     /** Called right before a new video id is loaded; returns the start offset in seconds. */
     internal fun beginLoad(): Float {
+        isLoading = true
         val start = pendingStartMs ?: positionMs
         pendingStartMs = null
         durationMs = 0L
@@ -140,7 +162,7 @@ class SongVideoPlaybackController(
             player?.let {
                 seekTargetMs = 0L
                 seekGuardUntilMs = positionStampMs + SEEK_GUARD_MS
-                it.seekTo(0f)
+                it.seekToSeconds(0f)
             }
         }
     }
@@ -169,6 +191,7 @@ class SongVideoPlaybackController(
     fun stop(resumeAudio: Boolean = false, resumePositionMs: Long? = null) {
         player?.pause()
         isPlaying = false
+        isLoading = false
         if (resumeAudio) {
             releaseVideo?.invoke()
             releaseVideo = null
@@ -204,16 +227,15 @@ fun PixelVideoPlayer(
             }
         }
     }
+    // The video keeps playing when the app goes to the background (by choice: Video mode is
+    // watched like a music video you can leave and come back to). Only leaving Video mode
+    // (disposal) stops it.
     DisposableEffect(owner, playback) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE) player?.pause()
-        }
-        owner.lifecycle.addObserver(observer)
         onDispose {
-            owner.lifecycle.removeObserver(observer)
             player?.pause()
             playback.isPlaying = false
-            if (playback.player === player) {
+            playback.isLoading = false
+            if ((playback.player as? YouTubeTransport)?.youTubePlayer === player) {
                 playback.player = null
                 playback.releaseVideo = null
             }
@@ -224,6 +246,8 @@ fun PixelVideoPlayer(
         factory = { context ->
             YouTubePlayerView(context).apply {
                 enableAutomaticInitialization = false
+                // Keep the WebView playing while the app isn't visible.
+                enableBackgroundPlayback(true)
                 view = this
                 playback.releaseVideo = {
                     view?.release()
@@ -235,7 +259,7 @@ fun PixelVideoPlayer(
                     override fun onReady(youTubePlayer: YouTubePlayer) {
                         if (view == null) return
                         player = youTubePlayer
-                        playback.player = youTubePlayer
+                        playback.player = YouTubeTransport(youTubePlayer)
                     }
                     override fun onCurrentSecond(youTubePlayer: YouTubePlayer, second: Float) {
                         if (view == null) return
@@ -249,22 +273,29 @@ fun PixelVideoPlayer(
                     }
                     override fun onError(youTubePlayer: YouTubePlayer, error: PlayerConstants.PlayerError) {
                         playback.isPlaying = false
+                        playback.isLoading = false
                         currentVideoId?.let { latestError(it, error) }
                     }
                     override fun onStateChange(youTubePlayer: YouTubePlayer, state: PlayerConstants.PlayerState) {
-                        if (state == PlayerConstants.PlayerState.PLAYING &&
-                            (view == null || !owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) || !playback.prepare())) {
+                        if (state == PlayerConstants.PlayerState.PLAYING && (view == null || !playback.prepare())) {
                             youTubePlayer.pause()
                             playback.isPlaying = false
                             return
                         }
                         playback.isPlaying = state == PlayerConstants.PlayerState.PLAYING
+                        playback.isLoading = state == PlayerConstants.PlayerState.BUFFERING ||
+                            (state == PlayerConstants.PlayerState.UNSTARTED && playback.isLoading)
                     }
                 }, IFramePlayerOptions.Builder(context)
                     // Native chrome off: the section's own overlay (version / prev / play / next)
                     // is the only video UI, so the two never stack.
                     .controls(0)
                     .rel(0)
+                    // No YouTube UI on top of the video: annotations / cards off, captions not
+                    // loaded, no fullscreen button.
+                    .ivLoadPolicy(3)
+                    .ccLoadPolicy(0)
+                    .fullscreen(0)
                     .origin("https://${context.packageName}")
                     .build())
             }

@@ -12,8 +12,11 @@ import java.nio.file.Files
 class UserPreferencesRepositoryTest {
 
     @Test
-    fun `default artist delimiters avoid common characters inside artist names`() {
-        assertEquals(listOf(";"), UserPreferencesRepository.DEFAULT_ARTIST_DELIMITERS)
+    fun `default artist delimiters avoid characters that sit inside artist names`() {
+        // "&", "/", "+" and "x" are word separators (need spaces), never plain characters.
+        val chars = UserPreferencesRepository.DEFAULT_ARTIST_DELIMITERS
+        assertTrue(";" in chars && "," in chars)
+        assertTrue(listOf("&", "/", "+", "x").none { it in chars })
     }
 
     @Test
@@ -125,6 +128,38 @@ class UserPreferencesRepositoryTest {
                 clearExisting = false
             )
             assertEquals(MIN_NAV_BAR_CORNER_RADIUS, repository.navBarCornerRadiusFlow.first())
+        } finally {
+            tempDir.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `roadmap 4_2 and 4_3 preference defaults and practice mode toggle`() = runTest {
+        val tempDir = Files.createTempDirectory("user-preferences-repository-defaults-test")
+        try {
+            val repository = UserPreferencesRepository(
+                dataStore = PreferenceDataStoreFactory.create(
+                    scope = backgroundScope,
+                    produceFile = { tempDir.resolve("settings.preferences_pb").toFile() }
+                ),
+                json = Json
+            )
+
+            // Verify roadmap 4.2 defaults
+            assertTrue(repository.showQueueHistoryFlow.first())
+            assertTrue(repository.persistentShuffleEnabledFlow.first())
+            assertTrue(repository.pauseOnVolumeZeroFlow.first())
+            assertTrue(repository.showScrollbarFlow.first())
+            assertEquals(false, repository.navBarCompactModeFlow.first())
+            assertEquals(false, repository.disableCastAutoplayFlow.first())
+            assertTrue(repository.keepPlayingInBackgroundFlow.first())
+
+            // Verify roadmap 4.3 modular practice mode default and toggle
+            assertTrue(repository.showPracticeModeFlow.first())
+            repository.setShowPracticeMode(false)
+            assertEquals(false, repository.showPracticeModeFlow.first())
+            repository.setShowPracticeMode(true)
+            assertTrue(repository.showPracticeModeFlow.first())
         } finally {
             tempDir.toFile().deleteRecursively()
         }

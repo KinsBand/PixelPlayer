@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -19,7 +20,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -33,6 +37,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -45,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -63,7 +69,8 @@ import androidx.compose.ui.res.stringResource
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MashupScreen(
-    mashupViewModel: MashupViewModel = hiltViewModel()
+    mashupViewModel: MashupViewModel = hiltViewModel(),
+    onBackClick: (() -> Unit)? = null
 ) {
     val mashupUiState by mashupViewModel.uiState.collectAsStateWithLifecycle()
     @Suppress("DEPRECATION")
@@ -74,6 +81,16 @@ fun MashupScreen(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.mashup_title)) },
+                navigationIcon = {
+                    if (onBackClick != null) {
+                        IconButton(onClick = onBackClick) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                                contentDescription = stringResource(R.string.common_back)
+                            )
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f))
             )
         }
@@ -107,6 +124,7 @@ fun MashupScreen(
                         onSelectSong = { mashupViewModel.openSongPicker(1) },
                         onSeek = { progress -> mashupViewModel.seek(1, progress) },
                         onSpeedChange = { speed -> mashupViewModel.setSpeed(1, speed) },
+                        onKeyLockToggle = { mashupViewModel.toggleKeyLock(1) },
                         onNudge = { amount -> mashupViewModel.nudge(1, amount) }
                     )
                     DeckUi(
@@ -119,6 +137,7 @@ fun MashupScreen(
                         onSelectSong = { mashupViewModel.openSongPicker(2) },
                         onSeek = { progress -> mashupViewModel.seek(2, progress) },
                         onSpeedChange = { speed -> mashupViewModel.setSpeed(2, speed) },
+                        onKeyLockToggle = { mashupViewModel.toggleKeyLock(2) },
                         onNudge = { amount -> mashupViewModel.nudge(2, amount) }
                     )
                 }
@@ -166,6 +185,7 @@ private fun DeckUi(
     onSelectSong: () -> Unit,
     onSeek: (Float) -> Unit,
     onSpeedChange: (Float) -> Unit,
+    onKeyLockToggle: () -> Unit,
     onNudge: (Long) -> Unit
 ) {
     Card(
@@ -253,6 +273,7 @@ private fun DeckUi(
                     SliderControl(label = stringResource(R.string.mashup_speed), value = deckState.speed, onValueChange = onSpeedChange, valueRange = 0.5f..2f, steps = 14, enabled = deckState.song != null) {
                         Text(text = stringResource(R.string.mashup_speed_multiplier, deckState.speed), style = MaterialTheme.typography.labelSmall)
                     }
+                    KeyLockRow(checked = deckState.keyLock, enabled = deckState.song != null, onToggle = onKeyLockToggle)
                 }
             }
 
@@ -270,6 +291,29 @@ private fun DeckUi(
                 }
             }
         }
+    }
+}
+
+/** Key Lock switch: on = time-stretch (key stays), off = vinyl (pitch follows speed). */
+@Composable
+private fun KeyLockRow(checked: Boolean, enabled: Boolean, onToggle: () -> Unit) {
+    val dim = if (enabled) LocalContentColor.current else LocalContentColor.current.copy(alpha = 0.38f)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = { onToggle() })
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(stringResource(R.string.mashup_key_lock), style = MaterialTheme.typography.labelMedium, color = dim)
+            Text(
+                stringResource(if (checked) R.string.mashup_key_lock_on_hint else R.string.mashup_key_lock_off_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else dim
+            )
+        }
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
 }
 

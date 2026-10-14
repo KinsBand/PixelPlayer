@@ -61,6 +61,35 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.rounded.Hearing
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import com.theveloper.pixelplay.presentation.components.SyncedLyricsList
+import com.theveloper.pixelplay.presentation.components.lyricsFontFamily
+import com.theveloper.pixelplay.presentation.components.lyrics.LocalLyricAnimationStyle
+import com.theveloper.pixelplay.presentation.components.lyrics.LocalLyricExpression
+import com.theveloper.pixelplay.presentation.components.lyrics.LocalLyricMotion
+import com.theveloper.pixelplay.presentation.components.lyrics.LocalLyricReducedMotion
+import com.theveloper.pixelplay.presentation.components.lyrics.LyricMotion
+import com.theveloper.pixelplay.presentation.components.lyrics.rememberSongExpressionProfile
+import com.theveloper.pixelplay.ui.theme.MotionTokens
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.layout.onSizeChanged
@@ -141,6 +170,8 @@ fun OverlayCutoutWidgetLayout(
     onPlayPauseToggle: () -> Unit,
     onSkipNext: () -> Unit,
     onSkipPrevious: () -> Unit,
+    onListen: () -> Unit,
+    onToggleFavorite: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
@@ -168,12 +199,19 @@ fun OverlayCutoutWidgetLayout(
     val windowCallback by rememberUpdatedState(onWindowSpec)
     val levelCallback by rememberUpdatedState(onLevelChange)
 
-    fun settleTo(level: CutoutExpansionLevel, velocity: Dp = 0.dp) {
+    /**
+     * Moves the surface to [target]. Every resting height - the levels and the track-change
+     * peek - goes through here, so they share the window handling and the springs.
+     */
+    fun animateHeight(
+        target: Dp,
+        collapsing: Boolean,
+        velocity: Dp = 0.dp,
+        after: suspend () -> Unit = {}
+    ) {
         motion.job?.cancel()
-        motion.target = level
         motion.job = scope.launch {
-            val target = metrics.height(level)
-            if (level == CutoutExpansionLevel.COLLAPSED && height.value <= metrics.pillSize + 1.dp) {
+            if (collapsing && height.value <= metrics.pillSize + 1.dp) {
                 // Already the pill: just make sure the window is the small touch strip.
                 height.snapTo(target)
                 windowCallback(OverlayWindowSpec.Collapsed)
@@ -193,7 +231,7 @@ fun OverlayCutoutWidgetLayout(
             withFrameMillis { }
             height.animateTo(
                 targetValue = target,
-                animationSpec = if (level == CutoutExpansionLevel.COLLAPSED) {
+                animationSpec = if (collapsing) {
                     spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 420f)
                 } else {
                     spring(dampingRatio = 0.82f, stiffness = 360f)
@@ -201,9 +239,34 @@ fun OverlayCutoutWidgetLayout(
                 initialVelocity = velocity
             )
             windowCallback(
-                if (level == CutoutExpansionLevel.COLLAPSED) OverlayWindowSpec.Collapsed
+                if (collapsing) OverlayWindowSpec.Collapsed
                 else metrics.windowFor(target)
             )
+            after()
+        }
+    }
+
+    fun settleTo(level: CutoutExpansionLevel, velocity: Dp = 0.dp) {
+        motion.target = level
+        motion.peeking = false
+        animateHeight(metrics.height(level), level == CutoutExpansionLevel.COLLAPSED, velocity)
+    }
+
+    // Track change on a closed island: peek the title / artist row, hold, then tuck back into
+    // the camera. A newer track restarts the hold; a tap, drag or level change cancels it.
+    // The token seen at first composition never peeks (the island just appeared).
+    val seenPeekToken = remember { mutableLongStateOf(state.peekToken) }
+    LaunchedEffect(state.peekToken) {
+        if (state.peekToken == seenPeekToken.longValue) return@LaunchedEffect
+        seenPeekToken.longValue = state.peekToken
+        val closed = state.expansionLevel == CutoutExpansionLevel.COLLAPSED &&
+            (motion.target == null || motion.target == CutoutExpansionLevel.COLLAPSED)
+        if (motion.dragging || !closed) return@LaunchedEffect
+        motion.target = CutoutExpansionLevel.COLLAPSED
+        motion.peeking = true
+        animateHeight(metrics.peekHeight, collapsing = false) {
+            delay(PEEK_HOLD_MS)
+            settleTo(CutoutExpansionLevel.COLLAPSED)
         }
     }
 
@@ -238,6 +301,10 @@ fun OverlayCutoutWidgetLayout(
     val isOpen by remember(metrics) {
         derivedStateOf { height.value > metrics.pillSize + 1.dp }
     }
+    // The peek is the header row only; lyrics and controls appear once the surface is taller.
+    val showLevelContent by remember(metrics) {
+        derivedStateOf { height.value > metrics.peekHeight + 1.dp }
+    }
 
     val dragModifier = Modifier.pointerInput(metrics) {
         val tracker = VelocityTracker()
@@ -252,6 +319,7 @@ fun OverlayCutoutWidgetLayout(
         detectVerticalDragGestures(
             onDragStart = {
                 motion.job?.cancel()
+                motion.peeking = false
                 motion.dragging = true
                 motion.dragHeight = height.value
                 tracker.resetTracking()
@@ -287,8 +355,11 @@ fun OverlayCutoutWidgetLayout(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                         onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            requestLevel(CutoutExpansionLevel.LEVEL_1_SINGLE)
+                            // "Tap camera hole" can be turned off in setup.
+                            if (state.tapToOpen) {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                requestLevel(CutoutExpansionLevel.LEVEL_1_SINGLE)
+                            }
                         },
                         onLongClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -311,9 +382,15 @@ fun OverlayCutoutWidgetLayout(
                 metrics = metrics,
                 contentLevel = contentLevel,
                 isOpen = isOpen,
+                showLevelContent = showLevelContent,
                 positionFlow = positionFlow,
                 onTitleClick = onOpenFullScreenPlayer,
-                onArtistClick = { onOpenArtist(state.song?.artistId ?: -1L) },
+                // Radio stations have no artist page.
+                onArtistClick = {
+                    if (!com.theveloper.pixelplay.data.radio.RadioPlayback.isRadio(state.song)) {
+                        onOpenArtist(state.song?.artistId ?: -1L)
+                    }
+                },
                 onHandleClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     onOpenLyricsScreen()
@@ -321,7 +398,32 @@ fun OverlayCutoutWidgetLayout(
                 onSeekTo = onSeekTo,
                 onPlayPauseToggle = onPlayPauseToggle,
                 onSkipNext = onSkipNext,
-                onSkipPrevious = onSkipPrevious
+                onSkipPrevious = onSkipPrevious,
+                onListen = onListen,
+                onToggleFavorite = onToggleFavorite
+            )
+        }
+
+        // The peek takes a tap anywhere on it (opens state 1) and a hold (opens the app), like
+        // the closed pill. Drawn over the header so its title / artist taps don't steal it.
+        if (motion.peeking) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(metrics.surfaceTop + metrics.peekHeight)
+                    .combinedClickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClickLabel = "Open lyrics",
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            requestLevel(CutoutExpansionLevel.LEVEL_1_SINGLE)
+                        },
+                        onLongClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onOpenApp()
+                        }
+                    )
             )
         }
 
@@ -331,9 +433,12 @@ fun OverlayCutoutWidgetLayout(
             isPlaying = state.isPlaying,
             isOpen = isOpen,
             onClick = {
+                if (!isOpen && !state.tapToOpen) return@CutoutRing
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                // On the peek, the camera opens the island like the closed pill does.
                 requestLevel(
-                    if (isOpen) CutoutExpansionLevel.COLLAPSED else CutoutExpansionLevel.LEVEL_1_SINGLE
+                    if (isOpen && !motion.peeking) CutoutExpansionLevel.COLLAPSED
+                    else CutoutExpansionLevel.LEVEL_1_SINGLE
                 )
             },
             onLongClick = {
@@ -374,7 +479,12 @@ private class IslandMotion {
     var target: CutoutExpansionLevel? = null
     var dragging = false
     var dragHeight: Dp = 0.dp
+    /** Showing the track-change peek (title / artist row only). */
+    var peeking by mutableStateOf(false)
 }
+
+/** How long the track-change peek stays before tucking back into the camera. */
+private const val PEEK_HOLD_MS = 3_000L
 
 /** Past either end the surface still moves, at a third of the finger's speed. */
 private fun rubberBand(value: Dp, min: Dp, max: Dp): Dp = when {
@@ -641,6 +751,7 @@ private fun IslandContent(
     metrics: IslandMetrics,
     contentLevel: CutoutExpansionLevel,
     isOpen: Boolean,
+    showLevelContent: Boolean,
     positionFlow: StateFlow<Long>,
     onTitleClick: () -> Unit,
     onArtistClick: () -> Unit,
@@ -648,13 +759,17 @@ private fun IslandContent(
     onSeekTo: (Long) -> Unit,
     onPlayPauseToggle: () -> Unit,
     onSkipNext: () -> Unit,
-    onSkipPrevious: () -> Unit
+    onSkipPrevious: () -> Unit,
+    onListen: () -> Unit,
+    onToggleFavorite: () -> Unit
 ) {
     val scheme = MaterialTheme.colorScheme
+    val context = LocalContext.current
 
     // Same settings as the lyrics sheet and the cover, straight from the lyrics menu:
     // animated lyrics, blur on/off and strength, highlight mode, translation, romanization,
-    // text size, font, immersive lyrics + auto-hide delay, and the per-song sync offset.
+    // text size, font, weight, line spacing, expressive / adaptive typography, animation
+    // style, immersive lyrics + auto-hide delay, and the per-song sync offset.
     // Only alignment is fixed (centre): the island is a small symmetric surface around the
     // camera, and a left/right-aligned line would sit under the camera hole.
     val prefs by rememberLyricsDisplayPrefs()
@@ -691,10 +806,45 @@ private fun IslandContent(
     )
     val immersive = immersiveState.isImmersive
 
+    // The lyrics sheet's own typography context (LyricsSheet): adaptive expressive typography,
+    // how words and lines move, the chosen animation style, and "Remove animations".
+    // Same voice as the sheet: the song's sections when they're known (the profile engine also
+    // reuses whatever the sheet resolved for this play) and its duration.
+    val islandStructure = remember(state.song?.id, state.lyrics) {
+        state.song?.id?.let { com.theveloper.pixelplay.data.lyrics.SongStructureRepository.get(context).cached(it) }
+    }
+    val expressionProfile by rememberSongExpressionProfile(
+        song = state.song,
+        lyrics = state.lyrics,
+        structure = islandStructure,
+        durationMs = state.song?.duration ?: 0L,
+        enabled = prefs.expressiveTypography && prefs.adaptiveTypography
+    )
+    val systemAnimationsOff = remember(context) {
+        android.provider.Settings.Global.getFloat(
+            context.contentResolver,
+            android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f
+        ) == 0f
+    }
+
+    // One list state for states 2-4, so moving between them keeps the scroll position.
+    val listState = androidx.compose.runtime.key(state.song?.id) { rememberLazyListState() }
+
+    CompositionLocalProvider(
+        LocalLyricExpression provides expressionProfile,
+        LocalLyricMotion provides when {
+            systemAnimationsOff -> LyricMotion.Still
+            else -> expressionProfile?.motion ?: LyricMotion.Default
+        },
+        LocalLyricAnimationStyle provides prefs.animationStyle,
+        LocalLyricReducedMotion provides systemAnimationsOff
+    ) {
     Column(modifier = Modifier.fillMaxSize().resetsLyricsImmersive(immersiveState)) {
         IslandHeader(
             state = state,
             metrics = metrics,
+            reducedMotion = systemAnimationsOff,
             onTitleClick = onTitleClick,
             onArtistClick = onArtistClick
         )
@@ -707,32 +857,40 @@ private fun IslandContent(
                 .weight(1f)
                 .fillMaxWidth()
         ) {
-            if (isOpen) {
+            if (showLevelContent) {
+                // States 2-4 share one scrollable list, so only state 1 <-> list crossfades.
+                val listKey = contentLevel != CutoutExpansionLevel.LEVEL_1_SINGLE
                 Crossfade(
-                    targetState = contentLevel,
+                    targetState = listKey,
                     animationSpec = tween(durationMillis = 220),
                     label = "islandContentLevel"
-                ) { level ->
+                ) { isList ->
                     LevelContent(
-                        level = level,
+                        level = if (isList) contentLevel else CutoutExpansionLevel.LEVEL_1_SINGLE,
                         state = state,
                         prefs = islandPrefs,
                         font = font,
                         lyricColors = lyricColors,
                         positionProvider = positionProvider,
+                        positionFlow = positionFlow,
+                        listState = listState,
                         immersive = immersive,
                         outlineHeight = metrics.outlineHeight,
+                        resizeBandHeight = metrics.handleHeight + 6.dp,
                         onSeekTo = seekToLine,
                         onPlayPauseToggle = onPlayPauseToggle,
                         onSkipNext = onSkipNext,
-                        onSkipPrevious = onSkipPrevious
+                        onSkipPrevious = onSkipPrevious,
+                        onListen = onListen,
+                        onToggleFavorite = onToggleFavorite
                     )
                 }
             }
         }
 
-        // No drag-handle bar: dragging anywhere on the island still resizes it, and the handle's
-        // height goes to the content so the controls sit in the bottom pill outline.
+        // No drag-handle bar: the header and the bottom band (the control pill in states 3-4,
+        // a strip under the lyrics in state 2) resize the island; the lyrics list scrolls.
+    }
     }
 }
 
@@ -740,6 +898,7 @@ private fun IslandContent(
 private fun IslandHeader(
     state: OverlayCutoutState,
     metrics: IslandMetrics,
+    reducedMotion: Boolean,
     onTitleClick: () -> Unit,
     onArtistClick: () -> Unit
 ) {
@@ -749,7 +908,9 @@ private fun IslandHeader(
             .fillMaxWidth()
             .height(metrics.headerHeight)
             // Clear of the screen's curved corners at the top.
-            .padding(horizontal = maxOf(18.dp, metrics.screenCornerRadius * 0.5f)),
+            .padding(horizontal = maxOf(18.dp, metrics.screenCornerRadius * 0.5f))
+            // A track change (including the peek on a closed island) is announced politely.
+            .semantics { liveRegion = LiveRegionMode.Polite },
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
@@ -764,6 +925,8 @@ private fun IslandHeader(
         ) {
             SlidingText(
                 text = state.song?.title ?: "Nothing playing",
+                direction = state.skipDirection,
+                reducedMotion = reducedMotion,
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold, fontSize = 15.sp),
                 color = scheme.onPrimaryContainer,
                 textAlign = TextAlign.Start
@@ -785,6 +948,8 @@ private fun IslandHeader(
         ) {
             SlidingText(
                 text = state.song?.artist ?: "",
+                direction = state.skipDirection,
+                reducedMotion = reducedMotion,
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium, fontSize = 14.sp),
                 color = scheme.onPrimaryContainer.copy(alpha = 0.75f),
                 textAlign = TextAlign.End
@@ -833,15 +998,44 @@ private fun StatusBarCoverHint(height: Dp) {
     }
 }
 
-/** Title/artist: a track change slides the new text up in place of the old. */
+/**
+ * Title/artist: a track change slides the new text in the way the skip went - up for next,
+ * down for previous - and only fades with "Remove animations" on.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SlidingText(text: String, style: TextStyle, color: Color, textAlign: TextAlign) {
+private fun SlidingText(
+    text: String,
+    direction: SkipDirection,
+    reducedMotion: Boolean,
+    style: TextStyle,
+    color: Color,
+    textAlign: TextAlign
+) {
+    val latestDirection by rememberUpdatedState(direction)
     AnimatedContent(
         targetState = text,
         transitionSpec = {
-            (slideInVertically(tween(360, easing = FastOutSlowInEasing)) { it / 2 } + fadeIn(tween(300)))
-                .togetherWith(slideOutVertically(tween(300, easing = FastOutSlowInEasing)) { -it / 2 } + fadeOut(tween(200)))
+            val enterSpec = tween<androidx.compose.ui.unit.IntOffset>(
+                MotionTokens.DurationMedium4, easing = MotionTokens.EmphasizedDecelerate
+            )
+            val exitSpec = tween<androidx.compose.ui.unit.IntOffset>(
+                MotionTokens.DurationMedium1, easing = MotionTokens.EmphasizedAccelerate
+            )
+            val fadeInSpec = tween<Float>(MotionTokens.DurationMedium4, easing = MotionTokens.EmphasizedDecelerate)
+            val fadeOutSpec = tween<Float>(MotionTokens.DurationMedium1, easing = MotionTokens.EmphasizedAccelerate)
+            // Next: in from below, out the top. Previous: in from above, out the bottom.
+            val sign = when (latestDirection) {
+                SkipDirection.BACKWARD -> -1
+                SkipDirection.FORWARD -> 1
+                SkipDirection.NONE -> 0
+            }
+            if (reducedMotion || sign == 0) {
+                fadeIn(fadeInSpec).togetherWith(fadeOut(fadeOutSpec))
+            } else {
+                (slideInVertically(enterSpec) { sign * it / 2 } + fadeIn(fadeInSpec))
+                    .togetherWith(slideOutVertically(exitSpec) { -sign * it / 2 } + fadeOut(fadeOutSpec))
+            }
         },
         label = "islandHeaderText"
     ) { value ->
@@ -865,29 +1059,43 @@ private fun LevelContent(
     font: LyricsFont,
     lyricColors: CoverLyricsColors,
     positionProvider: () -> Long,
+    positionFlow: StateFlow<Long>,
+    listState: androidx.compose.foundation.lazy.LazyListState,
     immersive: Boolean,
     outlineHeight: Dp,
+    resizeBandHeight: Dp,
     onSeekTo: (Long) -> Unit,
     onPlayPauseToggle: () -> Unit,
     onSkipNext: () -> Unit,
-    onSkipPrevious: () -> Unit
+    onSkipPrevious: () -> Unit,
+    onListen: () -> Unit,
+    onToggleFavorite: () -> Unit
 ) {
     val typography = MaterialTheme.typography
+    val expression = LocalLyricExpression.current
     val immersiveScale by animateFloatAsState(
         targetValue = if (immersive) ISLAND_IMMERSIVE_TEXT_SCALE else 1f,
         animationSpec = spring(stiffness = Spring.StiffnessLow),
         label = "islandImmersiveTextScale"
     )
-    val sizeMultiplier = prefs.textSize.multiplier * immersiveScale
-    fun lyricStyle(size: Float) = typography.titleMedium.copy(
-        fontSize = (size * sizeMultiplier).sp,
-        lineHeight = (size * sizeMultiplier * 1.25f).sp,
-        textMotion = TextMotion.Animated
-    )
+    val singleLine = level == CutoutExpansionLevel.LEVEL_1_SINGLE
+    // State 1 keeps its line animating smoothly into immersive; the list steps once instead,
+    // because a size change re-lays out (and re-centres) the whole list.
+    val sizeMultiplier = prefs.textSize.multiplier *
+        (if (singleLine) immersiveScale else if (immersive) ISLAND_IMMERSIVE_TEXT_SCALE else 1f)
+    fun lyricStyle(size: Float): TextStyle {
+        val base = typography.titleMedium.copy(
+            fontWeight = prefs.fontWeight.fontWeight,
+            fontSize = (size * sizeMultiplier).sp,
+            lineHeight = (size * sizeMultiplier * 1.25f * prefs.lineSpacing.multiplier).sp,
+            textMotion = TextMotion.Animated
+        )
+        // Adaptive expressive typography: the song's own size / tracking / weight voice.
+        return expression?.applyTo(base) ?: base
+    }
     val onLineClick: (SyncedLine) -> Unit = { onSeekTo(it.time.toLong()) }
     val showControls = level == CutoutExpansionLevel.LEVEL_3_SIX || level == CutoutExpansionLevel.LEVEL_4_FULL
 
-    val singleLine = level == CutoutExpansionLevel.LEVEL_1_SINGLE
     Column(modifier = Modifier.fillMaxSize()) {
         // State 1: the line sits in the middle of the bottom pill outline.
         Box(
@@ -903,7 +1111,7 @@ private fun LevelContent(
             val lines = state.syncedLines
             if (lines.isEmpty()) {
                 Text(
-                    text = if (level == CutoutExpansionLevel.LEVEL_1_SINGLE) state.fallbackLine else "No synced lyrics",
+                    text = if (singleLine) state.fallbackLine else "No synced lyrics",
                     style = typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f),
                     textAlign = TextAlign.Center,
@@ -911,146 +1119,328 @@ private fun LevelContent(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 24.dp)
                 )
-            } else {
+            } else if (singleLine) {
                 // Keyed on the song so a track change starts a fresh roll instead of
                 // animating from the old song's line index.
                 androidx.compose.runtime.key(state.song?.id) {
-                    when (level) {
-                        CutoutExpansionLevel.LEVEL_1_SINGLE -> CoverSyncedLyrics(
-                            lines = lines,
-                            positionProvider = positionProvider,
-                            prefs = prefs,
-                            font = font,
-                            style = lyricStyle(16f),
-                            colors = lyricColors,
-                            windowRadius = 1,
-                            rowMaxHeightFraction = 1f,
-                            horizontalPadding = 16.dp,
-                            onLineClick = onLineClick,
-                            immersive = immersive
-                        )
-                        CutoutExpansionLevel.LEVEL_2_THREE -> CoverSyncedLyrics(
-                            lines = lines,
-                            positionProvider = positionProvider,
-                            prefs = prefs,
-                            font = font,
-                            style = lyricStyle(16f),
-                            colors = lyricColors,
-                            windowRadius = 2,
-                            rowMaxHeightFraction = 0.5f,
-                            horizontalPadding = 16.dp,
-                            onLineClick = onLineClick,
-                            immersive = immersive
-                        )
-                        CutoutExpansionLevel.LEVEL_3_SIX -> CoverSyncedLyrics(
-                            lines = lines,
-                            positionProvider = positionProvider,
-                            prefs = prefs,
-                            font = font,
-                            style = lyricStyle(17f),
-                            colors = lyricColors,
-                            windowRadius = 3,
-                            rowMaxHeightFraction = 0.4f,
-                            horizontalPadding = 16.dp,
-                            onLineClick = onLineClick,
-                            immersive = immersive
-                        )
-                        else -> CoverSyncedLyrics(
-                            lines = lines,
-                            positionProvider = positionProvider,
-                            prefs = prefs,
-                            font = font,
-                            style = lyricStyle(24f),
-                            colors = lyricColors,
-                            windowRadius = 6,
-                            rowMaxHeightFraction = 0.3f,
-                            horizontalPadding = 20.dp,
-                            onLineClick = onLineClick,
-                            immersive = immersive
-                        )
+                    CoverSyncedLyrics(
+                        lines = lines,
+                        positionProvider = positionProvider,
+                        prefs = prefs,
+                        font = font,
+                        style = lyricStyle(16f),
+                        colors = lyricColors,
+                        windowRadius = 1,
+                        rowMaxHeightFraction = 1f,
+                        horizontalPadding = 16.dp,
+                        onLineClick = onLineClick,
+                        immersive = immersive
+                    )
+                }
+            } else {
+                // States 2-4: the lyrics sheet's own list - every line reachable by scrolling,
+                // auto-scroll pauses while the finger is down and picks up again after, and
+                // every lyrics setting (animation style, blur, highlight mode...) applies.
+                val listStyle = lyricStyle(if (level == CutoutExpansionLevel.LEVEL_4_FULL) 24f else 17f)
+                    .copy(fontFamily = lyricsFontFamily(font))
+                CompositionLocalProvider(LocalContentColor provides lyricColors.text) {
+                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                        // Room for the first and last line to scroll to the middle.
+                        val edge = maxHeight * 0.4f
+                        androidx.compose.runtime.key(state.song?.id) {
+                            SyncedLyricsList(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 20.dp),
+                                contentPadding = PaddingValues(top = edge, bottom = edge),
+                                lines = lines,
+                                listState = listState,
+                                playbackPositionFlow = positionFlow,
+                                lyricsSyncOffset = state.lyricsSyncOffsetMs,
+                                accentColor = lyricColors.highlight,
+                                textStyle = listStyle,
+                                onLineClick = onLineClick,
+                                // Small surface: a taller zone, centred in the list.
+                                highlightZoneFraction = 0.2f,
+                                highlightOffsetDp = 0.dp,
+                                autoscrollAnimationSpec = if (prefs.useAnimatedLyrics) {
+                                    spring(
+                                        stiffness = Spring.StiffnessMediumLow,
+                                        dampingRatio = Spring.DampingRatioLowBouncy
+                                    )
+                                } else {
+                                    tween(durationMillis = 450, easing = FastOutSlowInEasing)
+                                },
+                                useAnimatedLyrics = prefs.useAnimatedLyrics,
+                                highlightMode = prefs.highlightMode,
+                                animatedLyricsBlurEnabled = prefs.animatedLyricsBlurEnabled && !prefs.disableBlurAllOver,
+                                animatedLyricsBlurStrength = prefs.animatedLyricsBlurStrength,
+                                immersiveMode = immersive,
+                                lyricsAlignment = LyricsAlignment.CENTER.key,
+                                showTranslation = prefs.showTranslation,
+                                showRomanization = prefs.showRomanization,
+                                relayoutKey = listStyle,
+                                onSeekTo = { ms -> onSeekTo(ms) }
+                            )
+                        }
                     }
                 }
             }
           }
         }
 
-        // Controls auto-hide in immersive, like the sheet's controls. They fill the bottom
-        // pill outline (states 3 and 4).
-        AnimatedVisibility(
-            visible = showControls && !immersive,
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut()
+        // Bottom band: in states 3-4 the control pill, otherwise (state 2, or immersive) a
+        // strip under the lyrics. It is never part of the scrolling list, so dragging here
+        // always resizes the island.
+        if (!singleLine) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = resizeBandHeight)
+            ) {
+                // Controls auto-hide in immersive, like the sheet's controls.
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = showControls && !immersive,
+                    enter = expandVertically(
+                        tween(MotionTokens.DurationMedium2, easing = MotionTokens.EmphasizedDecelerate)
+                    ) + fadeIn(tween(MotionTokens.DurationMedium2, easing = MotionTokens.EmphasizedDecelerate)),
+                    exit = shrinkVertically(
+                        tween(MotionTokens.DurationShort4, easing = MotionTokens.EmphasizedAccelerate)
+                    ) + fadeOut(tween(MotionTokens.DurationShort4, easing = MotionTokens.EmphasizedAccelerate))
+                ) {
+                    IslandControls(
+                        height = outlineHeight,
+                        isPlaying = state.isPlaying,
+                        isListening = state.isListening,
+                        isFavorite = state.isFavorite,
+                        onPlayPauseToggle = onPlayPauseToggle,
+                        onSkipNext = onSkipNext,
+                        onSkipPrevious = onSkipPrevious,
+                        onListen = onListen,
+                        onToggleFavorite = onToggleFavorite
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Same shape language as the app's mini player: tonal skip buttons around a primary play,
+ * with Listen (identify a song playing nearby) at the right end of the pill.
+ */
+@Composable
+private fun IslandControls(
+    height: Dp,
+    isPlaying: Boolean,
+    isListening: Boolean,
+    isFavorite: Boolean,
+    onPlayPauseToggle: () -> Unit,
+    onSkipNext: () -> Unit,
+    onSkipPrevious: () -> Unit,
+    onListen: () -> Unit,
+    onToggleFavorite: () -> Unit
+) {
+    val scheme = MaterialTheme.colorScheme
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(height)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            IslandControls(
-                height = outlineHeight,
-                isPlaying = state.isPlaying,
-                onPlayPauseToggle = onPlayPauseToggle,
-                onSkipNext = onSkipNext,
-                onSkipPrevious = onSkipPrevious
+            ControlButton(
+                size = 46.dp,
+                container = scheme.onPrimaryContainer.copy(alpha = 0.12f),
+                onClick = onSkipPrevious
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.SkipPrevious,
+                    contentDescription = "Previous",
+                    tint = scheme.onPrimaryContainer,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            ControlButton(
+                size = 54.dp,
+                container = scheme.primary,
+                onClick = onPlayPauseToggle
+            ) {
+                AnimatedContent(
+                    targetState = isPlaying,
+                    transitionSpec = {
+                        (scaleIn(tween(220), initialScale = 0.6f) + fadeIn(tween(180)))
+                            .togetherWith(scaleOut(tween(180), targetScale = 0.6f) + fadeOut(tween(140)))
+                    },
+                    label = "islandPlayPause"
+                ) { playing ->
+                    Icon(
+                        imageVector = if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        contentDescription = if (playing) "Pause" else "Play",
+                        tint = scheme.onPrimary,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
+            ControlButton(
+                size = 46.dp,
+                container = scheme.onPrimaryContainer.copy(alpha = 0.12f),
+                onClick = onSkipNext
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.SkipNext,
+                    contentDescription = "Next",
+                    tint = scheme.onPrimaryContainer,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+
+        // Like: the mirror of Listen, at the left end of the pill.
+        LikeButton(
+            isFavorite = isFavorite,
+            onClick = onToggleFavorite,
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .padding(start = 18.dp)
+        )
+
+        ListenButton(
+            isListening = isListening,
+            onClick = onListen,
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 18.dp)
+        )
+    }
+}
+
+/**
+ * Like / unlike the playing song. Same heart icons as the full player (outline when not
+ * liked, filled when liked) and the same tonal button as Listen; filled primary when liked.
+ */
+@Composable
+private fun LikeButton(
+    isFavorite: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val scheme = MaterialTheme.colorScheme
+    val colorSpec = tween<Color>(MotionTokens.DurationMedium2, easing = MotionTokens.Emphasized)
+    val container by animateColorAsState(
+        targetValue = if (isFavorite) scheme.primary else scheme.onPrimaryContainer.copy(alpha = 0.12f),
+        animationSpec = colorSpec,
+        label = "islandLikeContainer"
+    )
+    val tint by animateColorAsState(
+        targetValue = if (isFavorite) scheme.onPrimary else scheme.onPrimaryContainer,
+        animationSpec = colorSpec,
+        label = "islandLikeTint"
+    )
+    // A small pop when it becomes liked.
+    val pop = remember { androidx.compose.animation.core.Animatable(1f) }
+    var seen by remember { androidx.compose.runtime.mutableStateOf(isFavorite) }
+    LaunchedEffect(isFavorite) {
+        if (isFavorite && !seen) {
+            pop.animateTo(1.18f, tween(MotionTokens.DurationShort3, easing = MotionTokens.EmphasizedDecelerate))
+            pop.animateTo(1f, tween(MotionTokens.DurationShort4, easing = MotionTokens.Emphasized))
+        }
+        seen = isFavorite
+    }
+    Box(
+        modifier = modifier
+            .size(48.dp)
+            .semantics {
+                contentDescription = if (isFavorite) "Remove from liked songs" else "Add to liked songs"
+                role = Role.Button
+                stateDescription = if (isFavorite) "Liked" else "Not liked"
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        ControlButton(
+            size = 46.dp,
+            container = container,
+            onClick = onClick,
+            modifier = Modifier.graphicsLayer {
+                scaleX = pop.value
+                scaleY = pop.value
+            }
+        ) {
+            Icon(
+                painter = androidx.compose.ui.res.painterResource(
+                    if (isFavorite) com.theveloper.pixelplay.R.drawable.round_favorite_24
+                    else com.theveloper.pixelplay.R.drawable.rounded_favorite_24
+                ),
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(24.dp)
             )
         }
     }
 }
 
-/** Same shape language as the app's mini player: tonal skip buttons around a primary play. */
+/** Identify a song playing nearby (Now Playing, else Google's song search). Pulses while listening. */
 @Composable
-private fun IslandControls(
-    height: Dp,
-    isPlaying: Boolean,
-    onPlayPauseToggle: () -> Unit,
-    onSkipNext: () -> Unit,
-    onSkipPrevious: () -> Unit
+private fun ListenButton(
+    isListening: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val scheme = MaterialTheme.colorScheme
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(height),
-        horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
-        verticalAlignment = Alignment.CenterVertically
+    val colorSpec = tween<Color>(MotionTokens.DurationMedium2, easing = MotionTokens.Emphasized)
+    val container by animateColorAsState(
+        targetValue = if (isListening) scheme.primary else scheme.onPrimaryContainer.copy(alpha = 0.12f),
+        animationSpec = colorSpec,
+        label = "islandListenContainer"
+    )
+    val tint by animateColorAsState(
+        targetValue = if (isListening) scheme.onPrimary else scheme.onPrimaryContainer,
+        animationSpec = colorSpec,
+        label = "islandListenTint"
+    )
+    val context = LocalContext.current
+    val animationsOff = remember(context) {
+        android.provider.Settings.Global.getFloat(
+            context.contentResolver,
+            android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f
+        ) == 0f
+    }
+    val pulse = if (isListening && !animationsOff) {
+        rememberInfiniteTransition(label = "islandListenPulse").animateFloat(
+            initialValue = 1f,
+            targetValue = 0.6f,
+            animationSpec = infiniteRepeatable(
+                tween(MotionTokens.DurationLong2 * 2, easing = MotionTokens.Standard),
+                RepeatMode.Reverse
+            ),
+            label = "islandListenPulseAlpha"
+        )
+    } else null
+
+    Box(
+        modifier = modifier
+            .size(48.dp)
+            .semantics {
+                contentDescription = "Identify song playing nearby"
+                role = Role.Button
+                stateDescription = if (isListening) "Listening" else "Not listening"
+            },
+        contentAlignment = Alignment.Center
     ) {
         ControlButton(
             size = 46.dp,
-            container = scheme.onPrimaryContainer.copy(alpha = 0.12f),
-            onClick = onSkipPrevious
+            container = container,
+            onClick = onClick,
+            modifier = Modifier.graphicsLayer { alpha = pulse?.value ?: 1f }
         ) {
             Icon(
-                imageVector = Icons.Rounded.SkipPrevious,
-                contentDescription = "Previous",
-                tint = scheme.onPrimaryContainer,
-                modifier = Modifier.size(24.dp)
-            )
-        }
-        ControlButton(
-            size = 54.dp,
-            container = scheme.primary,
-            onClick = onPlayPauseToggle
-        ) {
-            AnimatedContent(
-                targetState = isPlaying,
-                transitionSpec = {
-                    (scaleIn(tween(220), initialScale = 0.6f) + fadeIn(tween(180)))
-                        .togetherWith(scaleOut(tween(180), targetScale = 0.6f) + fadeOut(tween(140)))
-                },
-                label = "islandPlayPause"
-            ) { playing ->
-                Icon(
-                    imageVector = if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                    contentDescription = if (playing) "Pause" else "Play",
-                    tint = scheme.onPrimary,
-                    modifier = Modifier.size(28.dp)
-                )
-            }
-        }
-        ControlButton(
-            size = 46.dp,
-            container = scheme.onPrimaryContainer.copy(alpha = 0.12f),
-            onClick = onSkipNext
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.SkipNext,
-                contentDescription = "Next",
-                tint = scheme.onPrimaryContainer,
+                imageVector = Icons.Rounded.Hearing,
+                contentDescription = null,
+                tint = tint,
                 modifier = Modifier.size(24.dp)
             )
         }
@@ -1062,10 +1452,11 @@ private fun ControlButton(
     size: Dp,
     container: Color,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .size(size)
             .clip(CircleShape)
             .background(container)

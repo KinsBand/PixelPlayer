@@ -105,6 +105,7 @@ fun DailyMixSection(
     if (showSongInfoSheet && selectedSongForInfo != null) {
         val song = selectedSongForInfo!!
         SongInfoBottomSheet(
+            onStartSongRadio = { seedSong -> playerViewModel.startSongRadio(seedSong) },
             song = song,
             isFavorite = favoriteSongIds.contains(song.id),
             onToggleFavorite = { playerViewModel.toggleFavoriteSpecificSong(song) },
@@ -126,6 +127,9 @@ fun DailyMixSection(
             onAddNextToQueue = {
                 playerViewModel.addSongNextToQueue(song)
             },
+            // Hold Next → Soon (the "after which song" slider).
+            soonPlayer = playerViewModel,
+            onAddSoon = { k -> playerViewModel.addSongAfterUpcoming(song, k) },
             onAddToPlayList = {
                 showPlaylistBottomSheet = true
             },
@@ -198,7 +202,18 @@ private fun DailyMixCard(
         ),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         elevation = CardDefaults.elevatedCardElevation(0.dp),
-        modifier = Modifier.fillMaxWidth()
+        // Offline with nothing in the mix on the device: the whole card is veiled.
+        modifier = Modifier
+            .fillMaxWidth()
+            .offlineVeil(
+                rememberSongsOfflineBlocked(songs),
+                AbsoluteSmoothCornerShape(
+                    cornerRadiusBR = cornerRadius, smoothnessAsPercentTL = 60,
+                    cornerRadiusTR = cornerRadius, smoothnessAsPercentTR = 60,
+                    cornerRadiusBL = cornerRadius, smoothnessAsPercentBL = 60,
+                    cornerRadiusTL = cornerRadius, smoothnessAsPercentBR = 60
+                )
+            )
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             DailyMixHeader(thumbnails = headerSongs)
@@ -281,16 +296,19 @@ fun DailyMixHeader(thumbnails: ImmutableList<Song>) {
             ) {
                 thumbnails.forEachIndexed { index, song ->
                     val modifier = shapeConditionalModifier(index)
+                    val shape = threeShapeSwitch(index)
                     Box(
                         modifier = modifier
                             //.size(48.dp)
-                            .clip(threeShapeSwitch(index))
-                            .border(2.dp, MaterialTheme.colorScheme.surface, threeShapeSwitch(index))
+                            .clip(shape)
+                            .border(2.dp, MaterialTheme.colorScheme.surface, shape)
                     ) {
                         SmartImage(
                             model = song.albumArtUriString,
                             contentDescription = null,
                             contentScale = ContentScale.Crop,
+                            shape = shape,
+                            indicatorSize = 22.dp,
                             modifier = Modifier.fillMaxSize()
                         )
                     }

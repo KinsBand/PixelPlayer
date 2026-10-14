@@ -67,9 +67,8 @@ class AiHandler @Inject constructor(
 
         val now = System.currentTimeMillis()
 
-        // Verify if we should run on-device Gemini Nano (not in offline mode and model available)
-        val isOffline = networkAccessPolicy.getDecision(NetworkPurpose.Analytics) == NetworkDecision.OfflineMode
-        val useNano = !isOffline && nanoClient.isAvailable(context) && userProvider == AiProvider.GEMINI_NANO
+        // Gemini Nano runs on the phone, so offline mode doesn't matter: only whether it's ready.
+        val useNano = nanoClient.isAvailable(context) && userProvider == AiProvider.GEMINI_NANO
 
         val responseJson = if (useNano) {
             try {

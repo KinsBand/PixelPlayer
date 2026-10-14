@@ -62,6 +62,8 @@ class DownloadedLibraryIndexer @Inject constructor(
         val genre: String? = null,
         val year: Int = 0,
         val trackNumber: Int = 0,
+        val discNumber: Int? = null,
+        val lyrics: String? = null,
         val file: File,
         val mimeType: String? = null,
         val bitrate: Int? = null,
@@ -243,8 +245,9 @@ class DownloadedLibraryIndexer @Inject constructor(
             filePath = input.file.absolutePath,
             parentDirectoryPath = parentDir,
             isFavorite = input.isFavorite || previous?.isFavorite == true,
-            lyrics = previous?.lyrics,
+            lyrics = input.lyrics?.takeIf { it.isNotBlank() } ?: previous?.lyrics,
             trackNumber = input.trackNumber.takeIf { it > 0 } ?: previous?.trackNumber ?: 0,
+            discNumber = input.discNumber?.takeIf { it > 0 } ?: previous?.discNumber,
             year = input.year.takeIf { it > 0 } ?: previous?.year ?: 0,
             dateAdded = previous?.dateAdded ?: System.currentTimeMillis(),
             mimeType = input.mimeType ?: previous?.mimeType ?: guessMime(input.file),
@@ -335,6 +338,8 @@ class DownloadedLibraryIndexer @Inject constructor(
         ) return true
         // Indexed with a channel-style artist ("X - Topic", "XVEVO").
         if (CollectionKeys.cleanArtistName(existing.artistName) != existing.artistName.trim()) return true
+        // Indexed with a duration or play count as the album ("0:36"): regroup it.
+        if (CollectionKeys.isNotAnAlbumName(existing.albumName)) return true
         if (isDownloadAlbumId(id)) return false
         if (CollectionKeys.isPlaceholderAlbum(existing.albumName)) return true
         // A library (MediaStore) album the download joined: keep it.
@@ -352,6 +357,8 @@ class DownloadedLibraryIndexer @Inject constructor(
         genre = genre,
         year = year,
         trackNumber = trackNumber,
+        discNumber = discNumber,
+        lyrics = lyrics,
         file = file,
         mimeType = mimeType,
         bitrate = bitrate,

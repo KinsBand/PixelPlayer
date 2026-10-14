@@ -67,6 +67,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.LightMode
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.TouchApp
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.Check
@@ -384,6 +389,13 @@ fun SetupScreen(
                         uiState = uiState,
                         onModeSelected = setupViewModel::setAppThemeMode
                     )
+                    SetupPage.InitialFeatures -> InitialFeaturesPage(
+                        uiState = uiState,
+                        onUpNextToggle = setupViewModel::setUpNextNotification,
+                        onCutoutOverlayToggle = setupViewModel::setEnableCutoutOverlay,
+                        onCutoutTapToggle = setupViewModel::setCutoutTapEnabled,
+                        onSongSearchReaderToggle = setupViewModel::setSongSearchReaderEnabled
+                    )
                     SetupPage.Finish -> FinishPage()
                     SetupPage.LibraryLayout -> LibraryLayoutPage(
                         uiState = uiState,
@@ -542,6 +554,7 @@ sealed class SetupPage {
     object BackupRestore : SetupPage()
     object DirectorySelection : SetupPage()
     object ThemeSelection : SetupPage()
+    object InitialFeatures : SetupPage()
     object NotificationsPermission : SetupPage()
     object AlarmsPermission : SetupPage()
     object LibraryLayout : SetupPage()
@@ -563,6 +576,7 @@ private fun buildSetupPages(sdkInt: Int): List<SetupPage> {
     pages += SetupPage.BackupRestore
     pages += SetupPage.DirectorySelection
     pages += SetupPage.ThemeSelection
+    pages += SetupPage.InitialFeatures
     pages += SetupPage.LibraryLayout
     pages += SetupPage.NavBarLayout
 
@@ -2450,6 +2464,161 @@ fun NavBarPreview(isDefault: Boolean) {
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun InitialFeaturesPage(
+    uiState: SetupUiState,
+    onUpNextToggle: (Boolean) -> Unit,
+    onCutoutOverlayToggle: (Boolean) -> Unit,
+    onCutoutTapToggle: (Boolean) -> Unit = {},
+    onSongSearchReaderToggle: (Boolean) -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "Quick Features",
+                style = MaterialTheme.typography.displayMedium.copy(
+                    fontFamily = GoogleSansRounded,
+                    fontSize = 32.sp
+                ),
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Personalize your playback notifications, camera interactions, and intelligent song reader defaults.",
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Column(
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            // Next Up Notification
+            SetupFeatureToggleCard(
+                title = "Next Up Notification",
+                description = "Quiet system and lockscreen notification showing upcoming queue tracks",
+                icon = androidx.compose.material.icons.Icons.AutoMirrored.Rounded.QueueMusic,
+                checked = uiState.upNextNotification,
+                onCheckedChange = onUpNextToggle
+            )
+
+            // Camera Cutout Island Interaction
+            SetupFeatureToggleCard(
+                title = "Camera Punch-Hole Island",
+                description = "Interactive cutout island animations and tap gestures around front camera",
+                icon = androidx.compose.material.icons.Icons.Rounded.TouchApp,
+                checked = uiState.enableCutoutOverlay,
+                onCheckedChange = onCutoutOverlayToggle
+            )
+
+            // Tap the camera hole to open the island (only matters with the island on).
+            androidx.compose.animation.AnimatedVisibility(visible = uiState.enableCutoutOverlay) {
+                SetupFeatureToggleCard(
+                    title = androidx.compose.ui.res.stringResource(R.string.setup_cutout_tap_title),
+                    description = androidx.compose.ui.res.stringResource(R.string.setup_cutout_tap_description),
+                    icon = androidx.compose.material.icons.Icons.Rounded.TouchApp,
+                    checked = uiState.cutoutTapEnabled,
+                    onCheckedChange = onCutoutTapToggle
+                )
+            }
+
+            // Song Search Reader
+            SetupFeatureToggleCard(
+                title = "PixelPlayer Song Search Reader",
+                description = "Automatically detect and resolve Spotify & YT Music links in search",
+                icon = androidx.compose.material.icons.Icons.Rounded.Search,
+                checked = uiState.songSearchReaderEnabled,
+                onCheckedChange = onSongSearchReaderToggle
+            )
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Text(
+            text = "You can fine-tune these preferences anytime in Settings.",
+            style = MaterialTheme.typography.labelMedium,
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+        )
+    }
+}
+
+@Composable
+private fun SetupFeatureToggleCard(
+    title: String,
+    description: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        ),
+        shape = RoundedCornerShape(24.dp),
+        onClick = { onCheckedChange(!checked) }
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(horizontal = 20.dp, vertical = 16.dp)
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (checked) MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.surfaceContainerHighest
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = if (checked) MaterialTheme.colorScheme.onPrimaryContainer
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange
+            )
         }
     }
 }

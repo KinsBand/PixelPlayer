@@ -399,6 +399,9 @@ fun SettingsScreen(
             } else {
                 // Ten rows in four groups. Every setting has exactly one home under
                 // one of them; see SettingsRegistry for where each one lives.
+                item(key = "profile") {
+                    SettingsProfileCard(onClick = { navController.navigateSafely(Screen.Profile.route) })
+                }
                 item(key = "group_your_app") {
                     SettingsSectionHeader(title = stringResource(R.string.settings_group_your_app))
                     SettingsGroupCard {
@@ -412,10 +415,6 @@ fun SettingsScreen(
                         RootRowDivider()
                         RootCategoryRow(SettingsCategory.LYRICS, currentValue = playerThemeText) {
                             navController.navigateSafely(Screen.SettingsCategory.createRoute(SettingsCategory.LYRICS.id))
-                        }
-                        RootRowDivider()
-                        RootCategoryRow(SettingsCategory.WIDGETS) {
-                            navController.navigateSafely(Screen.SettingsCategory.createRoute(SettingsCategory.WIDGETS.id))
                         }
                     }
                 }
@@ -433,20 +432,15 @@ fun SettingsScreen(
                     }
                 }
 
-                item(key = "group_connections") {
+                // AI is Pixel-only (Gemini Nano); other phones don't get the AI category row.
+                if (com.theveloper.pixelplay.data.ai.nano.DeviceAi.isPixel) item(key = "group_connections") {
                     SettingsSectionHeader(title = stringResource(R.string.settings_group_connections_data))
+                    // Accounts & services and Backup live in Profile (the card at the top of Settings).
                     SettingsGroupCard {
-                        RootCategoryRow(SettingsCategory.SERVICES, currentValue = servicesText) {
-                            navController.navigateSafely(Screen.SettingsCategory.createRoute(SettingsCategory.SERVICES.id))
-                        }
-                        RootRowDivider()
                         RootCategoryRow(SettingsCategory.AI_INTEGRATION, currentValue = aiBadge) {
                             navController.navigateSafely(Screen.SettingsCategory.createRoute(SettingsCategory.AI_INTEGRATION.id))
                         }
-                        RootRowDivider()
-                        RootCategoryRow(SettingsCategory.BACKUP_RESTORE) {
-                            navController.navigateSafely(Screen.SettingsCategory.createRoute(SettingsCategory.BACKUP_RESTORE.id))
-                        }
+                        // Backup & restore (backup files) moved to Profile, next to the account copy.
                     }
                 }
 
@@ -462,12 +456,27 @@ fun SettingsScreen(
             }
         }
 
+        val settingsOnline by com.theveloper.pixelplay.presentation.components.rememberIsOnlineState()
+        val settingsStatusLineColor by androidx.compose.animation.animateColorAsState(
+            com.theveloper.pixelplay.presentation.components.connectivityStatusColor(settingsOnline),
+            androidx.compose.animation.core.tween(
+                com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium2,
+                easing = com.theveloper.pixelplay.ui.theme.MotionTokens.Emphasized
+            ),
+            label = "settingsStatusLine"
+        )
         CollapsibleCommonTopBar(
             title = stringResource(R.string.common_settings),
             collapseFraction = collapseFraction,
             headerHeight = currentTopBarHeightDp,
             onBackClick = onNavigationIconClick,
+            // Always-on online status: a thin green/red line along the header's bottom edge.
+            bottomAccentColor = settingsStatusLineColor,
             actions = {
+                // "Online" / "Offline" in the space between the title and search.
+                com.theveloper.pixelplay.presentation.components.ConnectivityStatusLabel(
+                    modifier = Modifier.padding(end = 12.dp)
+                )
                 FilledIconButton(
                     modifier = Modifier.padding(end = 12.dp),
                     onClick = { isSearchActive = true },
@@ -851,6 +860,7 @@ private fun toggleBindingFor(
     "smooth_corners" -> ToggleBinding(useSmoothCorners) { settingsViewModel.setUseSmoothCorners(it) }
     "disable_blur" -> ToggleBinding(uiState.disableBlurAllOver) { settingsViewModel.setDisableBlurAllOver(it) }
     "show_scrollbar" -> ToggleBinding(uiState.showScrollbar) { settingsViewModel.setShowScrollbar(it) }
+    "practice_mode" -> ToggleBinding(uiState.showPracticeMode) { settingsViewModel.setShowPracticeMode(it) }
     "haptic_feedback" -> ToggleBinding(uiState.hapticsEnabled) { settingsViewModel.setHapticsEnabled(it) }
     "hifi_mode" -> ToggleBinding(uiState.hiFiModeEnabled) { settingsViewModel.setHiFiModeEnabled(it) }
     "replaygain" -> ToggleBinding(uiState.replayGainEnabled) { settingsViewModel.setReplayGainEnabled(it) }
@@ -954,7 +964,6 @@ internal fun getCategoryColors(category: SettingsCategory): Pair<Color, Color> {
         SettingsCategory.PLAYBACK -> colorScheme.primaryContainer to colorScheme.onPrimaryContainer
         SettingsCategory.NOW_PLAYING -> colorScheme.surfaceVariant to colorScheme.onSurfaceVariant
         SettingsCategory.NAVIGATION -> colorScheme.secondaryContainer to colorScheme.onSecondaryContainer
-        SettingsCategory.WIDGETS -> colorScheme.tertiaryContainer to colorScheme.onTertiaryContainer
         SettingsCategory.AI_INTEGRATION -> colorScheme.tertiaryContainer to colorScheme.onTertiaryContainer
         SettingsCategory.BACKUP_RESTORE -> colorScheme.secondaryContainer to colorScheme.onSecondaryContainer
         SettingsCategory.DEVELOPER -> colorScheme.surfaceVariant to colorScheme.onSurfaceVariant

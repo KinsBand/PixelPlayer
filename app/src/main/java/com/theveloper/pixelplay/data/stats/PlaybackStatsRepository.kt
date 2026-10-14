@@ -19,6 +19,7 @@ import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
+import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -77,7 +78,9 @@ class PlaybackStatsRepository @Inject constructor(
         val artist: String,
         val totalDurationMs: Long,
         val playCount: Int,
-        val uniqueSongs: Int
+        val uniqueSongs: Int,
+        /** Art of the artist's most-played song in the range, used for avatars and share cards. */
+        val albumArtUri: String? = null
     )
 
     data class GenrePlaybackSummary(
@@ -160,7 +163,86 @@ class PlaybackStatsRepository @Inject constructor(
         val dayListeningDistribution: DayListeningDistribution?,
         val peakTimeline: TimelineEntry?,
         val peakDayLabel: String?,
-        val peakDayDurationMs: Long
+        val peakDayDurationMs: Long,
+        /** Distinct artists played in the range. */
+        val uniqueArtists: Int = 0,
+        /** Consecutive days up to today (or yesterday) with any listening, over all history. */
+        val currentStreakDays: Int = 0,
+        /** Same-length previous period (last month's same days, etc.). Null for All time. */
+        val previous: PeriodComparison? = null,
+        /** Listening per hour of day (index 0 = midnight), in ms. Empty when nothing was played. */
+        val hourlyDurationsMs: List<Long> = emptyList(),
+        val weekdayHourlyDurationsMs: List<Long> = emptyList(),
+        val weekendHourlyDurationsMs: List<Long> = emptyList(),
+        /** One entry per calendar day of the range (capped to the most recent 400 days). */
+        val dailyTotals: List<DailyTotal> = emptyList(),
+        /** Songs and artists first played in this range. Null for All time or without older history. */
+        val discoveries: Discoveries? = null,
+        /** The song played most in the last few days, if it was played enough to count as "on repeat". */
+        val onRepeat: OnRepeatSong? = null,
+        /** #1 artist of each month (Year and All time only). */
+        val monthlyTopArtists: List<MonthTopArtist> = emptyList(),
+        /** Top albums for the 3x3 share grid (up to 9). */
+        val albumGrid: List<AlbumPlaybackSummary> = emptyList(),
+        /** All-time counted plays of this range's #1 artist (for milestones). */
+        val topArtistAllTimePlays: Int = 0,
+        /** Days with any listening so far this calendar year. */
+        val activeDaysThisYear: Int = 0,
+        /** True when the range was picked with the custom date picker ([range] is then ALL). */
+        val isCustomRange: Boolean = false
+    )
+
+    data class PeriodComparison(
+        val startMillis: Long,
+        val endMillis: Long,
+        val totalDurationMs: Long,
+        val totalPlayCount: Int,
+        val uniqueSongs: Int,
+        val uniqueArtists: Int,
+        /** Same buckets as the current timeline, shifted back one period. */
+        val timeline: List<TimelineEntry>,
+        /** songId -> 1-based rank by listening time. */
+        val songRanks: Map<String, Int>,
+        /** [artistRankKey] -> 1-based rank by listening time. */
+        val artistRanks: Map<String, Int>
+    )
+
+    data class DailyTotal(
+        val date: LocalDate,
+        val durationMs: Long
+    )
+
+    data class NewArtistFind(
+        val artist: String,
+        val firstPlayedAt: Long,
+        val playCount: Int,
+        val albumArtUri: String?
+    )
+
+    data class Discoveries(
+        val newSongs: Int,
+        val newArtists: Int,
+        val newDurationMs: Long,
+        val artists: List<NewArtistFind>,
+        /** New song ids, most listened first (capped), for "Play your new finds". */
+        val newSongIds: List<String>
+    )
+
+    data class OnRepeatSong(
+        val songId: String,
+        val title: String,
+        val artist: String,
+        val albumArtUri: String?,
+        val recentPlays: Int,
+        /** Counted plays per day for the last 11 days, oldest first. */
+        val dailyPlays: List<Int>
+    )
+
+    data class MonthTopArtist(
+        val label: String,
+        val artist: String,
+        val durationMs: Long,
+        val albumArtUri: String?
     )
 
     suspend fun recordPlayback(
@@ -195,7 +277,9 @@ class PlaybackStatsRepository @Inject constructor(
     suspend fun loadSummary(
         range: StatsTimeRange,
         songs: List<Song>,
-        nowMillis: Long = System.currentTimeMillis()
+        nowMillis: Long = System.currentTimeMillis(),
+        /** Inclusive start/end millis of a custom range; [range] should be ALL when set. */
+        customBounds: Pair<Long, Long>? = null
     ): PlaybackStatsSummary = withContext(Dispatchers.IO) {
         val zoneId = ZoneId.systemDefault()
         val allEvents = readEvents()
@@ -204,7 +288,8 @@ class PlaybackStatsRepository @Inject constructor(
             songs = songs,
             nowMillis = nowMillis,
             allEvents = allEvents,
-            zoneId = zoneId
+            zoneId = zoneId,
+            customBounds = customBounds
         )
     }
 
@@ -213,9 +298,14 @@ class PlaybackStatsRepository @Inject constructor(
         songs: List<Song>,
         nowMillis: Long,
         allEvents: List<PlaybackEvent>,
-        zoneId: ZoneId = ZoneId.systemDefault()
+        zoneId: ZoneId = ZoneId.systemDefault(),
+        customBounds: Pair<Long, Long>? = null
     ): PlaybackStatsSummary {
-        val (startBound, endBound) = range.resolveBounds(allEvents, nowMillis, zoneId)
+        val (startBound, endBound) = if (customBounds != null) {
+            Pair<Long?, Long>(customBounds.first, customBounds.second)
+        } else {
+            range.resolveBounds(allEvents, nowMillis, zoneId)
+        }
         val filteredEvents = allEvents.mapNotNull { event ->
             val start = event.startMillis()
             val end = event.endMillis()
@@ -344,7 +434,9 @@ class PlaybackStatsRepository @Inject constructor(
         val longestSessionDuration = sessions.maxOfOrNull { it.totalDuration } ?: 0L
         val averageSessionsPerDay = if (daySpan > 0) totalSessions.toDouble() / daySpan else 0.0
 
-        val timelineBuckets = createTimelineBuckets(
+        val timelineBuckets = if (customBounds != null) {
+            createCustomBuckets(zoneId, customBounds.first, customBounds.second)
+        } else createTimelineBuckets(
             range = range,
             zoneId = zoneId,
             now = Instant.ofEpochMilli(endBound),
@@ -353,7 +445,7 @@ class PlaybackStatsRepository @Inject constructor(
         )
         val timelineEntries = accumulateTimelineEntries(timelineBuckets, overallSpans)
 
-        val topArtists = segmentsBySong.entries
+        val allArtists = segmentsBySong.entries
             .flatMap { (songId, segmentsForSong) ->
                 statsArtistNames(songMap[songId]).map { artist ->
                     ArtistSongPlayback(
@@ -370,20 +462,24 @@ class PlaybackStatsRepository @Inject constructor(
                     .map { it.songId }
                     .toSet()
                     .size
+                val topSongArt = artistSongs
+                    .maxByOrNull { songPlayback -> songPlayback.segments.sumOf { it.durationMs } }
+                    ?.let { songMap[it.songId]?.albumArtUriString }
                 ArtistPlaybackSummary(
                     artist = artist,
                     totalDurationMs = flattened.sumOf { it.durationMs },
                     playCount = flattened.size,
-                    uniqueSongs = uniqueSongCount
+                    uniqueSongs = uniqueSongCount,
+                    albumArtUri = topSongArt
                 )
             }
             .sortedWith(
                 compareByDescending<ArtistPlaybackSummary> { it.totalDurationMs }
                     .thenByDescending { it.playCount }
             )
-            .take(5)
+        val topArtists = allArtists.take(5)
 
-        val topAlbums = segmentsBySong.entries
+        val allAlbums = segmentsBySong.entries
             .groupBy { (songId, _) ->
                 val song = songMap[songId]
                 song?.album?.takeIf { it.isNotBlank() } ?: "Unknown Album"
@@ -407,7 +503,7 @@ class PlaybackStatsRepository @Inject constructor(
                 compareByDescending<AlbumPlaybackSummary> { it.totalDurationMs }
                     .thenByDescending { it.playCount }
             )
-            .take(5)
+        val topAlbums = allAlbums.take(5)
 
         val peakTimeline = timelineEntries
             .filter { it.totalDurationMs > 0L }
@@ -430,6 +526,23 @@ class PlaybackStatsRepository @Inject constructor(
                 endBound = endBound
             )
         } else null
+
+        val extras = computeExtras(
+            range = range,
+            isCustom = customBounds != null,
+            nowMillis = nowMillis,
+            allEvents = allEvents,
+            songMap = songMap,
+            segmentsBySong = segmentsBySong,
+            overallSpans = overallSpans,
+            daySlices = daySlices,
+            startBound = startBound,
+            endBound = endBound,
+            effectiveStart = effectiveStart,
+            timelineBuckets = timelineBuckets,
+            allArtists = allArtists,
+            zoneId = zoneId
+        )
 
         return PlaybackStatsSummary(
             range = range,
@@ -454,8 +567,404 @@ class PlaybackStatsRepository @Inject constructor(
             dayListeningDistribution = dayListeningDistribution,
             peakTimeline = peakTimeline,
             peakDayLabel = peakDayLabel,
-            peakDayDurationMs = peakDayDuration
+            peakDayDurationMs = peakDayDuration,
+            uniqueArtists = extras.uniqueArtists,
+            currentStreakDays = extras.currentStreakDays,
+            previous = extras.previous,
+            hourlyDurationsMs = extras.hourly,
+            weekdayHourlyDurationsMs = extras.weekdayHourly,
+            weekendHourlyDurationsMs = extras.weekendHourly,
+            dailyTotals = extras.dailyTotals,
+            discoveries = extras.discoveries,
+            onRepeat = extras.onRepeat,
+            monthlyTopArtists = extras.monthlyTopArtists,
+            albumGrid = allAlbums.take(9),
+            topArtistAllTimePlays = extras.topArtistAllTimePlays,
+            activeDaysThisYear = extras.activeDaysThisYear,
+            isCustomRange = customBounds != null
         )
+    }
+
+    private data class SummaryExtras(
+        val uniqueArtists: Int,
+        val currentStreakDays: Int,
+        val previous: PeriodComparison?,
+        val hourly: List<Long>,
+        val weekdayHourly: List<Long>,
+        val weekendHourly: List<Long>,
+        val dailyTotals: List<DailyTotal>,
+        val discoveries: Discoveries?,
+        val onRepeat: OnRepeatSong?,
+        val monthlyTopArtists: List<MonthTopArtist>,
+        val topArtistAllTimePlays: Int,
+        val activeDaysThisYear: Int
+    )
+
+    /**
+     * Everything the redesigned Stats screen adds on top of the original summary. Kept apart from
+     * [buildSummaryFromEvents] so the original numbers are computed exactly as before.
+     */
+    private fun computeExtras(
+        range: StatsTimeRange,
+        isCustom: Boolean,
+        nowMillis: Long,
+        allEvents: List<PlaybackEvent>,
+        songMap: Map<String, Song>,
+        segmentsBySong: Map<String, List<PlaybackSegment>>,
+        overallSpans: List<PlaybackSpan>,
+        daySlices: List<DaySlice>,
+        startBound: Long?,
+        endBound: Long,
+        effectiveStart: Long?,
+        timelineBuckets: List<TimelineBucket>,
+        allArtists: List<ArtistPlaybackSummary>,
+        zoneId: ZoneId
+    ): SummaryExtras {
+        // Artist keys per song, computed once (statsArtistNames allocates).
+        val artistKeysBySong = HashMap<String, List<Pair<String, String>>>()
+        fun artistsOf(songId: String): List<Pair<String, String>> = artistKeysBySong.getOrPut(songId) {
+            statsArtistNames(songMap[songId])
+                .map { it.normalizedArtistKey() to it }
+                .distinctBy { it.first }
+        }
+        val unknownKey = UNKNOWN_ARTIST.normalizedArtistKey()
+
+        val uniqueArtists = segmentsBySong.keys
+            .flatMap { songId -> artistsOf(songId).map { it.first } }
+            .toSet()
+            .size
+
+        // Streak and yearly active days use all history, relative to now (not to the range end).
+        val today = Instant.ofEpochMilli(nowMillis).atZone(zoneId).toLocalDate()
+        val playedDays = HashSet<LocalDate>()
+        for (event in allEvents) {
+            if (event.durationMs <= 0L) continue
+            playedDays += Instant.ofEpochMilli(event.startMillis()).atZone(zoneId).toLocalDate()
+            playedDays += Instant.ofEpochMilli(event.endMillis()).atZone(zoneId).toLocalDate()
+        }
+        var streakDay = if (today in playedDays) today else today.minusDays(1)
+        var currentStreak = 0
+        while (streakDay in playedDays) {
+            currentStreak++
+            streakDay = streakDay.minusDays(1)
+        }
+        val activeDaysThisYear = playedDays.count { it.year == today.year && !it.isAfter(today) }
+
+        // Listening clock.
+        val hourly = LongArray(24)
+        val weekdayHourly = LongArray(24)
+        val weekendHourly = LongArray(24)
+        overallSpans.forEach { span ->
+            var cursor = span.startMillis
+            while (cursor < span.endMillis) {
+                val zoned = Instant.ofEpochMilli(cursor).atZone(zoneId)
+                val nextHour = zoned.truncatedTo(ChronoUnit.HOURS).plusHours(1).toInstant().toEpochMilli()
+                val sliceEnd = min(span.endMillis, max(nextHour, cursor + 1L))
+                val sliceMs = sliceEnd - cursor
+                val hour = zoned.hour
+                hourly[hour] += sliceMs
+                val isWeekend = zoned.dayOfWeek == DayOfWeek.SATURDAY || zoned.dayOfWeek == DayOfWeek.SUNDAY
+                if (isWeekend) weekendHourly[hour] += sliceMs else weekdayHourly[hour] += sliceMs
+                cursor = sliceEnd
+            }
+        }
+        val hasClock = hourly.any { it > 0L }
+
+        // Calendar.
+        val byDate = daySlices.groupBy { it.date }.mapValues { (_, slices) -> slices.sumOf { it.durationMs } }
+        val firstDate = (startBound ?: effectiveStart)?.let { Instant.ofEpochMilli(it).atZone(zoneId).toLocalDate() }
+        val lastDate = Instant.ofEpochMilli(endBound).atZone(zoneId).toLocalDate()
+        val dailyTotals = if (firstDate == null || firstDate.isAfter(lastDate)) {
+            emptyList()
+        } else {
+            val boundedFirst = maxOf(firstDate, lastDate.minusDays(MAX_DAILY_TOTAL_DAYS - 1))
+            generateSequence(boundedFirst) { it.plusDays(1) }
+                .takeWhile { !it.isAfter(lastDate) }
+                .map { DailyTotal(it, byDate[it] ?: 0L) }
+                .toList()
+        }
+
+        // Previous period.
+        val shift = previousPeriodShift(range, isCustom, startBound, endBound, zoneId)
+        val previous = if (shift != null && startBound != null) {
+            val prevStart = shift(startBound)
+            val prevEnd = shift(endBound)
+            if (prevEnd > prevStart) {
+                val shiftedBuckets = timelineBuckets.map { bucket ->
+                    bucket.copy(startMillis = shift(bucket.startMillis), endMillis = shift(bucket.endMillis))
+                }
+                buildPeriodComparison(allEvents, songMap, prevStart, prevEnd, shiftedBuckets, ::artistsOf)
+            } else null
+        } else null
+
+        // Discoveries: first play ever (within kept history) falls inside this range.
+        val historyStart = allEvents.minOfOrNull { it.startMillis() }
+        val discoveries = if (
+            startBound != null &&
+            (range != StatsTimeRange.ALL || isCustom) &&
+            historyStart != null && historyStart < startBound
+        ) {
+            val firstPlayBySong = HashMap<String, Long>()
+            for (event in allEvents) {
+                if (event.durationMs <= 0L) continue
+                val start = event.startMillis()
+                val current = firstPlayBySong[event.songId]
+                if (current == null || start < current) firstPlayBySong[event.songId] = start
+            }
+            val firstPlayByArtist = HashMap<String, Long>()
+            val artistName = HashMap<String, String>()
+            firstPlayBySong.forEach { (songId, first) ->
+                artistsOf(songId).forEach { (key, name) ->
+                    if (key == unknownKey) return@forEach
+                    val current = firstPlayByArtist[key]
+                    if (current == null || first < current) firstPlayByArtist[key] = first
+                    artistName.putIfAbsent(key, name)
+                }
+            }
+            val songDuration = segmentsBySong.mapValues { (_, segments) -> segments.sumOf { it.durationMs } }
+            val newSongIds = segmentsBySong.keys
+                .filter { (firstPlayBySong[it] ?: Long.MIN_VALUE) >= startBound }
+                .sortedByDescending { songDuration[it] ?: 0L }
+            val playsByArtist = HashMap<String, Int>()
+            val artByArtist = HashMap<String, String?>()
+            segmentsBySong.forEach { (songId, segments) ->
+                artistsOf(songId).forEach { (key, _) ->
+                    playsByArtist[key] = (playsByArtist[key] ?: 0) + segments.size
+                    if (!artByArtist.containsKey(key)) artByArtist[key] = songMap[songId]?.albumArtUriString
+                }
+            }
+            val newArtistKeys = firstPlayByArtist
+                .filter { (key, first) -> first >= startBound && first <= endBound && (playsByArtist[key] ?: 0) > 0 }
+                .keys
+            Discoveries(
+                newSongs = newSongIds.size,
+                newArtists = newArtistKeys.size,
+                newDurationMs = newSongIds.sumOf { songDuration[it] ?: 0L },
+                artists = newArtistKeys
+                    .map { key ->
+                        NewArtistFind(
+                            artist = artistName[key] ?: key,
+                            firstPlayedAt = firstPlayByArtist[key] ?: startBound,
+                            playCount = playsByArtist[key] ?: 0,
+                            albumArtUri = artByArtist[key]
+                        )
+                    }
+                    .sortedByDescending { it.playCount }
+                    .take(MAX_DISCOVERY_ARTISTS),
+                newSongIds = newSongIds.take(MAX_NEW_SONG_IDS)
+            )
+        } else null
+
+        // On repeat: most counted plays in the last few days, relative to now.
+        val repeatWindowStart = nowMillis - TimeUnit.DAYS.toMillis(ON_REPEAT_WINDOW_DAYS)
+        val recentPlays = HashMap<String, Int>()
+        for (event in allEvents) {
+            if (event.durationMs < MIN_COUNTED_PLAY_MS) continue
+            val end = event.endMillis()
+            if (end in repeatWindowStart..nowMillis) {
+                recentPlays[event.songId] = (recentPlays[event.songId] ?: 0) + 1
+            }
+        }
+        val onRepeat = recentPlays.entries
+            .filter { it.value >= ON_REPEAT_MIN_PLAYS && songMap.containsKey(it.key) }
+            .maxByOrNull { it.value }
+            ?.let { (songId, plays) ->
+                val song = songMap.getValue(songId)
+                val daily = IntArray(ON_REPEAT_DAILY_DAYS)
+                for (event in allEvents) {
+                    if (event.songId != songId || event.durationMs < MIN_COUNTED_PLAY_MS) continue
+                    val date = Instant.ofEpochMilli(event.endMillis()).atZone(zoneId).toLocalDate()
+                    val daysAgo = ChronoUnit.DAYS.between(date, today)
+                    if (daysAgo >= 0L && daysAgo < ON_REPEAT_DAILY_DAYS) {
+                        daily[(ON_REPEAT_DAILY_DAYS - 1 - daysAgo).toInt()]++
+                    }
+                }
+                OnRepeatSong(
+                    songId = songId,
+                    title = song.title.ifBlank { song.path.substringAfterLast('/') },
+                    artist = song.displayArtist.ifBlank { UNKNOWN_ARTIST },
+                    albumArtUri = song.albumArtUriString,
+                    recentPlays = plays,
+                    dailyPlays = daily.toList()
+                )
+            }
+
+        // #1 artist per month.
+        val currentMonth = YearMonth.from(Instant.ofEpochMilli(endBound).atZone(zoneId))
+        val months: List<YearMonth> = when {
+            isCustom -> emptyList()
+            range == StatsTimeRange.YEAR -> (1..currentMonth.monthValue).map { YearMonth.of(currentMonth.year, it) }
+            range == StatsTimeRange.ALL -> (11 downTo 0).map { currentMonth.minusMonths(it.toLong()) }
+            else -> emptyList()
+        }
+        val monthlyTopArtists = if (months.isEmpty()) emptyList() else {
+            val monthSet = months.toSet()
+            val perMonth = HashMap<YearMonth, HashMap<String, Long>>()
+            val names = HashMap<String, String>()
+            segmentsBySong.forEach { (songId, segments) ->
+                val artists = artistsOf(songId).filter { it.first != unknownKey }
+                if (artists.isEmpty()) return@forEach
+                segments.forEach { segment ->
+                    val month = YearMonth.from(Instant.ofEpochMilli(segment.startMillis).atZone(zoneId))
+                    if (month !in monthSet) return@forEach
+                    val bucket = perMonth.getOrPut(month) { HashMap() }
+                    artists.forEach { (key, name) ->
+                        bucket[key] = (bucket[key] ?: 0L) + segment.durationMs
+                        names.putIfAbsent(key, name)
+                    }
+                }
+            }
+            val artByKey = allArtists.associate { it.artist.normalizedArtistKey() to it.albumArtUri }
+            months.mapNotNull { month ->
+                val best = perMonth[month]?.maxByOrNull { it.value } ?: return@mapNotNull null
+                MonthTopArtist(
+                    label = month.month.getDisplayName(TextStyle.SHORT, Locale.getDefault()),
+                    artist = names[best.key] ?: best.key,
+                    durationMs = best.value,
+                    albumArtUri = artByKey[best.key]
+                )
+            }
+        }
+
+        // All-time plays of this range's #1 artist.
+        val topKey = allArtists.firstOrNull()?.artist?.normalizedArtistKey()
+        val topArtistAllTimePlays = if (topKey == null || topKey == unknownKey) 0 else {
+            allEvents.count { event ->
+                event.durationMs >= MIN_COUNTED_PLAY_MS && artistsOf(event.songId).any { it.first == topKey }
+            }
+        }
+
+        return SummaryExtras(
+            uniqueArtists = uniqueArtists,
+            currentStreakDays = currentStreak,
+            previous = previous,
+            hourly = if (hasClock) hourly.toList() else emptyList(),
+            weekdayHourly = if (hasClock) weekdayHourly.toList() else emptyList(),
+            weekendHourly = if (hasClock) weekendHourly.toList() else emptyList(),
+            dailyTotals = dailyTotals,
+            discoveries = discoveries,
+            onRepeat = onRepeat,
+            monthlyTopArtists = monthlyTopArtists,
+            topArtistAllTimePlays = topArtistAllTimePlays,
+            activeDaysThisYear = activeDaysThisYear
+        )
+    }
+
+    private fun buildPeriodComparison(
+        allEvents: List<PlaybackEvent>,
+        songMap: Map<String, Song>,
+        start: Long,
+        end: Long,
+        buckets: List<TimelineBucket>,
+        artistsOf: (String) -> List<Pair<String, String>>
+    ): PeriodComparison {
+        val clipped = clipEvents(allEvents, start, end)
+        val segments = clipped.groupBy { it.songId }.mapValues { (_, events) -> mergeSongEvents(events) }
+        val spans = mergeSpans(segments.values.flatten().map { PlaybackSpan(it.startMillis, it.endMillis) })
+        val artistDurations = HashMap<String, Long>()
+        segments.forEach { (songId, songSegments) ->
+            val duration = songSegments.sumOf { it.durationMs }
+            artistsOf(songId).forEach { (key, _) ->
+                artistDurations[key] = (artistDurations[key] ?: 0L) + duration
+            }
+        }
+        val songRanks = segments.entries
+            .sortedByDescending { entry -> entry.value.sumOf { it.durationMs } }
+            .take(MAX_SONG_STATS_COUNT)
+            .mapIndexed { index, entry -> entry.key to index + 1 }
+            .toMap()
+        val artistRanks = artistDurations.entries
+            .sortedByDescending { it.value }
+            .take(MAX_SONG_STATS_COUNT)
+            .mapIndexed { index, entry -> entry.key to index + 1 }
+            .toMap()
+        return PeriodComparison(
+            startMillis = start,
+            endMillis = end,
+            totalDurationMs = spans.sumOf { it.durationMs },
+            totalPlayCount = segments.values.sumOf { it.size },
+            uniqueSongs = segments.size,
+            uniqueArtists = artistDurations.size,
+            timeline = accumulateTimelineEntries(buckets, spans),
+            songRanks = songRanks,
+            artistRanks = artistRanks
+        )
+    }
+
+    /** Events overlapping [lower, upper], clipped to it (same rules as [buildSummaryFromEvents]). */
+    private fun clipEvents(allEvents: List<PlaybackEvent>, lower: Long, upper: Long): List<PlaybackEvent> {
+        return allEvents.mapNotNull { event ->
+            val start = event.startMillis()
+            val end = event.endMillis()
+            if (end < lower || start > upper) return@mapNotNull null
+            val clippedStart = max(start, lower)
+            val clippedEnd = min(end, upper)
+            val clippedDuration = (clippedEnd - clippedStart).coerceAtLeast(0L)
+            if (clippedDuration <= 0L) return@mapNotNull null
+            event.copy(
+                timestamp = clippedEnd,
+                durationMs = clippedDuration,
+                startTimestamp = clippedStart,
+                endTimestamp = clippedEnd
+            )
+        }
+    }
+
+    /** Maps a timestamp to the same moment one period earlier, or null when there is no previous period. */
+    private fun previousPeriodShift(
+        range: StatsTimeRange,
+        isCustom: Boolean,
+        startBound: Long?,
+        endBound: Long,
+        zoneId: ZoneId
+    ): ((Long) -> Long)? {
+        if (startBound == null) return null
+        if (isCustom) {
+            val length = (endBound - startBound + 1L).coerceAtLeast(1L)
+            return { it - length }
+        }
+        val step: (java.time.ZonedDateTime) -> java.time.ZonedDateTime = when (range) {
+            StatsTimeRange.DAY -> { zoned -> zoned.minusDays(1) }
+            StatsTimeRange.WEEK -> { zoned -> zoned.minusWeeks(1) }
+            StatsTimeRange.MONTH -> { zoned -> zoned.minusMonths(1) }
+            StatsTimeRange.YEAR -> { zoned -> zoned.minusYears(1) }
+            StatsTimeRange.ALL -> return null
+        }
+        return { millis -> step(Instant.ofEpochMilli(millis).atZone(zoneId)).toInstant().toEpochMilli() }
+    }
+
+    /** Timeline buckets for a custom range: days (up to 2 weeks), weeks (up to ~4 months), else months. */
+    private fun createCustomBuckets(zoneId: ZoneId, start: Long, end: Long): List<TimelineBucket> {
+        val startDate = Instant.ofEpochMilli(start).atZone(zoneId).toLocalDate()
+        val endDate = Instant.ofEpochMilli(end).atZone(zoneId).toLocalDate()
+        if (endDate.isBefore(startDate)) return emptyList()
+        val dayCount = ChronoUnit.DAYS.between(startDate, endDate) + 1
+        val dayFormatter = DateTimeFormatter.ofPattern("MMM d", Locale.getDefault())
+        val monthFormatter = DateTimeFormatter.ofPattern("MMM yy", Locale.getDefault())
+        fun bucket(label: String, from: LocalDate, toExclusive: LocalDate) = TimelineBucket(
+            label = label,
+            startMillis = max(from.atStartOfDay(zoneId).toInstant().toEpochMilli(), start),
+            endMillis = min(toExclusive.atStartOfDay(zoneId).toInstant().toEpochMilli(), end + 1L),
+            inclusiveEnd = false
+        )
+        return when {
+            dayCount <= 14 -> (0 until dayCount).map { offset ->
+                val day = startDate.plusDays(offset)
+                bucket(dayFormatter.format(day), day, day.plusDays(1))
+            }
+            dayCount <= 120 -> generateSequence(startDate) { it.plusDays(7) }
+                .takeWhile { !it.isAfter(endDate) }
+                .map { weekStart -> bucket(dayFormatter.format(weekStart), weekStart, minOf(weekStart.plusDays(7), endDate.plusDays(1))) }
+                .toList()
+            else -> generateSequence(YearMonth.from(startDate)) { it.plusMonths(1) }
+                .takeWhile { !it.isAfter(YearMonth.from(endDate)) }
+                .map { month ->
+                    val from = maxOf(month.atDay(1), startDate)
+                    val to = minOf(month.atEndOfMonth().plusDays(1), endDate.plusDays(1))
+                    bucket(monthFormatter.format(month), from, to)
+                }
+                .toList()
+        }
     }
 
     suspend fun exportEventsForBackup(): List<PlaybackEvent> = withContext(Dispatchers.IO) {
@@ -469,6 +978,24 @@ class PlaybackStatsRepository @Inject constructor(
             .asSequence()
             .sortedByDescending { event -> event.timestamp }
             .take(safeLimit)
+            .map { event ->
+                PlaybackHistoryEntry(
+                    songId = event.songId,
+                    timestamp = event.timestamp.coerceAtLeast(0L)
+                )
+            }
+            .toList()
+    }
+
+    /**
+     * Every recorded play (about two years), newest first, for Home's discovery shelves
+     * (Forgotten favourites, On this day, the time-of-day mix). Unlike [loadPlaybackHistory] it
+     * isn't capped by count, so heavy listeners still get plays from months and years ago.
+     */
+    suspend fun loadFullPlaybackHistory(): List<PlaybackHistoryEntry> = withContext(Dispatchers.IO) {
+        readEvents()
+            .asSequence()
+            .sortedByDescending { event -> event.timestamp }
             .map { event ->
                 PlaybackHistoryEntry(
                     songId = event.songId,
@@ -1164,6 +1691,15 @@ class PlaybackStatsRepository @Inject constructor(
         private const val MAX_SONG_STATS_COUNT = 100
         /** A play shorter than this (a skip) doesn't count towards an artist's play counts. */
         const val MIN_COUNTED_PLAY_MS = 30_000L
+        private const val MAX_DAILY_TOTAL_DAYS = 400L
+        private const val MAX_DISCOVERY_ARTISTS = 5
+        private const val MAX_NEW_SONG_IDS = 100
+        private const val ON_REPEAT_WINDOW_DAYS = 3L
+        private const val ON_REPEAT_MIN_PLAYS = 5
+        private const val ON_REPEAT_DAILY_DAYS = 11
+
+        /** Key used by [PeriodComparison.artistRanks]; matches how artists are grouped. */
+        fun artistRankKey(name: String): String = name.trim().lowercase(Locale.ROOT)
     }
 }
 

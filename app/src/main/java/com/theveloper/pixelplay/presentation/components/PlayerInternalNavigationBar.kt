@@ -6,6 +6,10 @@ import android.os.SystemClock
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
@@ -145,10 +149,7 @@ private fun PlayerInternalNavigationItemsRow(
     compactMode: Boolean,
     bottomBarPadding: Dp,
     onSearchIconDoubleTap: () -> Unit,
-    searchQuery: String,
-    onSearchQueryChange: (String) -> Unit,
-    onVoiceSearchClick: () -> Unit = {},
-    voiceCapture: VoiceSpeechCaptureState? = null
+    hasFriendsOnline: Boolean = false
 ) {
     val navBarInsetPadding = sanitizeNavigationBarBottomInset(
         WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -170,7 +171,9 @@ private fun PlayerInternalNavigationItemsRow(
             .padding(start = 10.dp, end = 10.dp, bottom = innerRowPadding)
             .fillMaxWidth()
     }
-    val isOnSearchScreen = currentRoute == Screen.Search.route
+    // Search has no bar of its own in the nav bar any more: the query is typed in the Search
+    // screen's header. The Search tab is a plain tab that lights up while Search is open
+    // (and stays lit above the keyboard while typing).
 
     Row(
         modifier = rowModifier,
@@ -181,22 +184,9 @@ private fun PlayerInternalNavigationItemsRow(
         var lastSearchTapTimestamp by remember { mutableStateOf(0L) }
         navItems.forEach { item ->
             val isSelected = currentRoute != null && currentRoute == item.screen.route
-            val isSearchItem = item.screen.route == Screen.Search.route
+            val showPresenceDot = hasFriendsOnline && item.screen.route == Screen.Friends.route
 
-            val targetWeight = when {
-                isSearchItem -> if (isOnSearchScreen) 2.0f else 1.0f
-                else -> if (isOnSearchScreen) 0.5f else 1.0f
-            }
-            val animatedWeight by animateFloatAsState(
-                targetValue = targetWeight,
-                animationSpec = tween(
-                    durationMillis = 380,
-                    easing = MotionTokens.EmphasizedEasing
-                ),
-                label = "nav_item_weight"
-            )
-
-            val isCompactOrSearch = compactMode || isOnSearchScreen
+            val isCompactOrSearch = compactMode
 
             val selectedColor = MaterialTheme.colorScheme.primary
             val unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -243,27 +233,14 @@ private fun PlayerInternalNavigationItemsRow(
                     val isAlreadySelected = latestCurrentRoute == itemRoute
 
                     if (isSearchTab) {
-                        val now = SystemClock.elapsedRealtime()
-                        val isDoubleTap = now - lastSearchTapTimestamp <= 350L
-                        lastSearchTapTimestamp = now
-
+                        lastSearchTapTimestamp = 0L
                         if (!isAlreadySelected) {
-                            if (!navController.navigateToTopLevelSafely(itemRoute)) {
-                                lastSearchTapTimestamp = 0L
-                                return@click
-                            }
-                        }
-
-                        if (isDoubleTap) {
-                            lastSearchTapTimestamp = 0L
-                            if (isAlreadySelected) {
-                                latestOnSearchIconDoubleTap()
-                            } else {
-                                scope.launch {
-                                    delay(160L)
-                                    latestOnSearchIconDoubleTap()
-                                }
-                            }
+                            // Opening Search focuses its header query by itself.
+                            navController.navigateToTopLevelSafely(itemRoute)
+                        } else {
+                            // Already on Search: tapping the tab puts the cursor back in the
+                            // header's query and brings the keyboard up.
+                            latestOnSearchIconDoubleTap()
                         }
                     } else if (!isAlreadySelected) {
                         lastSearchTapTimestamp = 0L
@@ -274,66 +251,24 @@ private fun PlayerInternalNavigationItemsRow(
                 }
             }
 
-            if (isSearchItem) {
-                AnimatedContent(
-                    targetState = isOnSearchScreen,
-                    transitionSpec = {
-                        (fadeIn(animationSpec = tween(380, easing = MotionTokens.EmphasizedEasing)) togetherWith
-                            fadeOut(animationSpec = tween(380, easing = MotionTokens.EmphasizedEasing))
-                        ).using(SizeTransform(clip = false))
-                    },
-                    label = "search_morph",
-                    modifier = Modifier.weight(animatedWeight)
-                ) { expanded ->
-                    if (expanded) {
-                        InlineNavSearchBar(
-                            query = searchQuery,
-                            onQueryChange = onSearchQueryChange,
-                            onVoiceSearchClick = onVoiceSearchClick,
-                            voiceCapture = voiceCapture,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(if (compactMode) 48.dp else 56.dp)
-                        )
-                    } else {
-                        CustomNavigationBarItem(
-                            modifier = Modifier.fillMaxWidth(),
-                            selected = isSelected,
-                            onClick = onClickLambda,
-                            enabled = currentRoute != null,
-                            compactMode = compactMode,
-                            icon = iconLambda,
-                            selectedIcon = selectedIconLambda,
-                            label = labelLambda,
-                            contentDescription = localizedLabel,
-                            alwaysShowLabel = true,
-                            selectedIconColor = selectedColor,
-                            unselectedIconColor = unselectedColor,
-                            selectedTextColor = selectedColor,
-                            unselectedTextColor = unselectedColor,
-                            indicatorColor = indicatorColorFromTheme
-                        )
-                    }
-                }
-            } else {
-                CustomNavigationBarItem(
-                    modifier = Modifier.weight(animatedWeight),
-                    selected = isSelected,
-                    onClick = onClickLambda,
-                    enabled = currentRoute != null,
-                    compactMode = isCompactOrSearch,
-                    icon = iconLambda,
-                    selectedIcon = selectedIconLambda,
-                    label = labelLambda,
-                    contentDescription = localizedLabel,
-                    alwaysShowLabel = true,
-                    selectedIconColor = selectedColor,
-                    unselectedIconColor = unselectedColor,
-                    selectedTextColor = selectedColor,
-                    unselectedTextColor = unselectedColor,
-                    indicatorColor = indicatorColorFromTheme
-                )
-            }
+            CustomNavigationBarItem(
+                modifier = Modifier.weight(1f),
+                selected = isSelected,
+                onClick = onClickLambda,
+                enabled = currentRoute != null,
+                compactMode = isCompactOrSearch,
+                icon = iconLambda,
+                selectedIcon = selectedIconLambda,
+                label = labelLambda,
+                contentDescription = localizedLabel,
+                alwaysShowLabel = true,
+                selectedIconColor = selectedColor,
+                unselectedIconColor = unselectedColor,
+                selectedTextColor = selectedColor,
+                unselectedTextColor = unselectedColor,
+                indicatorColor = indicatorColorFromTheme,
+                showDot = showPresenceDot
+            )
         }
     }
 }
@@ -347,12 +282,10 @@ fun PlayerInternalNavigationBar(
     navBarStyle: String,
     compactMode: Boolean,
     bottomBarPadding: Dp = 0.dp,
+    /** Tapping the Search tab while Search is open (focuses the header query). */
     onSearchIconDoubleTap: () -> Unit = {},
-    searchQuery: String = "",
-    onSearchQueryChange: (String) -> Unit = {},
-    onVoiceSearchClick: () -> Unit = {},
-    /** Non-null while the voice sheet is open: the inline search bar shows the live transcript. */
-    voiceCapture: VoiceSpeechCaptureState? = null
+    /** At least one friend is listening right now: shows a green dot on the Friends tab. */
+    hasFriendsOnline: Boolean = false
 ) {
     PlayerInternalNavigationItemsRow(
         navController = navController,
@@ -362,167 +295,7 @@ fun PlayerInternalNavigationBar(
         compactMode = compactMode,
         bottomBarPadding = bottomBarPadding,
         onSearchIconDoubleTap = onSearchIconDoubleTap,
-        searchQuery = searchQuery,
-        onSearchQueryChange = onSearchQueryChange,
-        onVoiceSearchClick = onVoiceSearchClick,
-        voiceCapture = voiceCapture,
+        hasFriendsOnline = hasFriendsOnline,
         modifier = modifier
     )
-}
-
-@Composable
-private fun InlineNavSearchBar(
-    query: String,
-    onQueryChange: (String) -> Unit,
-    modifier: Modifier = Modifier,
-    onVoiceSearchClick: () -> Unit = {},
-    voiceCapture: VoiceSpeechCaptureState? = null
-) {
-    val keyboardController = LocalSoftwareKeyboardController.current
-    val focusManager = LocalFocusManager.current
-    val focusRequester = remember { FocusRequester() }
-    val voiceActive = voiceCapture != null
-    val voicePhase = voiceCapture?.phase
-    val voiceLive = voicePhase == VoiceCapturePhase.Listening || voicePhase == VoiceCapturePhase.Hearing
-
-    // Focus the field once, when the user opens Search. Saved across activity recreation, so
-    // coming back to PixelPlayer on the Search tab doesn't pop the keyboard up by itself.
-    var autoFocusDone by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        // Opened by voice search: the words are typed in by the microphone, so no keyboard.
-        if (voiceActive || autoFocusDone) return@LaunchedEffect
-        autoFocusDone = true
-        delay(380L) // wait for 380ms navigation transition to settle before showing keyboard
-        focusRequester.requestFocus()
-        keyboardController?.show()
-    }
-
-    // Leaving the app drops the field's focus and the keyboard. Otherwise, on return, the
-    // focused field brought the keyboard back (or left its insets behind) and the screen acted
-    // as if the search bar were being typed in.
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) {
-                keyboardController?.hide()
-                focusManager.clearFocus(force = true)
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
-    LaunchedEffect(voiceActive) {
-        if (voiceActive) {
-            keyboardController?.hide()
-            focusManager.clearFocus()
-        }
-    }
-
-    val placeholder = when (voicePhase) {
-        null -> stringResource(R.string.search_placeholder)
-        VoiceCapturePhase.Idle -> "Tap the mic to speak"
-        VoiceCapturePhase.NeedsPermission -> "Allow microphone access"
-        VoiceCapturePhase.Listening, VoiceCapturePhase.Hearing -> "Listening\u2026"
-        VoiceCapturePhase.Processing -> "Finding it\u2026"
-        VoiceCapturePhase.Done -> stringResource(R.string.search_placeholder)
-        VoiceCapturePhase.Error,
-        VoiceCapturePhase.Unavailable -> voiceCapture?.errorMessage?.substringBefore(".") ?: "Didn't catch that"
-    }
-    val isVoiceProblem = voicePhase == VoiceCapturePhase.Error || voicePhase == VoiceCapturePhase.Unavailable
-
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 4.dp),
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-    ) {
-        Box(
-            modifier = Modifier.padding(horizontal = 12.dp),
-            contentAlignment = Alignment.CenterStart
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Search,
-                    contentDescription = stringResource(R.string.search_cd_search_icon),
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp)
-                )
-
-                Box(
-                    modifier = Modifier.weight(1f),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    if (query.isEmpty()) {
-                        Text(
-                            text = placeholder,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = if (isVoiceProblem) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
-                            },
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    BasicTextField(
-                        value = query,
-                        onValueChange = onQueryChange,
-                        textStyle = TextStyle(
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontSize = 16.sp
-                        ),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                        keyboardOptions = KeyboardOptions(
-                            imeAction = ImeAction.Search
-                        ),
-                        keyboardActions = KeyboardActions(
-                            onSearch = {
-                                keyboardController?.hide()
-                            }
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .focusRequester(focusRequester)
-                    )
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    VoiceMicButton(
-                        onClick = onVoiceSearchClick,
-                        listening = voiceLive,
-                        level = { voiceCapture?.level ?: 0f },
-                        processing = voicePhase == VoiceCapturePhase.Processing,
-                        error = isVoiceProblem,
-                        size = 30.dp,
-                        iconSize = 20.dp,
-                        contentDescription = if (voiceActive) "Speak again" else "Voice search"
-                    )
-
-                    if (query.isNotEmpty()) {
-                        IconButton(
-                            onClick = { onQueryChange("") },
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Close,
-                                contentDescription = stringResource(R.string.search_cd_clear_search_query),
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
 }

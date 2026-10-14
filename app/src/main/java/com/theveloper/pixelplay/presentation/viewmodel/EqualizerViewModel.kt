@@ -121,6 +121,29 @@ class EqualizerViewModel @Inject constructor(
     private val _systemVolume = MutableStateFlow(0f)
     val systemVolume: StateFlow<Float> = _systemVolume.asStateFlow()
 
+    /** Extreme volume: dB added above the device's maximum by the playback engine. */
+    private val _volumeBoostDb = MutableStateFlow(0f)
+    val volumeBoostDb: StateFlow<Float> = _volumeBoostDb.asStateFlow()
+    val maxVolumeBoostDb: Float = DspEngineManager.MAX_VOLUME_BOOST_DB
+
+    /** Session the live spectrum attaches to. */
+    val audioSessionId: StateFlow<Int> = dualPlayerEngine.activeAudioSessionId
+
+    private var persistVolumeBoostJob: Job? = null
+
+    // Keeps the volume slider in step with the hardware volume keys.
+    private val systemVolumeObserver = object : android.database.ContentObserver(
+        android.os.Handler(android.os.Looper.getMainLooper())
+    ) {
+        override fun onChange(selfChange: Boolean) {
+            loadSystemVolume()
+            // Turning the device volume down while boosted drops Extreme first.
+            if (_systemVolume.value < 0.999f && _volumeBoostDb.value > 0f) {
+                setVolumeBoostDb(0f)
+            }
+        }
+    }
+
     private var persistBandLevelsJob: Job? = null
     private var persistBassBoostJob: Job? = null
     private var persistVirtualizerJob: Job? = null
@@ -138,6 +161,40 @@ class EqualizerViewModel @Inject constructor(
         observeDspAndErgonomicsState()
         observeAudioOutputRouting()
         loadSystemVolume()
+        runCatching {
+            context.contentResolver.registerContentObserver(
+                android.provider.Settings.System.CONTENT_URI, true, systemVolumeObserver
+            )
+        }.onFailure { Timber.tag(TAG).w(it, "Could not observe system volume") }
+        viewModelScope.launch {
+            _volumeBoostDb.value = equalizerPreferencesRepository.volumeBoostDbFlow.first()
+        }
+    }
+
+    /**
+     * One control for the whole output. [level] 0..1 sets the device media volume;
+     * 1..2 keeps it at maximum and adds Extreme gain (up to [maxVolumeBoostDb]).
+     */
+    fun setOutputLevel(level: Float) {
+        val clamped = level.coerceIn(0f, 2f)
+        if (clamped <= 1f) {
+            if (_volumeBoostDb.value > 0f) setVolumeBoostDb(0f)
+            setSystemVolume(clamped)
+        } else {
+            if (_systemVolume.value < 0.999f) setSystemVolume(1f)
+            setVolumeBoostDb((clamped - 1f) * maxVolumeBoostDb)
+        }
+    }
+
+    fun setVolumeBoostDb(db: Float) {
+        val clamped = db.coerceIn(0f, maxVolumeBoostDb)
+        _volumeBoostDb.value = clamped
+        dspEngineManager.setVolumeBoostDb(clamped)
+        persistVolumeBoostJob?.cancel()
+        persistVolumeBoostJob = viewModelScope.launch {
+            delay(SLIDER_PERSIST_DEBOUNCE_MS)
+            equalizerPreferencesRepository.setVolumeBoostDb(clamped)
+        }
     }
 
     private fun loadSystemVolume() {
@@ -151,15 +208,15 @@ class EqualizerViewModel @Inject constructor(
     }
 
     fun setSystemVolume(percent: Float) {
-        viewModelScope.launch {
-            try {
-                val max = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
-                val target = (percent * max).roundToInt().coerceIn(0, max)
+        try {
+            val max = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+            val target = (percent * max).roundToInt().coerceIn(0, max)
+            if (audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) != target) {
                 audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, target, 0)
-                _systemVolume.value = percent
-            } catch (e: Exception) {
-                Timber.tag(TAG).e(e, "Failed to set system volume")
             }
+            _systemVolume.value = percent
+        } catch (e: Exception) {
+            Timber.tag(TAG).e(e, "Failed to set system volume")
         }
     }
 
@@ -949,6 +1006,16 @@ class EqualizerViewModel @Inject constructor(
     }
 
     override fun onCleared() {
+        runCatching { context.contentResolver.unregisterContentObserver(systemVolumeObserver) }
+        persistVolumeBoostJob?.let { job ->
+            if (job.isActive) {
+                job.cancel()
+                val latestBoost = _volumeBoostDb.value
+                CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                    equalizerPreferencesRepository.setVolumeBoostDb(latestBoost)
+                }
+            }
+        }
         persistBandLevelsJob?.cancel()
         persistBassBoostJob?.cancel()
         persistVirtualizerJob?.cancel()

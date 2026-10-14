@@ -173,6 +173,30 @@ class SongMetadataGatherer @Inject constructor(
         return applyCached(song)
     }
 
+    /**
+     * Forgets what was gathered for [song] and searches every source again now ("Search
+     * metadata again" on the Info page, for wrong or corrupted details). Fields the new lookup
+     * finds replace both the song's own and earlier gathered values; anything it can't find
+     * keeps the song's value. Returns null when nothing was found (the old entry is restored).
+     */
+    suspend fun refresh(song: Song, timeoutMs: Long = 25_000): Song? {
+        val key = keyOf(song)
+        val old = cache.remove(key)
+        synchronized(deepInFlight) { deepInFlight.remove(key) }
+        synchronized(inFlight) { inFlight.remove(key) }
+        val fresh = withTimeoutOrNull(timeoutMs) { lookup(song, deep = true) }
+        if (fresh == null || !fresh.found) {
+            if (old != null && cache[key] == null) cache[key] = old
+            scheduleSave()
+            return null
+        }
+        val cleared = song.copy(
+            genre = null, album = "", year = 0, trackNumber = 0, discNumber = null, albumArtist = null,
+        )
+        // Fresh values first, then the song's own for whatever the lookup didn't have.
+        return merge(merge(cleared, fresh), song)
+    }
+
     /** [gatherDeep] without waiting (a song just liked or saved). */
     fun gatherDeepInBackground(song: Song) {
         if (song.isLocal) return
@@ -813,7 +837,10 @@ class SongMetadataGatherer @Inject constructor(
     private fun String?.isBlankOrUnknown() = this.isNullOrBlank() || this.equals("unknown", true) ||
         this.equals("<unknown>", true) || this.equals("Unknown Artist", true) || this.equals("Unknown Genre", true)
 
-    private fun String.isPlaceholderAlbum() = isBlank() || this in PLACEHOLDER_ALBUMS
+    // A duration or "1.2M views" saved as the album (some YouTube Music layouts) is not an album
+    // either, so those songs get their real album looked up too.
+    private fun String.isPlaceholderAlbum() = isBlank() || this in PLACEHOLDER_ALBUMS ||
+        com.theveloper.pixelplay.data.library.CollectionKeys.isNotAnAlbumName(this)
 
     /** YouTube Music songs arrive with "YouTube Music" as their genre; that isn't a genre. */
     private fun String?.isPlaceholderGenre() = isBlankOrUnknown() || this in PLACEHOLDER_GENRES

@@ -89,6 +89,15 @@
 -keep class com.theveloper.pixelplay.data.accounts.** { <fields>; <init>(...); }
 -keep class com.theveloper.pixelplay.data.DailyMixManager$SongEngagementStats { <fields>; <init>(...); }
 -keepclassmembers,allowobfuscation class * { @com.google.gson.annotations.SerializedName <fields>; }
+# Ticketmaster responses and the cached artist tours (read back with Gson).
+-keep class com.theveloper.pixelplay.data.network.ticketmaster.** { <fields>; <init>(...); }
+-keep class com.theveloper.pixelplay.data.tour.ArtistShow { <fields>; <init>(...); }
+-keep class com.theveloper.pixelplay.data.tour.ArtistTour { <fields>; <init>(...); }
+# Spotify artist-page extras cached on disk with Gson (artist page: On Spotify, Merch, Similar).
+-keep class com.theveloper.pixelplay.data.spotify.web.SpotifyArtistExtras { <fields>; <init>(...); }
+-keep class com.theveloper.pixelplay.data.spotify.web.SpotifyArtistPlaylist { <fields>; <init>(...); }
+-keep class com.theveloper.pixelplay.data.spotify.web.SpotifyMerchItem { <fields>; <init>(...); }
+-keep class com.theveloper.pixelplay.data.spotify.web.SpotifyRelatedArtist { <fields>; <init>(...); }
 
 # Netty channel classes are instantiated reflectively and require public no-arg constructors.
 # Without these, release builds can fail with:
@@ -189,9 +198,6 @@
 -keepclassmembers class net.sourceforge.pinyin4j.** { *; }
 -dontwarn net.sourceforge.pinyin4j.**
 
-# Glance Widget
--keep class * extends androidx.glance.appwidget.action.ActionCallback { <init>(); }
-
 # =============================================================================
 # TIMBER LOGGING OPTIMIZATION FOR RELEASE BUILDS
 # =============================================================================
@@ -237,4 +243,19 @@
 -dontwarn jdk.dynalink.**
 -keepclassmembers class * extends com.google.protobuf.GeneratedMessageLite {
     <fields>;
+}
+
+# On-device Gemini Nano (ML Kit GenAI Prompt API, AICore). The library ships its own consumer
+# rules; these keep its public surface intact under R8 in case a beta release misses one.
+-keep class com.google.mlkit.genai.** { *; }
+-dontwarn com.google.mlkit.genai.**
+
+# ONNX Runtime (lyrics word sync): Java classes are looked up from native code by name.
+-keep class ai.onnxruntime.** { *; }
+-dontwarn ai.onnxruntime.**
+
+# Discord Social SDK (discord_partner_sdk.aar): its Java side is called by reflection and from JNI.
+-keep class com.discord.socialsdk.** { *; }
+-keepclasseswithmembernames,includedescriptorclasses class com.theveloper.pixelplay.data.presence.DiscordSocialSdkBridge {
+    native <methods>;
 }

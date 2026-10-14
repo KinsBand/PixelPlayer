@@ -109,6 +109,8 @@ fun LibraryFavoritesTab(
             .map { it.currentSong?.id }
             .distinctUntilChanged()
     }.collectAsStateWithLifecycle(initialValue = null)
+    // One playback collector for all rows (they used to start one each while scrolling).
+    val playbackSnapshot = rememberLibraryPlaybackSnapshot(playerViewModel)
 
     val favoriteSongIds by playerViewModel.favoriteSongIds.collectAsStateWithLifecycle()
     val isCurrentSongFavorite = currentSongId != null && favoriteSongIds.contains(currentSongId)
@@ -263,6 +265,7 @@ fun LibraryFavoritesTab(
                                 LibraryPlaybackAwareSongItem(
                                     song = song,
                                     playerViewModel = playerViewModel,
+                                    playback = playbackSnapshot,
                                     onMoreOptionsClick = { onMoreOptionsClick(song) },
                                     isSelected = selectedSongIds.contains(song.id),
                                     selectionIndex = if (isSelectionMode) getSelectionIndex(song.id) else null,

@@ -1,7 +1,9 @@
 package com.theveloper.pixelplay.data.radio
 
+import android.content.Context
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.model.TrackSource
+import java.util.concurrent.ConcurrentHashMap
 
 /** Turns radio stations into [Song]s so they play through the normal player, queue and notification. */
 object RadioPlayback {
@@ -13,7 +15,38 @@ object RadioPlayback {
 
     fun uuidOf(song: Song?): String? = song?.id?.takeIf { it.startsWith(ID_PREFIX) }?.removePrefix(ID_PREFIX)
 
-    fun toSong(station: RadioStation): Song = Song.emptySong().copy(
+    /** Every station turned into a song this run, so the player can get its full details back. */
+    private val known = ConcurrentHashMap<String, RadioStation>()
+
+    /**
+     * The station behind a radio [song], with homepage and location when we have them:
+     * this run's stations, then favourites / recents / presets, then what the song itself holds.
+     */
+    fun stationFor(context: Context, song: Song?): RadioStation? {
+        val uuid = uuidOf(song) ?: return null
+        known[uuid]?.let { return it }
+        RadioStore.get(context).find(uuid)?.let { return it }
+        val s = song ?: return null
+        return RadioStation(
+            uuid = uuid,
+            name = s.title,
+            streamUrl = s.contentUriString.ifBlank { s.path },
+            favicon = s.albumArtUriString,
+            tags = listOfNotNull(s.genre),
+        )
+    }
+
+    fun toSong(station: RadioStation): Song = run {
+        // Icecast/Shoutcast streams are recorded while you listen so they can be rewound.
+        com.theveloper.pixelplay.data.radio.timeshift.RadioTimeShift.register(
+            streamUrl = station.streamUrl,
+            bitrateKbps = station.bitrate,
+            isHls = station.isHls || station.streamUrl.contains(".m3u8", ignoreCase = true),
+        )
+        toSongInternal(station)
+    }
+
+    private fun toSongInternal(station: RadioStation): Song = Song.emptySong().copy(
         id = ID_PREFIX + station.uuid,
         title = station.name,
         artist = station.subtitle.ifBlank { "Internet radio" },
@@ -31,5 +64,20 @@ object RadioPlayback {
         bitrate = station.bitrate.takeIf { it > 0 }?.times(1000),
         dateAdded = System.currentTimeMillis() / 1000L,
         explicitSource = TrackSource.OTHER,
-    )
+    ).also { known[station.uuid] = station }
+}
+
+/**
+ * "Show this station on the radio map", asked from outside the radio screen (the player's map
+ * button). Held until the radio screen picks it up, so it survives the navigation.
+ */
+object RadioMapFocus {
+    private val _pending = kotlinx.coroutines.flow.MutableStateFlow<RadioStation?>(null)
+    val pending: kotlinx.coroutines.flow.StateFlow<RadioStation?> = _pending
+
+    fun request(station: RadioStation) {
+        _pending.value = station
+    }
+
+    fun consume(): RadioStation? = _pending.value.also { _pending.value = null }
 }

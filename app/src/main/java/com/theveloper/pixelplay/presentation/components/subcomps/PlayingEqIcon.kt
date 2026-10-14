@@ -6,6 +6,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -15,9 +16,31 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import kotlinx.coroutines.isActive
 import kotlin.math.PI
 import kotlin.math.sin
+
+/** Whose playback a visualiser stands for. */
+enum class PlayingSource { MINE, FRIEND }
+
+/**
+ * The one colour rule for playing visualisers: something **you** are playing follows your
+ * wallpaper / Material You colour; a **friend** listening now keeps the friends' live green.
+ * [onCover] = drawn over a darkened cover, so yours uses the light tone of the same colour.
+ */
+@Composable
+fun playingIndicatorColor(source: PlayingSource, onCover: Boolean = false): Color {
+    val scheme = MaterialTheme.colorScheme
+    return when (source) {
+        PlayingSource.FRIEND -> com.theveloper.pixelplay.presentation.components.FriendsLiveGreen
+        PlayingSource.MINE -> when {
+            !onCover -> scheme.primary
+            scheme.surface.luminance() < 0.5f -> scheme.primary
+            else -> scheme.inversePrimary
+        }
+    }
+}
 
 @Composable
 fun PlayingEqIcon(
@@ -79,10 +102,11 @@ fun PlayingEqIcon(
         val w = size.width
         val h = size.height
 
-        // Layout barras
-        val tentativeBarW = w / (bars + (bars - 1) * (1f + gapFraction))
-        val gap = tentativeBarW * gapFraction
-        val barW = tentativeBarW
+        // Layout barras: bars + gaps fill the canvas and the group is centred horizontally.
+        val barW = w / (bars + (bars - 1) * gapFraction)
+        val gap = barW * gapFraction
+        val totalBarsW = (bars * barW) + ((bars - 1) * gap)
+        val startX = (w - totalBarsW) / 2f
         val corner = CornerRadius(barW / 2f, barW / 2f)
 
         repeat(bars) { i ->
@@ -107,7 +131,7 @@ fun PlayingEqIcon(
             val blendedH = dotH + (barH - dotH) * activity
 
             val top = (h - blendedH) / 2f
-            val left = i * (barW + gap)
+            val left = startX + (i * (barW + gap))
 
             drawRoundRect(
                 color = color,

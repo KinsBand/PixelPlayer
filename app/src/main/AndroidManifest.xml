@@ -42,6 +42,8 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- For disabling battery optimization -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Discord Social SDK: its manifest asks for this for voice chat, which PixelPlayer doesn't use. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" tools:node="remove" />
     <queries>
         <intent>
             <action android:name="android.speech.RecognitionService" />
@@ -49,12 +51,19 @@
         <package android:name="com.songsterr" />
         <package android:name="com.google.android.googlequicksearchbox" />
         <package android:name="com.android.chrome" />
+        <!-- Discord status: is the Discord app installed? (the status is shown through it) -->
+        <package android:name="com.discord" />
         <package android:name="com.google.android.as" />
         <intent>
             <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
         </intent>
         <intent>
             <action android:name="com.google.android.googlequicksearchbox.action.INTENT_SOUND_SEARCH" />
+        </intent>
+        <!-- Song search: bring back the app the user was in (its launcher activity). -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
         </intent>
     </queries>
 
@@ -75,6 +84,8 @@
         android:usesCleartextTraffic="false"
         android:networkSecurityConfig="@xml/network_security_config"
         tools:targetApi="31">
+        <!-- Gemma 4 (LiteRT-LM) runs on the GPU through OpenCL where the phone has it; optional. -->
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
         <service
             android:name=".data.recognition.ambient.AmbientListeningService"
             android:exported="false"
@@ -177,6 +188,21 @@
                 android:resource="@xml/cutout_accessibility_service_config" />
         </service>
 
+        <!-- Reads Google's song search result (Listen / Hum) only while PixelPlayer has just opened it. -->
+        <service
+            android:name=".data.recognition.SongSearchResultReader"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:label="@string/song_search_reader_service_name"
+            android:description="@string/song_search_reader_description"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/song_search_reader_config" />
+        </service>
+
         <meta-data
             android:name="com.google.android.gms.car.application"
             android:resource="@xml/automotive_app_desc" />
@@ -185,60 +211,12 @@
             android:name=".data.youtube.DownloadActionReceiver"
             android:exported="false" />
 
-        <receiver
-            android:name=".ui.glancewidget.PixelPlayGlanceWidgetReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/pixelplay_glance_widget_info" />
-        </receiver>
 
-        <receiver
-            android:name=".ui.glancewidget.BarWidget4x1Receiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/bar_widget_4x1_info" />
-        </receiver>
 
-        <receiver
-            android:name=".ui.glancewidget.ControlWidget4x2Receiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/control_widget_4x2_info" />
-        </receiver>
 
-        <receiver
-            android:name=".ui.glancewidget.GridWidget2x2Receiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/grid_widget_2x2_info" />
-        </receiver>
 
-        <receiver
-            android:name=".ui.glancewidget.TurntableWidgetReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/turntable_widget_info" />
-        </receiver>
+
+
 
         <receiver android:name=".data.service.SleepTimerReceiver" android:exported="false" />
 
@@ -264,11 +242,6 @@
                 tools:node="remove" />
         </provider>
 
-        <receiver android:name=".ui.glancewidget.WidgetUpdateReceiver" android:exported="false">
-            <intent-filter>
-                <action android:name="com.theveloper.pixelplay.ACTION_WIDGET_UPDATE_PLAYBACK_STATE" />
-            </intent-filter>
-        </receiver>
 
         <service
             android:name=".data.service.http.MediaFileHttpServerService"
@@ -338,6 +311,11 @@
             </intent-filter>
         </service>
 
+        <!-- Discord Social SDK: its exported sign-in screen is only for account linking, which
+             PixelPlayer doesn't use (the status goes through the Discord app without sign-in). -->
+        <activity
+            android:name="com.discord.socialsdk.AuthenticationActivity"
+            tools:node="remove" />
     </application>
 
 </manifest>

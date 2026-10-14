@@ -44,6 +44,11 @@ data class SetupUiState(
     val navBarCornerRadius: Int = 28,
     val alarmsPermissionGranted: Boolean = false,
     val appThemeMode: String = AppThemeMode.DARK,
+    val upNextNotification: Boolean = false,
+    val enableCutoutOverlay: Boolean = false,
+    /** Tap the camera hole to open the island. */
+    val cutoutTapEnabled: Boolean = true,
+    val songSearchReaderEnabled: Boolean = true,
     val isInspectingBackup: Boolean = false,
     val isRestoringBackup: Boolean = false,
     val restorePlan: RestorePlan? = null,
@@ -110,9 +115,22 @@ class SetupViewModel @Inject constructor(
                 userPreferencesRepository.libraryNavigationModeFlow,
                 userPreferencesRepository.navBarStyleFlow,
                 userPreferencesRepository.navBarCornerRadiusFlow,
-                themePreferencesRepository.appThemeModeFlow
-            ) { blocked, mode, style, radius, appThemeMode ->
-                SetupPrefsUpdate(blocked, mode, style, radius, appThemeMode)
+                themePreferencesRepository.appThemeModeFlow,
+                userPreferencesRepository.upNextNotificationFlow,
+                userPreferencesRepository.enableCutoutOverlayFlow,
+                userPreferencesRepository.songSearchReaderEnabledFlow
+            ) { args: Array<Any?> ->
+                @Suppress("UNCHECKED_CAST")
+                SetupPrefsUpdate(
+                    blocked = args[0] as Set<String>,
+                    mode = args[1] as String,
+                    style = args[2] as String,
+                    radius = args[3] as Int,
+                    appThemeMode = args[4] as String,
+                    upNextNotification = args[5] as Boolean,
+                    enableCutoutOverlay = args[6] as Boolean,
+                    songSearchReaderEnabled = args[7] as Boolean
+                )
             }.collect { update ->
                 _uiState.update { state ->
                     state.copy(
@@ -120,9 +138,18 @@ class SetupViewModel @Inject constructor(
                         libraryNavigationMode = update.mode,
                         navBarStyle = update.style,
                         navBarCornerRadius = update.radius,
-                        appThemeMode = update.appThemeMode
+                        appThemeMode = update.appThemeMode,
+                        upNextNotification = update.upNextNotification,
+                        enableCutoutOverlay = update.enableCutoutOverlay,
+                        songSearchReaderEnabled = update.songSearchReaderEnabled
                     )
                 }
+            }
+        }
+
+        viewModelScope.launch {
+            userPreferencesRepository.cutoutTapEnabledFlow.collect { enabled ->
+                _uiState.update { it.copy(cutoutTapEnabled = enabled) }
             }
         }
 
@@ -138,8 +165,27 @@ class SetupViewModel @Inject constructor(
         val mode: String,
         val style: String,
         val radius: Int,
-        val appThemeMode: String
+        val appThemeMode: String,
+        val upNextNotification: Boolean,
+        val enableCutoutOverlay: Boolean,
+        val songSearchReaderEnabled: Boolean
     )
+
+    fun setUpNextNotification(enabled: Boolean) {
+        viewModelScope.launch { userPreferencesRepository.setUpNextNotification(enabled) }
+    }
+
+    fun setEnableCutoutOverlay(enabled: Boolean) {
+        viewModelScope.launch { userPreferencesRepository.setEnableCutoutOverlay(enabled) }
+    }
+
+    fun setCutoutTapEnabled(enabled: Boolean) {
+        viewModelScope.launch { userPreferencesRepository.setCutoutTapEnabled(enabled) }
+    }
+
+    fun setSongSearchReaderEnabled(enabled: Boolean) {
+        viewModelScope.launch { userPreferencesRepository.setSongSearchReaderEnabled(enabled) }
+    }
 
     fun checkPermissions(context: Context) {
         val mediaPermissionGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

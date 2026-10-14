@@ -60,12 +60,23 @@ class SoundFontSynth(
     var masterGain = 1.0f
     var reverbLevel = 0.9f
 
+    /**
+     * Playback speed the score was built at (Tabs speed, 0.5…2). Above 1 the notes come closer
+     * together, so release tails and chokes shorten with it (floor 5 ms) and voices don't pile up.
+     * Set before the first note.
+     */
+    var scoreSpeed = 1f
+
     private val reverb = Freeverb(sampleRate)
     private val blockL = FloatArray(BLOCK)
     private val blockR = FloatArray(BLOCK)
     private val sendL = FloatArray(BLOCK)
     private val sendR = FloatArray(BLOCK)
     private var limGain = 1f
+    // Last output of voices cut by a hard steal, decaying over ~3 ms so the cut doesn't click.
+    private var tailL = 0f
+    private var tailR = 0f
+    private val tailCoef = exp(-1f / (STEAL_FADE_MS * 0.001f * sampleRate))
 
     // ── MIDI ──────────────────────────────────────────────────────────────────
 
@@ -110,9 +121,18 @@ class SoundFontSynth(
         c.bendSemis = (value14 - 8192) / 8192f * c.bendRange
     }
 
+    /**
+     * Swaps melodic General MIDI programs for a sound style (8-bit, synth…). Drums (channel 10)
+     * are never remapped. Null keeps every program as written.
+     */
+    @Volatile var programMap: ((Int) -> Int)? = null
+
+    private fun mapped(channel: Int, program: Int): Int =
+        if (channel == 9) program else programMap?.invoke(program) ?: program
+
     fun noteOn(ch: Int, key: Int, vel: Int) {
         val c = channels[ch and 15]
-        val preset = font.preset(c.bank, c.program) ?: return
+        val preset = font.preset(c.bank, mapped(c.index, c.program)) ?: return
         startVoices(preset, key, vel.coerceIn(1, 127), key.toFloat(), c, null)
     }
 
@@ -179,7 +199,7 @@ class SoundFontSynth(
     }
 
     fun startNote(bank: Int, program: Int, key: Int, vel: Int, pitch: Float, style: NoteStyle): Note? {
-        val preset = font.preset(bank, program) ?: return null
+        val preset = font.preset(bank, if (bank == 128) program else programMap?.invoke(program) ?: program) ?: return null
         return startVoices(preset, key.coerceIn(0, 127), vel.coerceIn(1, 127), pitch, null, style)
     }
 
@@ -205,16 +225,43 @@ class SoundFontSynth(
     }
 
     private fun allocate(): Int {
+        var free = -1
+        var freeCount = 0
+        for (i in voices.indices) if (!voices[i].active) { if (free < 0) free = i; freeCount++ }
+        if (free >= 0) {
+            // Nearly full: fade the next steal candidate out over a few ms now, so a slot is
+            // already free (and silent) when a later note needs one.
+            if (freeCount <= STEAL_RESERVE) {
+                val c = stealCandidate()
+                if (c >= 0) voices[c].fadeForSteal()
+            }
+            return free
+        }
+        // No slot at all: cut the candidate, carrying its last output into a short decaying
+        // tail so the cut is a quick fade rather than a click.
+        val best = stealCandidate().let { if (it >= 0) it else 0 }
+        val v = voices[best]
+        tailL += v.lastL
+        tailR += v.lastR
+        v.kill()
+        return best
+    }
+
+    /** The quietest released voice, else the oldest; skips voices already fading for a steal. */
+    private fun stealCandidate(): Int {
         var best = -1
-        for (i in voices.indices) if (!voices[i].active) return i
-        // Steal: the quietest released voice, else the oldest.
         var bestScore = Float.MAX_VALUE
         for (i in voices.indices) {
             val v = voices[i]
+            if (!v.active || v.stealFading) continue
             val score = (if (v.released) 0f else 10f) + v.amp + v.serial.toFloat() * 1e-9f
             if (score < bestScore) { bestScore = score; best = i }
         }
-        voices[best].kill()
+        if (best < 0) {
+            // Everything left is already fading: take the oldest of those.
+            var oldest = Long.MAX_VALUE
+            for (i in voices.indices) if (voices[i].active && voices[i].serial < oldest) { oldest = voices[i].serial; best = i }
+        }
         return best
     }
 
@@ -234,8 +281,10 @@ class SoundFontSynth(
             for (v in voices) if (v.active) v.render(n)
             reverb.process(sendL, sendR, blockL, blockR, n, reverbLevel)
             for (i in 0 until n) {
-                var l = blockL[i] * masterGain
-                var r = blockR[i] * masterGain
+                var l = (blockL[i] + tailL) * masterGain
+                var r = (blockR[i] + tailR) * masterGain
+                tailL *= tailCoef
+                tailR *= tailCoef
                 // Soft peak limiter: instant attack, ~120 ms release, ceiling −1 dBFS.
                 val peak = max(abs(l), abs(r))
                 val target = if (peak * limGain > CEILING) CEILING / peak else 1f
@@ -262,6 +311,11 @@ class SoundFontSynth(
         var sustained = false
         var pitch = 60f
         var amp = 0f
+        /** Being faded out because the voice pool is nearly full. */
+        var stealFading = false
+        /** Last output sample (after pan), for a click-free hard steal. */
+        var lastL = 0f
+        var lastR = 0f
 
         private var chan: Channel? = null
         private lateinit var gen: IntArray
@@ -316,6 +370,7 @@ class SoundFontSynth(
 
         fun start(r: SoundFont.Region, k: Int, velocity: Int, p: Float, ch: Channel?, style: NoteStyle?, s: Long, preset: Int) {
             active = true; released = false; sustained = false
+            stealFading = false; lastL = 0f; lastR = 0f
             serial = s; presetId = preset
             gen = r.gen; chan = ch; channel = ch?.index ?: -1
             key = k; vel = velocity; pitch = p
@@ -361,9 +416,14 @@ class SoundFontSynth(
             vHold = tc(G.HOLD_VOL_ENV, G.KEY_TO_VOL_ENV_HOLD); vDecay = tc(G.DECAY_VOL_ENV, G.KEY_TO_VOL_ENV_DECAY)
             vSustainDb = gen[G.SUSTAIN_VOL_ENV].coerceIn(0, 1440) / 10f
             vRelease = max(tc(G.RELEASE_VOL_ENV), 0.006f * sampleRate)
+            // Faster tempo: shorter tails, so dense passages don't exhaust the voice pool.
+            if (scoreSpeed > 1f) vRelease = max(vRelease / scoreSpeed, 0.005f * sampleRate)
             vStage = STAGE_DELAY; vTime = 0f; vDb = 0f; amp = 0f
             fadeIn = (style?.fadeInMs ?: 0f) * sampleRate / 1000f
-            chokeCoef = style?.chokeMs?.takeIf { it > 0f }?.let { exp(-BLOCK / (it * sampleRate / 1000f)) } ?: 1f
+            chokeCoef = style?.chokeMs?.takeIf { it > 0f }?.let {
+                val ms = if (scoreSpeed > 1f) it / scoreSpeed else it
+                exp(-BLOCK / (ms * sampleRate / 1000f))
+            } ?: 1f
             chokeAmp = 1f
 
             mDelay = tc(G.DELAY_MOD_ENV); mAttack = tc(G.ATTACK_MOD_ENV)
@@ -401,6 +461,12 @@ class SoundFontSynth(
         fun releaseIn(ms: Float) {
             released = true
             beginRelease(max(1f, ms) * sampleRate / 1000f)
+        }
+
+        /** A quick fade (≈[STEAL_FADE_MS]) that frees this voice for a new note. */
+        fun fadeForSteal() {
+            stealFading = true
+            releaseIn(STEAL_FADE_MS)
         }
 
         private fun beginRelease(len: Float) {
@@ -502,6 +568,7 @@ class SoundFontSynth(
             val send = sendGain
             val data = font.samples
             val lastIndex = font.sampleCount - 1
+            var lastOut = 0f
             for (i in 0 until n) {
                 val ip = pos.toInt()
                 val frac = (pos - ip).toFloat()
@@ -529,6 +596,7 @@ class SoundFontSynth(
                 }
                 g += gStep
                 val out = s * g
+                lastOut = out
                 blockL[i] += out * lg
                 blockR[i] += out * rg
                 sendL[i] += out * lg * send
@@ -543,6 +611,8 @@ class SoundFontSynth(
                     return
                 }
             }
+            lastL = lastOut * lg
+            lastR = lastOut * rg
         }
 
         private fun setFilter(fcCents: Float) {
@@ -571,6 +641,10 @@ class SoundFontSynth(
         private const val STAGE_RELEASE = 5
         private const val CEILING = 0.89f
         private const val LIM_RELEASE = 0.0002f
+        /** Free voices left before the next steal candidate starts fading out early. */
+        private const val STEAL_RESERVE = 4
+        /** Fade used when a voice is stolen. */
+        private const val STEAL_FADE_MS = 3f
     }
 }
 

@@ -88,7 +88,9 @@ fun rememberVoiceSearchDeckCoordinator(
 fun Modifier.voiceSearchSwipeToDismiss(
     coordinator: VoiceSearchDeckCoordinator,
     sheetHeightPx: () -> Float,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    /** Off while typing in the sheet, so dragging its list can't pull the sheet down. */
+    enabled: Boolean = true
 ): Modifier = composed {
     val scope = rememberCoroutineScope()
     val latestOnDismiss by rememberUpdatedState(onDismiss)
@@ -102,6 +104,7 @@ fun Modifier.voiceSearchSwipeToDismiss(
     draggable(
         state = dragState,
         orientation = Orientation.Vertical,
+        enabled = enabled,
         onDragStopped = { velocity ->
             if (coordinator.animatable.value < 0.67f || velocity > 1200f) {
                 latestOnDismiss()

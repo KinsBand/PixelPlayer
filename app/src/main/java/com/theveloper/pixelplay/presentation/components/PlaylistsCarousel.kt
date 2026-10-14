@@ -145,7 +145,7 @@ fun PlaylistsCarousel(
 }
 
 @Composable
-private fun FriendFilterAvatar(
+internal fun FriendFilterAvatar(
     friend: PlaylistFriendFilter,
     selected: Boolean,
     dimmed: Boolean,
@@ -282,11 +282,22 @@ private fun GridCollageCard(
                     fontWeight = FontWeight.Bold,
                     color = OliveCream
                 )
-                Text(
-                    text = if (likedSongs.size == 1) "1 liked song" else "${likedSongs.size} liked songs",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = OliveCream.copy(alpha = 0.6f)
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.MusicNote,
+                        contentDescription = null,
+                        tint = OliveCream.copy(alpha = 0.6f),
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Text(
+                        text = "${likedSongs.size}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OliveCream.copy(alpha = 0.6f)
+                    )
+                }
             }
         }
     }
@@ -363,13 +374,24 @@ private fun PlaylistCarouselCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Text(
-                    text = "${playlist.songIds.size} songs" + if (playlist.ownerName.isNotBlank()) " · ${playlist.ownerName}" else "",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = OliveCream.copy(alpha = 0.6f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.MusicNote,
+                        contentDescription = null,
+                        tint = OliveCream.copy(alpha = 0.6f),
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Text(
+                        text = "${playlist.songIds.size}" + if (playlist.ownerName.isNotBlank()) " · ${playlist.ownerName}" else "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OliveCream.copy(alpha = 0.6f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
     }

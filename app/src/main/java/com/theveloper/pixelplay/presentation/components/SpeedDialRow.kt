@@ -120,11 +120,16 @@ private fun SpeedDialTileCard(
 ) {
     val colors = MaterialTheme.colorScheme
     val shape = RoundedCornerShape(18.dp)
+    val offlineBlocked = when (tile) {
+        is SpeedDialTile.MixTile -> rememberSongsOfflineBlocked(tile.mix.songs)
+        is SpeedDialTile.SongTile -> rememberSongOfflineBlocked(tile.song)
+    }
 
     Box(
         modifier = modifier
             .width(size.dp)
             .clip(shape)
+            .offlineVeil(offlineBlocked, shape)
             .background(colors.surfaceContainer)
             .clickable(onClick = onClick)
     ) {

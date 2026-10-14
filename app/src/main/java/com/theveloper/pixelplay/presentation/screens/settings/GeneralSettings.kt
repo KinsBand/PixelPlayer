@@ -27,7 +27,6 @@ import androidx.compose.ui.res.stringResource
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.preferences.AppLanguage
 import com.theveloper.pixelplay.data.preferences.LaunchTab
-import com.theveloper.pixelplay.data.preferences.LibraryNavigationMode
 import com.theveloper.pixelplay.presentation.screens.SettingsSegmentedSelectorItem
 import com.theveloper.pixelplay.presentation.screens.SwitchSettingItem
 import com.theveloper.pixelplay.presentation.screens.ThemeSelectorItem
@@ -39,7 +38,7 @@ import com.theveloper.pixelplay.presentation.viewmodel.SettingsViewModel
  * opens on, and gestures and haptics. Full-screen mode lives in Appearance.
  *
  * Collects what used to be split between Appearance (language, full screen) and the old
- * Navigation page (starting tab, library layout, gestures, haptics).
+ * Navigation page (starting tab, gestures, haptics). Library navigation lives in Appearance.
  */
 @Composable
 internal fun GeneralSettingsContent(
@@ -79,18 +78,6 @@ internal fun GeneralSettingsContent(
             onOptionSelected = { tab: String -> settingsViewModel.setLaunchTab(tab) },
             leadingIcon = { Icon(painterResource(R.drawable.tab_24), null, tint = MaterialTheme.colorScheme.secondary) },
             settingKey = "default_tab"
-        )
-        ThemeSelectorItem(
-            label = stringResource(R.string.settings_library_navigation_title),
-            description = stringResource(R.string.settings_library_navigation_subtitle),
-            options = mapOf(
-                LibraryNavigationMode.TAB_ROW to stringResource(R.string.settings_library_nav_tab_row),
-                LibraryNavigationMode.COMPACT_PILL to stringResource(R.string.settings_library_nav_compact_pill)
-            ),
-            selectedKey = uiState.libraryNavigationMode,
-            onSelectionChanged = { settingsViewModel.setLibraryNavigationMode(it) },
-            leadingIcon = { Icon(painterResource(R.drawable.rounded_library_music_24), null, tint = MaterialTheme.colorScheme.secondary) },
-            settingKey = "library_navigation"
         )
     }
 

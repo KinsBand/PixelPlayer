@@ -5,6 +5,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Wifi
+import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.HighQuality
+import androidx.compose.material.icons.rounded.SdCard
+import com.theveloper.pixelplay.data.youtube.DownloadQuality
+import com.theveloper.pixelplay.presentation.components.player.QualityStarButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -124,6 +129,42 @@ internal fun LikedSongsDownloadSection(
             onCheckedChange = { viewModel.setWifiOnly(it) },
             leadingIcon = { Icon(Icons.Rounded.Wifi, null, tint = MaterialTheme.colorScheme.secondary) }
         )
+    }
+
+    // Download quality: star one and the download button uses it straight away (hold the button
+    // in the player to pick another quality for one song).
+    val starred by viewModel.preferredQuality.collectAsStateWithLifecycle()
+    SettingsSubsection(title = "Download quality") {
+        DownloadQuality.entries.forEach { quality ->
+            val isStarred = starred == quality
+            val detail = when (quality) {
+                DownloadQuality.HIGH -> "Best available (usually Opus ~160 kbps)"
+                DownloadQuality.MEDIUM -> "AAC ~128 kbps, fully tagged files"
+                DownloadQuality.LOW -> "Smallest files (~48–70 kbps)"
+            }
+            SettingsItem(
+                settingKey = "download_quality_${quality.name.lowercase()}",
+                title = quality.label,
+                subtitle = if (isStarred) "$detail · default for the download button" else detail,
+                leadingIcon = {
+                    Icon(
+                        when (quality) {
+                            DownloadQuality.HIGH -> Icons.Rounded.HighQuality
+                            DownloadQuality.MEDIUM -> Icons.Rounded.GraphicEq
+                            DownloadQuality.LOW -> Icons.Rounded.SdCard
+                        },
+                        null,
+                        tint = if (isStarred) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
+                    )
+                },
+                trailingIcon = {
+                    QualityStarButton(quality = quality, starred = isStarred, onToggle = {
+                        viewModel.setPreferredQuality(if (isStarred) null else quality)
+                    })
+                },
+                onClick = { viewModel.setPreferredQuality(if (isStarred) null else quality) }
+            )
+        }
     }
 
     SettingsConfirmSheet(request = confirm, onDismiss = { confirm = null })

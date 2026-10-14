@@ -5,11 +5,13 @@ import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -28,6 +30,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
@@ -62,6 +65,7 @@ fun SmartImage(
     placeHolderBackgroundColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
     songId: String? = null,
     isDownloading: Boolean = false,
+    indicatorSize: Dp? = null,
     onState: ((AsyncImagePainter.State) -> Unit)? = null
 ) {
     val context = LocalContext.current
@@ -71,9 +75,11 @@ fun SmartImage(
     }
     val downloading = isDownloading || (songId != null && LocalDownloadingSongIds.current.contains(songId))
 
+    val effectiveModel = if (model is String && model.isBlank()) null else model
+
     val imageContent = @Composable { imageModifier: Modifier ->
-        if (model == null || model is ImageVector || model is Painter || model is ImageBitmap || model is Bitmap) {
-            if (model == null) {
+        if (effectiveModel == null || effectiveModel is ImageVector || effectiveModel is Painter || effectiveModel is ImageBitmap || effectiveModel is Bitmap) {
+            if (effectiveModel == null) {
                 Placeholder(
                     modifier = imageModifier,
                     drawableResId = placeholderResId,
@@ -84,7 +90,7 @@ fun SmartImage(
                 )
             } else {
                 handleDirectModel(
-                    data = model,
+                    data = effectiveModel,
                     modifier = imageModifier,
                     contentDescription = contentDescription,
                     contentScale = contentScale,
@@ -95,7 +101,7 @@ fun SmartImage(
         } else {
             val request = remember(
                 context,
-                model,
+                effectiveModel,
                 crossfadeDurationMillis,
                 useDiskCache,
                 useMemoryCache,
@@ -136,7 +142,8 @@ fun SmartImage(
                         is AsyncImagePainter.State.Success -> {
                             SubcomposeAsyncImageContent()
                         }
-                        is AsyncImagePainter.State.Loading -> {
+                        is AsyncImagePainter.State.Loading,
+                        is AsyncImagePainter.State.Empty -> {
                             if (placeholderModel != null) {
                                 AsyncImage(
                                     model = placeholderModel,
@@ -147,13 +154,11 @@ fun SmartImage(
                                     alpha = alpha
                                 )
                             } else {
-                                Placeholder(
-                                    modifier = Modifier.fillMaxSize(),
-                                    drawableResId = placeholderResId,
-                                    contentDescription = contentDescription,
+                                CoverLoadingIndicator(
+                                    modifier = Modifier.fillMaxSize().alpha(alpha),
                                     containerColor = placeHolderBackgroundColor,
-                                    iconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    alpha = alpha
+                                    indicatorColor = MaterialTheme.colorScheme.primary,
+                                    indicatorSize = indicatorSize
                                 )
                             }
                         }
@@ -170,16 +175,48 @@ fun SmartImage(
                     }
                 }
             } else {
-                AsyncImage(
-                    model = request,
-                    contentDescription = contentDescription,
-                    modifier = imageModifier,
-                    contentScale = contentScale,
-                    colorFilter = colorFilter,
-                    alpha = alpha,
-                    placeholder = painterResource(placeholderResId),
-                    error = painterResource(errorResId)
-                )
+                var asyncState by remember(request) {
+                    mutableStateOf<AsyncImagePainter.State>(AsyncImagePainter.State.Empty)
+                }
+                Box(
+                    modifier = imageModifier.background(placeHolderBackgroundColor),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AsyncImage(
+                        model = request,
+                        contentDescription = contentDescription,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = contentScale,
+                        colorFilter = colorFilter,
+                        alpha = alpha,
+                        onState = { state ->
+                            asyncState = state
+                            onState?.invoke(state)
+                        }
+                    )
+                    when (asyncState) {
+                        is AsyncImagePainter.State.Loading,
+                        is AsyncImagePainter.State.Empty -> {
+                            CoverLoadingIndicator(
+                                modifier = Modifier.fillMaxSize().alpha(alpha),
+                                containerColor = placeHolderBackgroundColor,
+                                indicatorColor = MaterialTheme.colorScheme.primary,
+                                indicatorSize = indicatorSize
+                            )
+                        }
+                        is AsyncImagePainter.State.Error -> {
+                            Placeholder(
+                                modifier = Modifier.fillMaxSize(),
+                                drawableResId = errorResId,
+                                contentDescription = contentDescription,
+                                containerColor = placeHolderBackgroundColor,
+                                iconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                alpha = alpha
+                            )
+                        }
+                        is AsyncImagePainter.State.Success -> Unit
+                    }
+                }
             }
         }
     }
@@ -259,6 +296,40 @@ private fun handleDirectModel(
 }
 
 @Composable
+fun CoverLoadingIndicator(
+    modifier: Modifier = Modifier,
+    containerColor: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    indicatorColor: Color = MaterialTheme.colorScheme.primary,
+    indicatorSize: Dp? = null,
+) {
+    BoxWithConstraints(
+        modifier = modifier.background(containerColor),
+        contentAlignment = Alignment.Center
+    ) {
+        val resolvedIndicatorSize = indicatorSize ?: run {
+            val hasValidWidth = maxWidth != androidx.compose.ui.unit.Dp.Unspecified &&
+                maxWidth != androidx.compose.ui.unit.Dp.Infinity && maxWidth > 0.dp
+            val hasValidHeight = maxHeight != androidx.compose.ui.unit.Dp.Unspecified &&
+                maxHeight != androidx.compose.ui.unit.Dp.Infinity && maxHeight > 0.dp
+            val containerSize = if (hasValidWidth && hasValidHeight) {
+                minOf(maxWidth, maxHeight)
+            } else if (hasValidWidth) {
+                maxWidth
+            } else if (hasValidHeight) {
+                maxHeight
+            } else {
+                48.dp
+            }
+            (containerSize * 0.45f).coerceIn(20.dp, 36.dp)
+        }
+        SongCoverLoadingIndicator(
+            size = resolvedIndicatorSize,
+            color = indicatorColor
+        )
+    }
+}
+
+@Composable
 private fun Placeholder(
     modifier: Modifier,
     @DrawableRes drawableResId: Int,
@@ -267,17 +338,31 @@ private fun Placeholder(
     iconColor: Color,
     alpha: Float,
 ) {
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .alpha(alpha)
             .background(containerColor),
         contentAlignment = Alignment.Center
     ) {
+        val hasValidWidth = maxWidth != androidx.compose.ui.unit.Dp.Unspecified &&
+            maxWidth != androidx.compose.ui.unit.Dp.Infinity && maxWidth > 0.dp
+        val hasValidHeight = maxHeight != androidx.compose.ui.unit.Dp.Unspecified &&
+            maxHeight != androidx.compose.ui.unit.Dp.Infinity && maxHeight > 0.dp
+        val containerSize = if (hasValidWidth && hasValidHeight) {
+            minOf(maxWidth, maxHeight)
+        } else if (hasValidWidth) {
+            maxWidth
+        } else if (hasValidHeight) {
+            maxHeight
+        } else {
+            48.dp
+        }
+        val iconSize = (containerSize * 0.5f).coerceIn(16.dp, 32.dp)
         Image(
             painter = painterResource(drawableResId),
             contentDescription = contentDescription,
             colorFilter = ColorFilter.tint(iconColor),
-            modifier = Modifier.size(32.dp),
+            modifier = Modifier.size(iconSize),
             contentScale = ContentScale.Fit
         )
     }

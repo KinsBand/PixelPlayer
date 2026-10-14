@@ -68,6 +68,7 @@ fun GenreMultiSelectionOptionSheet(
     @Suppress("DEPRECATION")
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
+    val dismissSheetAnimated = rememberAnimatedSheetDismiss(sheetState, onDismiss)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState
@@ -132,7 +133,7 @@ fun GenreMultiSelectionOptionSheet(
                 GenreSelectionActionButton(
                     onClick = {
                         onPlay()
-                        onDismiss()
+                        dismissSheetAnimated()
                     },
                     modifier = Modifier
                         .weight(0.5f)
@@ -153,7 +154,7 @@ fun GenreMultiSelectionOptionSheet(
                 GenreSelectionActionButton(
                     onClick = {
                         onAddToPlaylist()
-                        onDismiss()
+                        dismissSheetAnimated()
                     },
                     modifier = Modifier
                         .weight(0.5f)
@@ -184,7 +185,7 @@ fun GenreMultiSelectionOptionSheet(
                 GenreSelectionActionButton(
                     onClick = {
                         onPlayNext()
-                        onDismiss()
+                        dismissSheetAnimated()
                     },
                     modifier = Modifier
                         .weight(0.4f)
@@ -205,7 +206,7 @@ fun GenreMultiSelectionOptionSheet(
                 GenreSelectionActionButton(
                     onClick = {
                         onAddToQueue()
-                        onDismiss()
+                        dismissSheetAnimated()
                     },
                     modifier = Modifier
                         .weight(0.6f)

@@ -135,6 +135,11 @@ class PixelPlayApplication : Application(), ImageLoaderFactory, Configuration.Pr
         installHeapPressureTrimmers()
         // Automatic lyrics timing: cheap to create; it only works when lyrics load.
         com.theveloper.pixelplay.data.lyrics.autosync.LyricsAutoSync.install(this) { lyricsAudioSources.get() }
+        // On-device word sync: also idle until a song's line-synced lyrics load.
+        com.theveloper.pixelplay.data.lyrics.align.LyricsWordAligner.install(this) { lyricsAudioSources.get() }
+        // Adaptive expressive typography: measures each song's loudness / energy / tempo once (local,
+        // downloaded and streamed songs alike). Idle unless Expressive + Adaptive typography are on.
+        com.theveloper.pixelplay.data.lyrics.voice.SongVoiceAnalyzer.install(this) { lyricsAudioSources.get() }
 
         runCatching {
             org.schabi.newpipe.extractor.NewPipe.init(newPipeDownloader.get())

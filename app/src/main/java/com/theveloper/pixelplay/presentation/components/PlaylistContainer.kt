@@ -86,6 +86,7 @@ import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.LikedSongsViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.PlaylistUiState
 import com.theveloper.pixelplay.presentation.viewmodel.PlaylistViewModel
+import com.theveloper.pixelplay.presentation.viewmodel.SettingsViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.PlaylistSelectionStateHolder
 import com.theveloper.pixelplay.utils.formatSongCount
 import androidx.compose.ui.platform.LocalContext
@@ -261,9 +262,12 @@ fun PlaylistItems(
             .map { it.currentSong != null && it.currentSong != Song.emptySong() }
             .distinctUntilChanged()
     }.collectAsStateWithLifecycle(initialValue = false)
+    val settingsViewModel: SettingsViewModel = hiltViewModel()
+    val showPracticeMode by settingsViewModel.showPracticeMode.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val showPinnedPlaylists = !isAddingToPlaylist
-    val pinnedCount = if (showPinnedPlaylists) PINNED_PLAYLIST_ITEM_COUNT + HUB_ITEM_COUNT else 0
+    val hubItemCount = if (showPracticeMode) HUB_ITEM_COUNT else (HUB_ITEM_COUNT - 1)
+    val pinnedCount = if (showPinnedPlaylists) PINNED_PLAYLIST_ITEM_COUNT + hubItemCount else 0
     var lastHandledPlaylistSortKey by remember { mutableStateOf(currentSortOption?.storageKey) }
     var pendingPlaylistSortScrollReset by remember { mutableStateOf(false) }
 
@@ -305,15 +309,34 @@ fun PlaylistItems(
     val youtubePlaylists = remember(userPlaylists, showPinnedPlaylists) {
         if (showPinnedPlaylists) userPlaylists.filter { it.source.equals("YOUTUBE_MUSIC", true) } else emptyList()
     }
+    val applePlaylistCount = remember(userPlaylists, showPinnedPlaylists) {
+        if (showPinnedPlaylists) userPlaylists.count { it.source.equals("APPLE_MUSIC", true) } else 0
+    }
+    // Which services are signed in: the service card row adapts to 0 / 1 / 2 / 3 of them.
+    val platformViewModel: PlaylistViewModel = hiltViewModel()
+    val spotifyConnected by platformViewModel.isSpotifyConnected.collectAsStateWithLifecycle()
+    val youtubeConnected by platformViewModel.isYouTubeMusicConnected.collectAsStateWithLifecycle()
+    val appleConnected by platformViewModel.isAppleMusicConnected.collectAsStateWithLifecycle()
+    val connectedPlatforms = remember(spotifyConnected, youtubeConnected, appleConnected, spotifyPlaylists.size, youtubePlaylists.size, applePlaylistCount) {
+        buildList {
+            if (spotifyConnected) add(PlatformCardInfo("SPOTIFY", spotifyPlaylists.size))
+            if (youtubeConnected) add(PlatformCardInfo("YOUTUBE_MUSIC", youtubePlaylists.size))
+            if (appleConnected) add(PlatformCardInfo("APPLE_MUSIC", applePlaylistCount))
+        }
+    }
     // Friends' playlists pinned (liked) from the Friends screen sit with your own playlists,
     // still showing the friend and platform.
     val friendsViewModel: com.theveloper.pixelplay.presentation.viewmodel.FriendsViewModel = hiltViewModel()
     val pinnedFriendIds by friendsViewModel.pinnedPlaylistIds.collectAsStateWithLifecycle()
     val friendsById by friendsViewModel.friendsById.collectAsStateWithLifecycle()
-    val localPlaylists = remember(userPlaylists, showPinnedPlaylists, friendPlaylists, pinnedFriendIds) {
+    // Blends liked from a blend page: today's mix of each, listed with your playlists.
+    val pinnedBlends by friendsViewModel.pinnedBlendPlaylists.collectAsStateWithLifecycle()
+    val pinnedBlendIds = remember(pinnedBlends) { pinnedBlends.mapTo(HashSet()) { it.id } }
+    val localPlaylists = remember(userPlaylists, showPinnedPlaylists, friendPlaylists, pinnedFriendIds, pinnedBlends) {
         if (showPinnedPlaylists) {
             userPlaylists.filterNot { it.source.equals("SPOTIFY", true) || it.source.equals("YOUTUBE_MUSIC", true) } +
-                friendPlaylists.filter { it.id in pinnedFriendIds }
+                friendPlaylists.filter { it.id in pinnedFriendIds } +
+                pinnedBlends.filter { blend -> userPlaylists.none { it.id == blend.id } }
         } else userPlaylists
     }
     val playlistFastScrollLabelProvider = remember(localPlaylists, currentSortOption, pinnedCount) {
@@ -347,26 +370,29 @@ fun PlaylistItems(
             contentPadding = PaddingValues(bottom = bottomBarHeight + MiniPlayerHeight + 30.dp)
         ) {
             if (showPinnedPlaylists) {
-                // Spotify | YT Music, Friends | Practice, then your own playlists (Your Music is in the top row).
+                // Spotify | YT Music, Practice, then your own playlists (Your Music is in the top row).
                 item(key = "platform_cards", contentType = "platform_cards") {
                     PlatformPlaylistCards(
-                        spotifyCount = spotifyPlaylists.size,
-                        youtubeCount = youtubePlaylists.size,
+                        connected = connectedPlatforms,
                         onOpenPlatform = { source ->
                             if (!isSelectionMode) navController?.navigateSafely(Screen.PlatformPlaylists.createRoute(source))
+                        },
+                        onConnect = {
+                            if (!isSelectionMode) navController?.navigateSafely(Screen.Accounts.route)
                         }
                     )
                 }
-                item(key = "friends_practice", contentType = "friends_practice") {
-                    val context = LocalContext.current
-                    val practiceStore = remember { PracticeStore.get(context) }
-                    val practice by practiceStore.entries.collectAsStateWithLifecycle()
-                    FriendsPracticeTiles(
-                        navController = navController,
-                        practiceSummary = practiceSummary(practice),
-                        onOpenPractice = { navController?.navigateSafely(Screen.Practice.route) },
-                        enabled = !isSelectionMode
-                    )
+                // Friends is a bottom-nav tab now, so Practice gets the whole row.
+                if (showPracticeMode) {
+                    item(key = "practice", contentType = "practice") {
+                        val context = LocalContext.current
+                        val practiceStore = remember { PracticeStore.get(context) }
+                        val practice by practiceStore.entries.collectAsStateWithLifecycle()
+                        PracticeButton(
+                            summary = practiceSummary(practice),
+                            onClick = { if (!isSelectionMode) navController?.navigateSafely(Screen.Practice.route) }
+                        )
+                    }
                 }
                 item(key = "your_playlists_header", contentType = "section_header") {
                     Text(
@@ -400,7 +426,7 @@ fun PlaylistItems(
                             val currentSelection = selectedPlaylists[playlist.id] ?: false
                             selectedPlaylists[playlist.id] = !currentSelection
                         } else if (isSelectionMode) {
-                            onPlaylistSelectionToggle(playlist)
+                            if (playlist.id !in pinnedBlendIds) onPlaylistSelectionToggle(playlist)
                         } else {
                             navController?.navigateSafely(Screen.PlaylistDetail.createRoute(playlist.id))
                         }
@@ -423,10 +449,13 @@ fun PlaylistItems(
                     isSelectionMode = isSelectionMode,
                     isSelected = selectedPlaylistIds.contains(playlist.id),
                     selectionIndex = selectionIndex,
-                    onLongPress = { onPlaylistLongPress(playlist) },
-                    onPlaylistSelectionToggle = { onPlaylistSelectionToggle(playlist) },
+                    // Pinned blends are generated daily mixes: they can't be selected (deleted / merged).
+                    onLongPress = { if (playlist.id !in pinnedBlendIds) onPlaylistLongPress(playlist) },
+                    onPlaylistSelectionToggle = { if (playlist.id !in pinnedBlendIds) onPlaylistSelectionToggle(playlist) },
                     friendName = if (playlist.friendId != null) pinnedFriend?.name ?: playlist.ownerName.ifBlank { "Friend" } else null,
                     friendAvatarUrl = pinnedFriend?.avatarUrl,
+                    dateLabel = playlistDateLabel(playlist, currentSortOption),
+                    isBlend = playlist.id in pinnedBlendIds,
                     modifier = Modifier.animateItem()
                 )
             }
@@ -587,6 +616,10 @@ fun PlaylistItem(
     /** Set for a friend's pinned playlist: shows "by {friend}" with their picture. */
     friendName: String? = null,
     friendAvatarUrl: String? = null,
+    /** Shown after the count when the list is sorted by date ("[♪] 42 · 10/10/26"). */
+    dateLabel: String? = null,
+    /** A pinned blend (daily mix): the subtitle says "Blend". */
+    isBlend: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val playlistPreviewSongIds = remember(playlist.songIds) {
@@ -734,18 +767,24 @@ fun PlaylistItem(
                         }
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "by $friendName · ${formatSongCount(playlist.songIds.size)}",
+                            text = "by $friendName" + CompactMeta.SEPARATOR,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        CompactCountBadge(
+                            count = playlist.songIds.size,
+                            trailing = dateLabel,
+                            style = MaterialTheme.typography.bodySmall
                         )
                     }
                 } else {
-                    Text(
-                        text = formatSongCount(playlist.songIds.size),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    CompactCountBadge(
+                        count = playlist.songIds.size,
+                        trailing = dateLabel,
+                        style = MaterialTheme.typography.bodySmall
                     )
                 }
             }
@@ -871,3 +910,9 @@ fun CreatePlaylistDialogRedesigned(
         }
     }
 }
+
+/** The created date for the subtitle when playlists are sorted by date created; null otherwise. */
+private fun playlistDateLabel(playlist: Playlist, sortOption: SortOption?): String? =
+    if (sortOption == SortOption.PlaylistDateCreated || sortOption == SortOption.PlaylistDateCreatedAsc) {
+        CompactMeta.dateLabel(playlist.createdAt)
+    } else null

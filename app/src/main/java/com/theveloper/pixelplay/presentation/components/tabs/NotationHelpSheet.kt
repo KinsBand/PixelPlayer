@@ -87,10 +87,6 @@ internal fun NotationHelpSheet(controller: TabPracticeController, onBg: Color, a
         TabParser.InstrumentFamily.DRUMS -> "drums"
         TabParser.InstrumentFamily.OTHER -> track.instrument.ifBlank { "this instrument" }.lowercase()
     }
-    Text(
-        "All ${items.size} marks for $familyName. Tap one to hear it; the ones in this song are highlighted.",
-        color = onBg.copy(alpha = 0.7f), fontSize = 13.sp, textAlign = TextAlign.Center,
-    )
 
     fun play(key: String, block: () -> Boolean) {
         if (player.playingKey == key) { player.stop(); return }

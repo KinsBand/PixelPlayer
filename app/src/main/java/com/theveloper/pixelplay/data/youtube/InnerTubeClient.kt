@@ -111,6 +111,8 @@ class InnerTubeClient @Inject constructor(
                 SearchFilterType.ALBUMS -> "EgWKAQIYAWoMEA4QChADEAQQCRAF"
                 // Community playlists (ytmusicapi "EgeKAQQoA" + "EA" + "BagwQDhAKEAMQBBAJEAU=").
                 SearchFilterType.PLAYLISTS -> "EgeKAQQoAEABagwQDhAKEAMQBBAJEAU="
+                // People aren't on YouTube Music; the Profiles tab never asks (see MusicRepositoryImpl).
+                SearchFilterType.PROFILES -> return@withKey emptyList()
             }
             if (params != null) body.put("params", params)
             val root = post("search", body)
@@ -122,11 +124,64 @@ class InnerTubeClient @Inject constructor(
                     SearchFilterType.ARTISTS -> item is SearchResultItem.ArtistItem
                     SearchFilterType.ALBUMS -> item is SearchResultItem.AlbumItem
                     SearchFilterType.PLAYLISTS -> item is SearchResultItem.PlaylistItem
+                    SearchFilterType.PROFILES -> false
                 }
             }
             synchronized(cache) { cache[key(query, filter)] = Cached(results, System.currentTimeMillis() + 300_000) }
             results
         }
+    }
+
+    private data class CachedSuggestions(val items: List<String>, val expiry: Long)
+    private val suggestionCache = object : LinkedHashMap<String, CachedSuggestions>(64, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CachedSuggestions>) = size > 64
+    }
+
+    /**
+     * YouTube Music's own autocomplete for what's typed so far ("deftons" → "deftones",
+     * "deftones mein", …): the same list music.youtube.com shows under its search box. Spelling
+     * mistakes are corrected server-side. Cached for 10 minutes per input.
+     */
+    suspend fun searchSuggestions(input: String): List<String> = withContext(Dispatchers.IO) {
+        val typed = input.trim()
+        if (typed.isEmpty()) return@withContext emptyList()
+        val cacheKey = typed.lowercase(Locale.ROOT)
+        synchronized(suggestionCache) { suggestionCache[cacheKey] }
+            ?.takeIf { it.expiry > System.currentTimeMillis() }?.let { return@withContext it.items }
+        val root = post("music/get_search_suggestions", JSONObject().put("input", typed))
+        val found = LinkedHashSet<String>()
+        fun walk(node: Any?) {
+            when (node) {
+                is JSONObject -> {
+                    // searchSuggestionRenderer (completions) and historySuggestionRenderer.
+                    val renderer = node.optJSONObject("searchSuggestionRenderer")
+                        ?: node.optJSONObject("historySuggestionRenderer")
+                    if (renderer != null) {
+                        val query = renderer.optJSONObject("navigationEndpoint")
+                            ?.optJSONObject("searchEndpoint")?.optString("query").orEmpty()
+                        val text = query.ifBlank {
+                            val runs = renderer.optJSONObject("suggestion")?.optJSONArray("runs")
+                            buildString {
+                                if (runs != null) for (i in 0 until runs.length()) {
+                                    append(runs.optJSONObject(i)?.optString("text").orEmpty())
+                                }
+                            }
+                        }.trim()
+                        if (text.isNotEmpty()) found += text
+                        return
+                    }
+                    val keys = node.keys()
+                    while (keys.hasNext()) walk(node.opt(keys.next()))
+                }
+                is org.json.JSONArray -> for (i in 0 until node.length()) walk(node.opt(i))
+            }
+        }
+        walk(root.opt("contents"))
+        val items = found.take(10)
+        synchronized(suggestionCache) {
+            suggestionCache[cacheKey] = CachedSuggestions(items, System.currentTimeMillis() + 600_000)
+        }
+        items
     }
 
     data class BrowsePage(val songs: List<Song>, val continuation: String?)
@@ -316,4 +371,5 @@ internal fun SearchResultItem.searchIdentity(): String = when (this) {
     is SearchResultItem.AlbumItem -> "album:${browseId ?: album.id}"
     is SearchResultItem.PlaylistItem -> "playlist:${browseId ?: playlist.id}"
     is SearchResultItem.FriendItem -> "friend:$friendId"
+    is SearchResultItem.ProfileItem -> "profile:${person.userId}"
 }

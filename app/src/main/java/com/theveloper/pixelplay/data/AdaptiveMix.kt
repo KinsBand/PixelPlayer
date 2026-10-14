@@ -15,6 +15,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.math.pow
+import kotlin.math.roundToInt
 
 enum class MixFlavor(val title: String) { NORMAL("Normal Mix"), SMART("Smart Mix") }
 
@@ -60,7 +62,7 @@ internal class MixAffinityIndex(seeds: List<Song>) {
 }
 
 @Singleton
-class AdaptiveMix @Inject constructor(private val music: MusicRepository, private val youtube: YouTubeRepository, private val connected: com.theveloper.pixelplay.data.accounts.ConnectedLibraryRepository, private val playlists: com.theveloper.pixelplay.data.preferences.PlaylistPreferencesRepository, private val cloud: com.theveloper.pixelplay.data.database.CloudSongDao, private val feedback: MixFeedback, private val learning: MixLearning, private val gatherer: com.theveloper.pixelplay.data.metadata.SongMetadataGatherer, private val enrichment: com.theveloper.pixelplay.data.database.EnrichmentDao) {
+class AdaptiveMix @Inject constructor(private val music: MusicRepository, private val youtube: YouTubeRepository, private val connected: com.theveloper.pixelplay.data.accounts.ConnectedLibraryRepository, private val playlists: com.theveloper.pixelplay.data.preferences.PlaylistPreferencesRepository, private val cloud: com.theveloper.pixelplay.data.database.CloudSongDao, private val feedback: MixFeedback, private val learning: MixLearning, private val gatherer: com.theveloper.pixelplay.data.metadata.SongMetadataGatherer, private val enrichment: com.theveloper.pixelplay.data.database.EnrichmentDao, private val friendsInRoom: dagger.Lazy<com.theveloper.pixelplay.data.social.FriendsInRoomController>) {
     init {
         // Moods the gatherer only guessed from genre + BPM don't count as mood evidence.
         MixVibe.isMoodEstimated = gatherer::isMoodEstimated
@@ -129,7 +131,11 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
         /** Local analysis (BPM, key, energy…) by track id, from `track_analysis`. */
         val features: Map<Long, com.theveloper.pixelplay.data.database.TrackMixFeatures> = emptyMap(),
         /** Unit-length VGGish embeddings by song id, from `track_embeddings`. */
-        val embeddings: Map<String, FloatArray> = emptyMap()
+        val embeddings: Map<String, FloatArray> = emptyMap(),
+        /** Songs that are yours (local, likes, favourites, your own playlists), by id. */
+        val ownIds: Set<String> = emptySet(),
+        /** Songs only in a friend's saved playlist: song id → friend id (tagged with that friend). */
+        val friendSongs: Map<String, String> = emptyMap(),
     ) {
         val byId: Map<String, Song> by lazy { library.associateBy { it.id } }
         /** Mix identities of the whole library (was rebuilt on every plan). */
@@ -185,10 +191,19 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
         val embeddings = try { loadEmbeddings() }
         catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
         catch (_: Exception) { emptyMap() }
-        val library = (music.getAllSongsOnce() + connectedSnapshot.playlists.flatMap { it.songs } + connectedSnapshot.spotifyLikes +
-            connectedSnapshot.youtubeLikes + favorites).distinctBy { it.id }
+        val (friendPlaylists, ownPlaylists) = connectedSnapshot.playlists.partition { it.friendId != null }
+        val own = music.getAllSongsOnce() + ownPlaylists.flatMap { it.songs } + connectedSnapshot.spotifyLikes +
+            connectedSnapshot.youtubeLikes + favorites
+        val ownIds = own.mapTo(HashSet()) { it.id }
+        // Friend playlists you saved stay in your pool, but their songs carry the friend's tag.
+        val friendSongs = HashMap<String, String>()
+        for (playlist in friendPlaylists) for (song in playlist.songs) {
+            if (song.id !in ownIds) friendSongs.putIfAbsent(song.id, playlist.friendId!!)
+        }
+        val library = (own + friendPlaylists.flatMap { it.songs }).distinctBy { it.id }
             .map { withAnalysis(gatherer.applyCached(it), features) }
-        LibrarySnapshot(library, explicitFavorites, android.os.SystemClock.elapsedRealtime(), features, embeddings).also { snapshot = it }
+        LibrarySnapshot(library, explicitFavorites, android.os.SystemClock.elapsedRealtime(), features, embeddings,
+            ownIds, friendSongs).also { snapshot = it }
     }
 
     /** VGGish vectors, normalised; all-zero or all-non-positive rows (old fallback vectors) are skipped. */
@@ -313,11 +328,22 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
     fun activate(mixId: String, keepPrompt: Boolean = false, keepVibe: Boolean = false) {
         learning.sessionId = java.util.UUID.randomUUID().toString()
         direction = null
-        if (!keepPrompt) promptSeeds = emptyList()
+        if (!keepPrompt) { promptSeeds = emptyList(); promptVibe = null }
         if (!keepVibe) vibe = null
         synchronized(offVibe) { offVibe.clear() }
         synchronized(skipped) { skipped.clear() }
         _insights.value = emptyMap()
+        sessionVibe.reset()
+        synchronized(friendPicks) { friendPicks.clear() }
+        energyFrom = null
+        energyChangedAtSong = 0
+        synchronized(steerList) {
+            // A prompt typed just before the mix started keeps its steers; everything else starts fresh.
+            if (!keepPrompt) steerList.clear() else steerList.removeAll { it.group == GROUP_MORE_LIKE }
+            steerList.filter { it.movesVibe }.forEach { sessionVibe.steer(it.influence) }
+        }
+        publishSteers()
+        sessionReactions.clear()
         feedback.startSession()
         // Likes / downloads since the last mix are picked up by a background rebuild; the
         // first plan doesn't wait for it.
@@ -361,7 +387,10 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
     /** "Normal Mix · Workout" while a vibe is locked, else the flavour's own title. */
     fun statusTitle(flavor: MixFlavor): String = vibe?.let { "${flavor.title} · ${it.label}" } ?: flavor.title
     fun undo() = feedback.undo()
-    fun dislikeEverywhere(song: Song) = feedback.dislike(song, null)
+    fun dislikeEverywhere(song: Song) {
+        sessionVibe.push("disliked:" + mixIdentity(song), feelOf(song), SessionVibe.DISLIKED)
+        feedback.dislike(song, null)
+    }
     val revision get() = feedback.revision
     @Volatile internal var lastDecisions: List<MixSequencePlanner.Decision> = emptyList()
         private set
@@ -371,7 +400,38 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
     /** Energy the listener asked for (Calm 0.25 · Steady 0.55 · Hype 0.85), or null to follow the music. */
     var energyTarget: Double?
         get() = feedback.energyTarget()
-        set(value) { feedback.setEnergyTarget(value) }
+        set(value) {
+            // A new setting eases in over 3 songs from where the energy is now.
+            energyFrom = energyAt(0)
+            energyChangedAtSong = sessionVibe.songCount
+            feedback.setEnergyTarget(value)
+        }
+
+    @Volatile private var energyFrom: Double? = null
+    @Volatile private var energyChangedAtSong = 0
+
+    /**
+     * Energy wanted at a planned position (0 = the next slot). Calm / Steady / Hype ease in over
+     * [ENERGY_EASE_SONGS] songs; Follow is the average of the last 3 listened songs, moving at
+     * most 0.08 a song, so the mix can't creep up or down on its own. Relative steers
+     * ("calmer", "more energy") are added on top. Null before anything is known.
+     */
+    internal fun energyAt(position: Int): Double? {
+        val shift = sessionVibe.energyShiftNow()
+        val chosen = feedback.energyTarget()
+        if (chosen == null) {
+            val follow = sessionVibe.followEnergy ?: sessionVibe.target()?.energy ?: return null
+            return (follow + shift).coerceIn(0.0, 1.0)
+        }
+        val from = energyFrom ?: chosen
+        val songsSince = (sessionVibe.songCount - energyChangedAtSong).coerceAtLeast(0)
+        val progress = ((songsSince + position + 1).toDouble() / ENERGY_EASE_SONGS).coerceIn(0.0, 1.0)
+        return (from + (chosen - from) * progress + shift).coerceIn(0.0, 1.0)
+    }
+
+    /** Weight of [energyAt]: a chosen setting pulls harder than Follow. */
+    private fun energyWeight(weights: MixWeights): Double =
+        if (feedback.energyTarget() != null) weights.energyTarget else weights.energyTarget * FOLLOW_ENERGY_SHARE
 
     /** Why the mix picked a queued song, and whether it's new to the listener. */
     data class MixInsight(val reason: String, val discovery: Boolean)
@@ -393,10 +453,16 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
             "longTermTaste" to "Matches your taste",
             "recentTaste" to "Matches what you've played lately",
             "sessionFit" to "Fits what's playing",
-            "pickedVibe" to "Like the songs you queued"
+            "pickedVibe" to "Like the songs you queued",
+            "feelFit" to "Fits the vibe",
+            "energyTarget" to "Fits the energy"
         )
         val best = phrases.filter { (key, phrase) -> phrase != null && (c[key] ?: 0.0) > 0.5 }
             .maxByOrNull { (key, _) -> c[key] ?: 0.0 }?.second
+        decision.friendId?.let { friendId ->
+            val name = try { friendsInRoom.get().displayOf(friendId).first } catch (_: Exception) { "a friend" }
+            return listOfNotNull("From $name's playlists", best?.replaceFirstChar { it.lowercase() }).joinToString(" · ")
+        }
         return when (decision.source) {
             "discovery" -> listOfNotNull("New for you", best).joinToString(" · ")
             "rediscovery" -> "Not heard in a while"
@@ -436,7 +502,12 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
         all + accuracy + model
     }
     @Volatile private var direction: Song? = null
-    fun moreLike(song: Song) { direction = song; feedback.invalidate() }
+    /** "More like this": a 35 % steer toward the song's feel, shown as a chip with ✕. */
+    fun moreLike(song: Song) {
+        direction = song
+        addSteer(Steer(SteerChip("more-like", "More like ${song.title}"), GROUP_MORE_LIKE,
+            SessionVibe.Influence("steer:more-like", feelOf(song), SessionVibe.STEER_DEFAULT), songs = listOf(song)))
+    }
 
     /** The song "More like this" was used on, if any (shown as a steer the user can clear). */
     val moreLikeSong: Song? get() = direction
@@ -448,32 +519,336 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
      */
     @Volatile private var promptSeeds: List<Song> = emptyList()
 
-    fun steerTowards(songs: List<Song>) {
-        promptSeeds = songs.take(MAX_PROMPT_SEEDS)
+    /**
+     * The sound typed in the prompt box ("upbeat 80s rock"), applied like a locked vibe for the
+     * rest of the mix session. A vibe locked with a queue mix button takes precedence.
+     */
+    @Volatile private var promptVibe: VibeFilter? = null
+
+    /** The vibe the mix keeps to right now: a locked vibe, else the typed prompt's sound. */
+    private val activeVibe: VibeFilter? get() = vibe ?: promptVibe
+
+    fun steerTowards(songs: List<Song>, filter: VibeFilter? = null) {
+        if (songs.isEmpty()) return
+        val label = filter?.label?.takeIf { it.isNotBlank() } ?: songs.first().artist
+        addSteer(Steer(SteerChip("toward:" + label.lowercase(java.util.Locale.ROOT), label), GROUP_TOWARD,
+            SessionVibe.Influence("steer:toward", averageFeel(songs.take(MAX_PROMPT_INTENT_SEEDS)), SessionVibe.STEER_DEFAULT),
+            songs = songs.take(if (filter != null) MAX_PROMPT_INTENT_SEEDS else MAX_PROMPT_SEEDS), filter = filter))
+    }
+
+    /** Clears every explicit steer: the typed prompt, its chips and "More like this". */
+    fun clearPromptSteer() {
+        val had = synchronized(steerList) { steerList.isNotEmpty().also { steerList.clear() } }
+        if (!had && promptSeeds.isEmpty() && direction == null && promptVibe == null) return
+        sessionVibe.removeAll { it.startsWith("steer:") }
+        rebuildSteerState()
+    }
+
+    // ── Steers ("any direction") ────────────────────────────────────────────────────
+    /** A steer as the queue shows it: a chip with ✕. */
+    data class SteerChip(val id: String, val label: String)
+
+    private class Steer(
+        val chip: SteerChip,
+        /** Steers in the same group replace each other (a new "calmer" replaces "faster"'s energy twin…). */
+        val group: String,
+        val influence: SessionVibe.Influence,
+        val songs: List<Song> = emptyList(),
+        val filter: VibeFilter? = null,
+        val awayArtists: Set<String> = emptySet(),
+        val lessArtists: Set<String> = emptySet(),
+        val lessGenres: List<String> = emptyList(),
+    ) {
+        val movesVibe: Boolean get() = influence.rate > 0.0
+    }
+
+    private val steerList = ArrayList<Steer>()
+    private val _steers = kotlinx.coroutines.flow.MutableStateFlow<List<SteerChip>>(emptyList())
+    /** Active steers, oldest first, for the chips under the prompt box. */
+    val steers: kotlinx.coroutines.flow.StateFlow<List<SteerChip>> = _steers
+
+    @Volatile private var awayArtists: Set<String> = emptySet()
+    @Volatile private var lessArtists: Set<String> = emptySet()
+    @Volatile private var lessGenres: List<String> = emptyList()
+
+    private fun addSteer(steer: Steer) {
+        synchronized(steerList) {
+            val replaced = steerList.filter { it.group == steer.group || it.chip.id == steer.chip.id }
+            replaced.forEach { sessionVibe.remove(it.influence.id) }
+            steerList.removeAll(replaced)
+            steerList += steer
+            // At most [MAX_STEERS] at once: the oldest goes.
+            while (steerList.size > MAX_STEERS) sessionVibe.remove(steerList.removeAt(0).influence.id)
+        }
+        // Each steer has its own vibe influence id so stacked steers don't overwrite each other.
+        // Away / less steers don't move the vibe; they only filter and penalise.
+        if (steer.movesVibe) sessionVibe.steer(steer.influence)
+        rebuildSteerState()
+    }
+
+    /** Removes one steer chip (✕). Returns false when it wasn't there. */
+    fun removeSteer(id: String): Boolean {
+        val removed = synchronized(steerList) { steerList.filter { it.chip.id == id }.also { steerList.removeAll(it) } }
+        if (removed.isEmpty()) return false
+        removed.forEach { sessionVibe.remove(it.influence.id) }
+        if (removed.any { it.group == GROUP_MORE_LIKE }) direction = null
+        rebuildSteerState()
+        return true
+    }
+
+    /** Seeds, typed vibe, exclusions and chips follow the steers that are left. */
+    private fun rebuildSteerState() {
+        val list = synchronized(steerList) { steerList.toList() }
+        promptSeeds = list.filter { it.group != GROUP_MORE_LIKE }.flatMap { it.songs }.distinctBy(::mixIdentity)
+            .take(MAX_PROMPT_INTENT_SEEDS)
+        promptVibe = list.lastOrNull { it.filter != null }?.filter
+        if (list.none { it.group == GROUP_MORE_LIKE }) direction = null
+        awayArtists = list.flatMapTo(HashSet()) { it.awayArtists }
+        lessArtists = list.flatMapTo(HashSet()) { it.lessArtists }
+        lessGenres = list.flatMap { it.lessGenres }.distinct()
+        publishSteers()
         feedback.invalidate()
     }
 
-    /** Clears every explicit steer: the typed prompt and "More like this". */
-    fun clearPromptSteer() {
-        if (promptSeeds.isEmpty() && direction == null) return
-        promptSeeds = emptyList()
-        direction = null
-        feedback.invalidate()
+    private fun publishSteers() {
+        _steers.value = synchronized(steerList) { steerList.map { it.chip } }
+    }
+
+    /** Drops steers whose time is up ("for a few songs", relative shifts after 10 songs). */
+    private fun expireSteers() {
+        val active = sessionVibe.activeIds()
+        val expired = synchronized(steerList) { steerList.filter { it.movesVibe && it.influence.id !in active }.also { steerList.removeAll(it) } }
+        if (expired.isNotEmpty()) rebuildSteerState()
+    }
+
+    private fun artistKey(song: Song) = song.artist.trim().lowercase(java.util.Locale.ROOT)
+
+    /** "no <artist>" for this session. */
+    internal fun isSteeredAway(song: Song): Boolean {
+        val away = awayArtists
+        if (away.isEmpty()) return false
+        val artist = artistKey(song)
+        return away.any { it == artist || (it.length >= 4 && artist.contains(it)) }
+    }
+
+    /** Extra penalty for "less <artist>" / "less <genre>". */
+    private fun lessPenalty(song: Song): Double {
+        var penalty = 0.0
+        if (lessArtists.isNotEmpty() && artistKey(song) in lessArtists) penalty += LESS_ARTIST_PENALTY
+        val genres = lessGenres
+        if (genres.isNotEmpty()) {
+            val tags = (song.genre.orEmpty() + " " + song.songInformation.subgenre.orEmpty()).lowercase(java.util.Locale.ROOT)
+            if (genres.any { tag -> genreTagRegex(tag).containsMatchIn(tags) }) penalty += LESS_GENRE_PENALTY
+        }
+        return penalty
     }
 
     /**
-     * Songs for a typed song or artist: library matches first (artist, then title), topped up
-     * with an online search when the library has none. Best match first.
+     * Turns a resolved prompt into steers: toward what it named (songs, artists, a sound), away
+     * from artists ("no X"), less of something, a blend of two, a path from one to another, and
+     * relative shifts ("calmer", "faster"). Returns the labels applied (empty = nothing to do).
      */
-    suspend fun resolvePrompt(query: String): List<Song> = withContext(Dispatchers.IO) {
+    fun applyPrompt(resolution: PromptResolution): List<String> {
+        val intent = resolution.intent ?: MixPromptParser.parse(resolution.query)
+        val strength = intent.strength ?: SessionVibe.STEER_DEFAULT
+        val scale = strength / SessionVibe.STEER_DEFAULT
+        val temporary = intent.temporarySongs
+        val applied = mutableListOf<String>()
+        val label = intent.labels.joinToString(" · ").ifBlank { resolution.query }
+        if (resolution.songs.isNotEmpty() && (intent.hasTarget || !intent.hasDirection)) {
+            addSteer(Steer(SteerChip("toward", resolution.labels.joinToString(" · ").ifBlank { label }), GROUP_TOWARD,
+                SessionVibe.Influence("steer:toward", averageFeel(resolution.songs), strength, lastsSongs = temporary),
+                songs = resolution.songs.take(if (resolution.filter != null) MAX_PROMPT_INTENT_SEEDS else MAX_PROMPT_SEEDS),
+                filter = resolution.filter))
+            applied += resolution.labels.ifEmpty { listOf(label) }
+        }
+        if (resolution.blendA.isNotEmpty() && resolution.blendB.isNotEmpty() && intent.blend.size >= 2) {
+            val mid = Feel.toward(averageFeel(resolution.blendA), averageFeel(resolution.blendB) ?: return applied, 0.5)
+            addSteer(Steer(SteerChip("blend", "Between ${intent.blend[0]} & ${intent.blend[1]}"), GROUP_BLEND,
+                SessionVibe.Influence("steer:blend", mid, strength, lastsSongs = temporary),
+                songs = interleave(resolution.blendA, resolution.blendB)))
+            applied += "between ${intent.blend[0]} & ${intent.blend[1]}"
+        }
+        if (resolution.pathA.isNotEmpty() && resolution.pathB.isNotEmpty() && intent.pathFrom != null && intent.pathTo != null) {
+            val start = averageFeel(resolution.pathA)
+            val end = averageFeel(resolution.pathB)
+            if (start != null && end != null) {
+                addSteer(Steer(SteerChip("path", "${intent.pathFrom} → ${intent.pathTo}"), GROUP_PATH,
+                    SessionVibe.Influence("steer:path", start, maxOf(strength, SessionVibe.STEER_DEFAULT), pathTo = end, pathSongs = PATH_SONGS),
+                    songs = resolution.pathA.take(3) + resolution.pathB.take(3)))
+                applied += "${intent.pathFrom} → ${intent.pathTo}"
+            }
+        }
+        fun shift(axis: SessionVibe.Axis, amount: Double?, word: String) {
+            amount ?: return
+            val sign = if (amount > 0) "+" else "−"
+            addSteer(Steer(SteerChip("shift:${axis.name.lowercase(java.util.Locale.ROOT)}", word), "shift:${axis.name}",
+                SessionVibe.Influence("steer:shift:${axis.name}", null, 1.0, shiftAxis = axis, shift = amount * scale,
+                    // Relative moves fade back over about 10 songs (or last "for a few songs").
+                    fadeSongs = if (temporary == null) SessionVibe.SHIFT_FADE_SONGS else null, lastsSongs = temporary)))
+            applied += "$word ($sign)"
+        }
+        val shiftLabels = intent.labels
+        fun labelFor(vararg keys: String, fallback: String) = shiftLabels.firstOrNull { l -> keys.any { l.contains(it) } } ?: fallback
+        shift(SessionVibe.Axis.ENERGY, intent.energyShift, labelFor("calm", "chill", "soft", "mellow", "quiet", "gentl", "light", "heav", "loud", "hard", "energ", "hype", "wild", "liv", "intense", fallback = if ((intent.energyShift ?: 0.0) < 0) "Calmer" else "More energy").replaceFirstChar { it.uppercase() })
+        shift(SessionVibe.Axis.TEMPO, intent.tempoShift, labelFor("fast", "quick", "slow", fallback = if ((intent.tempoShift ?: 0.0) < 0) "Slower" else "Faster").replaceFirstChar { it.uppercase() })
+        shift(SessionVibe.Axis.VALENCE, intent.valenceShift, labelFor("happ", "bright", "cheer", "sad", "dark", "mood", fallback = if ((intent.valenceShift ?: 0.0) < 0) "Sadder" else "Happier").replaceFirstChar { it.uppercase() })
+        for (artist in intent.awayArtists) {
+            val key = artist.trim().lowercase(java.util.Locale.ROOT)
+            addSteer(Steer(SteerChip("away:$key", "No $artist"), "away:$key",
+                SessionVibe.Influence("steer:away:$key", null, 0.0), awayArtists = setOf(key)))
+            applied += "no $artist"
+        }
+        for (artist in intent.lessArtists) {
+            val key = artist.trim().lowercase(java.util.Locale.ROOT)
+            addSteer(Steer(SteerChip("less:$key", "Less $artist"), "less:$key",
+                SessionVibe.Influence("steer:less:$key", null, 0.0), lessArtists = setOf(key)))
+            applied += "less $artist"
+        }
+        if (intent.lessGenres.isNotEmpty()) {
+            val word = intent.labels.firstOrNull { it.startsWith("less ") } ?: "less " + intent.lessGenres.first()
+            addSteer(Steer(SteerChip("lessgenre", word.replaceFirstChar { it.uppercase() }), "lessgenre",
+                SessionVibe.Influence("steer:lessgenre", null, 0.0), lessGenres = intent.lessGenres))
+            applied += word
+        }
+        return applied
+    }
+
+    private fun interleave(a: List<Song>, b: List<Song>): List<Song> =
+        (0 until maxOf(a.size, b.size)).flatMap { listOfNotNull(a.getOrNull(it), b.getOrNull(it)) }
+
+    // ── Session vibe ────────────────────────────────────────────────────────────────
+    /** The running target feel every control nudges (see [SessionVibe]). */
+    private val sessionVibe = SessionVibe()
+
+    private fun analysedNow(song: Song): Song {
+        val snap = snapshot
+        return snap?.byId?.get(song.id) ?: withAnalysis(gatherer.applyCached(song), snap?.features.orEmpty())
+    }
+
+    internal fun feelOf(song: Song): Feel = Feel.of(analysedNow(song), snapshot?.embeddings.orEmpty())
+
+    private fun averageFeel(songs: List<Song>): Feel? = Feel.average(songs.take(10).map(::feelOf))
+
+    /** A new song started playing: fades move on, expired steers go. */
+    fun noteSongStarted() {
+        sessionVibe.advanceSong()
+        expireSteers()
+    }
+
+    /** A song was listened to (reward from [MixRewards], ≥ 0.4): the vibe follows it. */
+    fun noteListened(song: Song, reward: Double) {
+        sessionVibe.listened(feelOf(song), reward)
+    }
+
+    /** A song you queued played through: it pulls the vibe another 10 %. */
+    fun notePickPlayed(song: Song) {
+        sessionVibe.pull("pick-played:" + mixIdentity(song), feelOf(song), SessionVibe.PICK_PLAYED)
+    }
+
+    /** 0…1: how close [song] feels to where the mix is heading. */
+    fun vibeFit(song: Song): Double = sessionVibe.fit(feelOf(song))
+
+    /**
+     * Where the mix is heading, in words, for the Tune this mix sheet
+     * ("Steady energy · chill, happy · about 118 BPM · rock, pop"), or null before anything is known.
+     */
+    fun headingSummary(): String? {
+        val target = sessionVibe.target() ?: return null
+        val parts = mutableListOf<String>()
+        energyAt(0)?.let { e ->
+            parts += when {
+                e < 0.35 -> "Calm energy"
+                e < 0.6 -> "Steady energy"
+                e < 0.78 -> "Lively energy"
+                else -> "High energy"
+            }
+        }
+        target.moods.entries.sortedByDescending { it.value }.filter { it.value >= 0.15 }.take(2)
+            .map { it.key }.takeIf { it.isNotEmpty() }?.let { parts += it.joinToString(", ") }
+        target.tempo?.let { parts += "about ${(2.0.pow(it)).roundToInt()} BPM" }
+        target.families.entries.sortedByDescending { it.value }.filter { it.value >= 0.15 }.take(2)
+            .map { family -> familyLabel(family.key) }.takeIf { it.isNotEmpty() }?.let { parts += it.joinToString(", ") }
+        return parts.joinToString(" · ").ifBlank { null }
+    }
+
+    private fun familyLabel(family: String): String = when (family) {
+        "hip_hop" -> "hip hop"
+        "rnb" -> "R&B"
+        "new_age" -> "new age"
+        else -> family.replace('_', ' ')
+    }
+
+    /** "feelFit" per candidate: closeness to the session vibe, centred on an average song. */
+    private fun feelFitScores(candidates: List<Song>, embeddings: Map<String, FloatArray>, weights: MixWeights): Map<String, Double> {
+        val target = sessionVibe.target() ?: return emptyMap()
+        return candidates.associate { song ->
+            song.id to (Feel.fit(Feel.of(song, embeddings), target) - MixVibeSimilarity.PRIOR) * weights.feelFit
+        }
+    }
+
+    // ── Friends in the room ─────────────────────────────────────────────────────────
+    /** Friend songs the mix queued this session, per friend (for fair turns). */
+    private val friendPicks = HashMap<String, Int>()
+
+    private fun friendDeficit(friendIds: Collection<String>): Map<String, Double> {
+        if (friendIds.isEmpty()) return emptyMap()
+        val counts = synchronized(friendPicks) { HashMap(friendPicks) }
+        val total = friendIds.sumOf { counts[it] ?: 0 }
+        val fair = total.toDouble() / friendIds.size
+        return friendIds.associateWith { fair - (counts[it] ?: 0) }
+    }
+
+    /** What the queue prompt box resolved to: seed songs and the labels it understood. */
+    data class PromptResolution(
+        val songs: List<Song>,
+        val labels: List<String>,
+        val filter: VibeFilter?,
+        /** What was typed, and how it was read (directions: away, less, blend, path, shifts). */
+        val query: String = "",
+        val intent: PromptIntent? = null,
+        /** Songs for each side of "between X and Y" / "start with X, end with Y". */
+        val blendA: List<Song> = emptyList(),
+        val blendB: List<Song> = emptyList(),
+        val pathA: List<Song> = emptyList(),
+        val pathB: List<Song> = emptyList(),
+    ) {
+        /** True when there's something to steer with (songs to move toward, or a direction). */
+        val isUsable: Boolean get() = songs.isNotEmpty() || intent?.hasDirection == true
+    }
+
+    /**
+     * Songs for a typed prompt. A plain song or artist name works as before (library first, then
+     * an online search). Anything with a sound in it ("upbeat 80s rock like Queen", "slow sad
+     * acoustic", "fast aussie hip hop but no rap") is read by [MixPromptParser] and every part is
+     * scored together over the whole library, so songs matching more parts rank higher. [refined]
+     * is an optional richer reading of the same prompt (the on-device AI); it only fills gaps.
+     */
+    suspend fun resolvePrompt(query: String, refined: PromptIntent? = null): PromptResolution = withContext(Dispatchers.IO) {
         val q = query.trim()
-        if (q.isEmpty()) return@withContext emptyList()
-        val needle = q.lowercase(java.util.Locale.ROOT)
-        val snapshot = connected.snapshot.value
-        val library = (music.getAllSongsOnce() + snapshot.playlists.flatMap { it.songs } + snapshot.spotifyLikes + snapshot.youtubeLikes)
+        if (q.isEmpty()) return@withContext PromptResolution(emptyList(), emptyList(), null, q)
+        val parsed = MixPromptParser.parse(q)
+        val intent = refined?.let { parsed.mergedWith(it) } ?: parsed
+        // Only a direction ("calmer", "no Drake", "between X and Y"): nothing to match directly.
+        val target = if (intent.hasTarget || !intent.hasDirection) resolveTarget(q, intent)
+            else PromptResolution(emptyList(), intent.labels, null)
+        suspend fun side(name: String?): List<Song> = name?.let { resolveTarget(it, MixPromptParser.parse(it)).songs }.orEmpty()
+        val blendA = side(intent.blend.getOrNull(0))
+        val blendB = side(intent.blend.getOrNull(1))
+        val pathA = side(intent.pathFrom)
+        val pathB = side(intent.pathTo)
+        target.copy(query = q, intent = intent, blendA = blendA, blendB = blendB, pathA = pathA, pathB = pathB,
+            labels = intent.labels.ifEmpty { target.labels })
+    }
+
+    /** Songs matching what to move toward (names and / or a sound); see [resolvePrompt]. */
+    private suspend fun resolveTarget(q: String, intent: PromptIntent): PromptResolution {
+        val snapshotNow = connected.snapshot.value
+        val library = (music.getAllSongsOnce() + snapshotNow.playlists.flatMap { it.songs } + snapshotNow.spotifyLikes + snapshotNow.youtubeLikes)
             .filter { it.contentUriString.isNotBlank() && !feedback.isDisliked(it) }
             .distinctBy(::mixIdentity)
-        fun rank(song: Song): Int {
+
+        fun rank(song: Song, needle: String): Int {
             val artist = song.artist.lowercase(java.util.Locale.ROOT)
             val title = song.title.lowercase(java.util.Locale.ROOT)
             return when {
@@ -485,13 +860,87 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
                 else -> -1
             }
         }
-        val local = library.map { it to rank(it) }.filter { it.second >= 0 }
-            .sortedBy { it.second }.map { it.first }.take(MAX_PROMPT_SEEDS)
-        if (local.isNotEmpty()) return@withContext local
-        discover { youtube.searchSongs(q) }
+        fun lookup(needle: String, limit: Int): List<Song> {
+            val n = needle.trim().lowercase(java.util.Locale.ROOT)
+            if (n.length < 2) return emptyList()
+            return library.map { it to rank(it, n) }.filter { it.second >= 0 }
+                .sortedBy { it.second }.map { it.first }.take(limit)
+        }
+
+        // Only a name ("Queen", "Mr Brightside"): the old, exact behaviour.
+        if (!intent.hasVibe) {
+            val names = intent.artists + intent.songs
+            // Direction words ("calmer", "a little", "no X") were read already; look up what's left.
+            val words = if (intent.hasDirection || intent.strength != null || intent.temporarySongs != null)
+                intent.freeWords.joinToString(" ").ifBlank { q } else q
+            val local = if (names.isEmpty()) lookup(words, MAX_PROMPT_SEEDS)
+                else names.flatMap { lookup(it, MAX_PROMPT_SEEDS) }.distinctBy(::mixIdentity).take(MAX_PROMPT_SEEDS)
+            val labels = intent.labels.ifEmpty { listOf("more like $q") }
+            if (local.isNotEmpty()) return PromptResolution(local, labels, null)
+            val online = discover { youtube.searchSongs(names.firstOrNull() ?: words) }
+                .filter { it.contentUriString.isNotBlank() || it.youtubeId != null }
+                .map(gatherer::applyCached)
+                .take(MAX_PROMPT_SEEDS)
+            return PromptResolution(online, labels, null)
+        }
+
+        // A sound / era / mood (plus maybe names): score the whole library on all parts at once.
+        val snap = snapshot
+        val features = snap?.features.orEmpty()
+        fun analysed(song: Song): Song = snap?.byId?.get(song.id) ?: withAnalysis(gatherer.applyCached(song), features)
+
+        val artistNames = intent.artists.map { it.lowercase(java.util.Locale.ROOT) }.toMutableSet()
+        // Words typed without "like" can still be an artist in the library ("queen rock").
+        if (intent.freeWords.isNotEmpty()) {
+            val libraryArtists = library.mapTo(HashSet()) { it.artist.trim().lowercase(java.util.Locale.ROOT) }
+            val words = intent.freeWords
+            for (size in 3 downTo 1) for (i in 0..(words.size - size)) {
+                val phrase = words.subList(i, i + size).joinToString(" ")
+                if (phrase in libraryArtists) artistNames += phrase
+            }
+        }
+        val songSeeds = intent.songs.flatMap { lookup(it, 2) }.distinctBy(::mixIdentity)
+        val artistSeeds = library.filter { it.artist.trim().lowercase(java.util.Locale.ROOT) in artistNames }
+        val affinity = MixAffinityIndex((songSeeds + artistSeeds.take(6)).distinctBy(::mixIdentity))
+        val filter = intent.copy(freeWords = intent.freeWords.filterNot { w -> artistNames.any { it.contains(w) } }).toFilter()
+        val excluded = intent.excludeGenres
+
+        fun isExcluded(song: Song): Boolean {
+            if (excluded.isEmpty()) return false
+            val tags = (song.genre.orEmpty() + " " + song.songInformation.subgenre.orEmpty()).lowercase(java.util.Locale.ROOT)
+            return excluded.any { tag -> genreTagRegex(tag).containsMatchIn(tags) }
+        }
+
+        val scored = library.asSequence()
+            .filterNot(::isExcluded)
+            .map(::analysed)
+            .map { song ->
+                var score = MusicVibeFilters.score(song, filter)
+                if (song.artist.trim().lowercase(java.util.Locale.ROOT) in artistNames) score += 4.0
+                score += affinity.affinity(song) * 0.35
+                song to score
+            }
+            .filter { it.second >= MusicVibeFilters.MATCH_THRESHOLD }
+            .sortedByDescending { it.second }
+            .map { it.first }
+            .toList()
+        // A few per artist so one artist doesn't take the whole steer.
+        val perArtist = HashMap<String, Int>()
+        val picked = (songSeeds + scored).distinctBy(::mixIdentity).filter { song ->
+            val key = song.artist.trim().lowercase(java.util.Locale.ROOT)
+            val n = perArtist.getOrDefault(key, 0)
+            if (n >= 3) false else { perArtist[key] = n + 1; true }
+        }.take(MAX_PROMPT_INTENT_SEEDS)
+
+        if (picked.isNotEmpty()) return PromptResolution(picked, intent.labels, filter)
+        // Nothing in the library fits: search online with the names first, then the words typed.
+        val onlineQuery = (intent.artists + intent.songs).firstOrNull() ?: q
+        val online = discover { youtube.searchSongs(onlineQuery) }
             .filter { it.contentUriString.isNotBlank() || it.youtubeId != null }
+            .filterNot(::isExcluded)
             .map(gatherer::applyCached)
             .take(MAX_PROMPT_SEEDS)
+        return PromptResolution(online, intent.labels, filter.takeIf { online.isNotEmpty() })
     }
 
     /**
@@ -511,6 +960,12 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
     fun markPicked(song: Song) {
         signals.markPicked(song)
         clearSkipped(song)
+        // The vibe tilts toward it: 25 % if it already fits, 15 % if it's a different vibe.
+        val feel = feelOf(song)
+        val rate = if (sessionVibe.target() == null || sessionVibe.fit(feel) >= SessionVibe.PICK_FIT_THRESHOLD)
+            SessionVibe.PICK_FITS else SessionVibe.PICK_DIFFERENT
+        sessionVibe.pull("pick:" + mixIdentity(song), feel, rate)
+        sessionVibe.remove("removed:" + mixIdentity(song))
         feedback.invalidate()
     }
 
@@ -525,6 +980,8 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
 
     fun markOffVibe(song: Song) {
         signals.markRemoved(song)
+        sessionVibe.remove("pick:" + mixIdentity(song))
+        sessionVibe.push("removed:" + mixIdentity(song), feelOf(song), SessionVibe.REMOVED)
         synchronized(offVibe) {
             offVibe.removeAll { mixIdentity(it) == mixIdentity(song) }
             offVibe.addLast(song)
@@ -537,6 +994,7 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
     /** Undo of a queue removal: the song fits after all. */
     fun clearOffVibe(song: Song) {
         signals.unmarkRemoved(song)
+        sessionVibe.remove("removed:" + mixIdentity(song))
         synchronized(offVibe) { offVibe.removeAll { mixIdentity(it) == mixIdentity(song) } }
         feedback.forgetRemoval(song)
         feedback.invalidate()
@@ -570,11 +1028,72 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
                 (components["artistFatigue"] ?: 0.0) * 0.5
             val penalty = feedback.removalPenalty(song) * 0.5 + offVibePenalty(song, removed) * 0.5 +
                 offVibePenalty(song, skips) * 0.25
-            song.id to (learned - penalty).coerceIn(-4.0, 3.0)
+            song.id to (learned - penalty + reactionBias(song)).coerceIn(-4.0, 3.0)
         }
     }
 
     internal fun offVibeSongs(): List<Song> = synchronized(offVibe) { offVibe.toList() }
+
+    // ── Lyrics-screen reactions (❤️ 🔥 👌 / 👎 🥱 😐) ──
+
+    /** Lasting taste per song id and per recording (❤️ 👌 up, 👎 down): polarity × strength. */
+    private val reactionTaste = java.util.concurrent.ConcurrentHashMap<String, Double>()
+    /** This session's vibe / engagement reactions (🔥 😐 🥱), per recording. */
+    private val sessionReactions = java.util.concurrent.ConcurrentHashMap<String, Double>()
+
+    private suspend fun loadReactionTaste() {
+        runCatching {
+            // Newest first: the latest reaction to a song wins.
+            for (r in learning.reactionDao().recent()) {
+                if (r.axis != SongReaction.Axis.SONG_PREFERENCE.name) continue
+                reactionTaste.putIfAbsent(r.songId, r.polarity * r.strength)
+            }
+            feedback.invalidate()
+        }
+    }
+
+    /**
+     * A reaction from the lyrics screen. Moves where this session is heading right away
+     * (🔥 ❤️ 👌 pull toward the song's feel, 😐 🥱 👎 push away) and, for ❤️ 👌 👎, how the song
+     * itself ranks from now on. 👎 is still not an exclusion (that's the mix feedback sheet).
+     */
+    fun onReaction(song: Song, reaction: SongReaction) {
+        val identity = mixIdentity(song)
+        val id = "reaction:$identity"
+        val feel = feelOf(song)
+        when {
+            reaction.isPositive -> sessionVibe.pull(id, feel, SessionVibe.PICK_FITS * reaction.strength)
+            reaction == SongReaction.BORING -> sessionVibe.push(id, feel, SessionVibe.SKIPPED * 2 * reaction.strength)
+            else -> sessionVibe.push(id, feel, SessionVibe.DISLIKED * reaction.strength)
+        }
+        if (reaction.axis == SongReaction.Axis.SONG_PREFERENCE) {
+            reactionTaste[song.id] = reaction.signedWeight
+            reactionTaste[identity] = reaction.signedWeight
+            sessionReactions.remove(identity)
+        } else {
+            sessionReactions[identity] = reaction.signedWeight
+        }
+        feedback.invalidate()
+    }
+
+    /** Score shift from reactions: lasting taste, plus a smaller nudge for this session's. */
+    internal fun reactionBias(song: Song): Double {
+        val identity = mixIdentity(song)
+        val lasting = reactionTaste[song.id] ?: reactionTaste[identity] ?: 0.0
+        val session = sessionReactions[identity] ?: 0.0
+        return lasting * REACTION_TASTE_WEIGHT + session * REACTION_SESSION_WEIGHT
+    }
+
+    /** The penalty side of [reactionBias], for planners that only take penalties. */
+    private fun reactionPenalty(song: Song): Double = (-reactionBias(song)).coerceAtLeast(0.0)
+
+    init {
+        // Lasting lyrics reactions (❤️ 👌 / 👎) from earlier sessions. (After the maps above
+        // exist: init blocks run in declaration order.)
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO).launch {
+            loadReactionTaste()
+        }
+    }
 
     /**
      * Songs skipped early in this mix session, newest last. A skip is a weaker "not this"
@@ -582,7 +1101,11 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
      */
     private val skipped = ArrayDeque<Song>()
 
-    fun markSkipped(song: Song) {
+    fun markSkipped(song: Song, friendSong: Boolean = false) {
+        // A skipped friend song is a weaker "not this" (half), and says nothing about the friend.
+        sessionVibe.push("skipped:" + mixIdentity(song), feelOf(song),
+            if (friendSong) SessionVibe.SKIPPED * 0.5 else SessionVibe.SKIPPED)
+        if (friendSong) { feedback.invalidate(); return }
         synchronized(skipped) {
             skipped.removeAll { mixIdentity(it) == mixIdentity(song) }
             skipped.addLast(song)
@@ -593,6 +1116,7 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
 
     /** A skipped song was played again / queued by hand: it wasn't a rejection after all. */
     fun clearSkipped(song: Song) {
+        sessionVibe.remove("skipped:" + mixIdentity(song))
         val removed = synchronized(skipped) { skipped.removeAll { mixIdentity(it) == mixIdentity(song) } }
         if (removed) feedback.invalidate()
     }
@@ -669,7 +1193,8 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
      */
     private fun shortlist(
         pool: List<Song>, seeds: List<Song>, boosts: Map<String, Double>, favorites: Set<String>,
-        embeddings: Map<String, FloatArray>, fresh: Set<String>, steer: Song?
+        embeddings: Map<String, FloatArray>, fresh: Set<String>, steer: Song?,
+        friendOf: Map<String, String> = emptyMap(),
     ): List<Song> {
         val size = SHORTLIST_TOP + SHORTLIST_SOUND + SHORTLIST_RANDOM
         if (pool.size <= size) return pool
@@ -678,6 +1203,17 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
         val removed = MixAffinityIndex(signals.removedSongs())
         val keep = LinkedHashMap<String, Song>(size * 2)
         pool.asSequence().filter { it.id in fresh }.take(SHORTLIST_FRESH).forEach { keep[it.id] = it }
+        // Friends in the room: each friend's best-feeling songs always reach the planner (an
+        // equal slice each, so a friend with a huge library can't crowd out the others).
+        if (friendOf.isNotEmpty()) {
+            val target = sessionVibe.target()
+            val byFriend = pool.filter { it.id in friendOf }.groupBy { friendOf.getValue(it.id) }
+            val each = (SHORTLIST_FRIENDS / byFriend.size.coerceAtLeast(1)).coerceAtLeast(20)
+            for (songs in byFriend.values) {
+                songs.sortedByDescending { song -> target?.let { Feel.fit(Feel.of(song, embeddings), it) } ?: affinity.affinity(song).toDouble() }
+                    .take(each).forEach { keep.putIfAbsent(it.id, it) }
+            }
+        }
         pool.sortedByDescending { song ->
             affinity.affinity(song) + (boosts[song.id] ?: 0.0) +
                 (if (song.id in favorites || song.isFavorite) 2.0 else 0.0) - removed.affinity(song) * 0.5
@@ -710,26 +1246,32 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
         fun analysed(song: Song): Song = snap?.byId?.get(song.id)
             ?: withAnalysis(gatherer.applyCached(song), features)
         val ctx = context.map(::analysed)
-        val lockedVibe = vibe
+        val lockedVibe = activeVibe
         val steer = direction ?: promptSeeds.firstOrNull()
         val energy = energyTarget
         val varietyValue = variety
         val recentArtists = ctx.takeLast(2 + (varietyValue * 3).toInt()).mapTo(HashSet()) { it.artist.trim().lowercase() }
         val removedList = offVibeSongs()
-        val songs = candidates.filterNot { feedback.isDisliked(it) }.map(::analysed)
+        val songs = candidates.filterNot { feedback.isDisliked(it) || isSteeredAway(it) }.map(::analysed)
         val signalParts = vibeSignalComponents(songs, ctx, embeddings)
+        val target = sessionVibe.target()
+        val wantedEnergy = energyAt(0)
         return songs.associate { song ->
             var score = MixVibeSimilarity.toContext(song, ctx, embeddings) * 8.0
+            target?.let { score += (Feel.fit(Feel.of(song, embeddings), it) - MixVibeSimilarity.PRIOR) * MixWeights.DEFAULT.feelFit }
+            score -= lessPenalty(song)
             ctx.lastOrNull()?.let { previous -> score += MixVibe.components(previous, song).values.sum() * 0.4 }
             for (part in signalParts.values) score += part[song.id] ?: 0.0
             lockedVibe?.let { score += MusicVibeFilters.score(song, it).coerceIn(-3.0, 8.0) * 0.6 }
             steer?.let { score += (MixVibeSimilarity.similarity(song, it, embeddings) - MixVibeSimilarity.PRIOR) * 4.0 }
-            energy?.let { target ->
+            (energy ?: wantedEnergy)?.let { wanted ->
                 val e = song.mixIntelligence.energy?.takeIf { it.isFinite() && it in 0f..1f }?.toDouble()
-                score -= (if (e == null) 0.3 else kotlin.math.abs(e - target)) * 3.0
+                    ?: Feel.of(song).energy
+                score -= (if (e == null) 0.3 else kotlin.math.abs(e - wanted)) * (if (energy != null) 3.0 else 2.0)
             }
             if (song.artist.trim().lowercase() in recentArtists) score -= 1.5 + varietyValue * 4.0
             score -= feedback.removalPenalty(song) * 0.5 + offVibePenalty(song, removedList) * 0.5
+            score += reactionBias(song)
             song.id to score
         }
     }
@@ -749,7 +1291,7 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
     }
 
     fun heardTooMuch(song: Song) = feedback.heardTooMuch(song)
-    suspend fun resetLearning() { direction = null; learning.reset(); historyCache = null; cooldownCache = null; signals.clear() }
+    suspend fun resetLearning() { direction = null; learning.reset(); historyCache = null; cooldownCache = null; signals.clear(); sessionVibe.reset(); synchronized(steerList) { steerList.clear() }; rebuildSteerState() }
     fun resetFeedback() = feedback.reset()
     fun decisionSummary(): String = lastDecisions.take(5).joinToString("\n\n") {
         "${it.song.title}: ${it.source}\n" + it.components.entries.joinToString { (key, value) -> "$key=${"%.1f".format(value)}" }
@@ -759,9 +1301,18 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
     suspend fun attribute(song: Song, item: androidx.media3.common.MediaItem, queueRevision: Long): androidx.media3.common.MediaItem {
         val decision = lastDecisions.firstOrNull { it.song.id == song.id }
         decision?.let { d ->
-            val insight = MixInsight(explain(d), d.source == "discovery")
+            val insight = MixInsight(explain(d), d.source == "discovery" && d.friendId == null)
             _insights.value = (_insights.value - song.id + (song.id to insight)).entries.toList()
                 .takeLast(MAX_INSIGHTS).associate { it.key to it.value }
+        }
+        // A friend's song (in the room, or from a friend playlist you saved): their picture on the row.
+        val friendId = decision?.friendId ?: snapshot?.friendSongs?.get(song.id)
+        if (friendId != null) {
+            try {
+                val (name, avatar) = friendsInRoom.get().displayOf(friendId)
+                com.theveloper.pixelplay.data.social.FriendQueueAttribution.tag(listOf(song.id), friendId, name, avatar)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled } catch (_: Exception) { }
+            if (decision?.friendId != null) synchronized(friendPicks) { friendPicks[friendId] = (friendPicks[friendId] ?: 0) + 1 }
         }
         val id = java.util.UUID.randomUUID().toString()
         val entry = MixRecommendation(id, song.id, mixIdentity(song), learning.sessionId,
@@ -775,7 +1326,10 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
         return MixQueueMetadata.tag(item, id, learning.sessionId, mixIdentity(song))
     }
 
-    fun dislike(song: Song) = feedback.dislike(song)
+    fun dislike(song: Song) {
+        sessionVibe.push("disliked:" + mixIdentity(song), feelOf(song), SessionVibe.DISLIKED)
+        feedback.dislike(song)
+    }
     fun isDisliked(song: Song) = feedback.isDisliked(song)
 
     /**
@@ -787,7 +1341,7 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
     suspend fun next(flavor: MixFlavor, seeds: List<Song>, excluded: Set<String>, userPicks: List<Song> = emptyList(), limit: Int = 12): List<Song> = withContext(Dispatchers.IO) {
         feedback.awaitReady()
         val mixId = feedback.activeMixId
-        val lockedVibe = vibe
+        val lockedVibe = activeVibe
         var effectiveLimit = limit
         // "More like this" wins; otherwise the song the user most recently queued steers the mix.
         // A typed prompt counts as explicit too; "More like this" on a song still wins.
@@ -812,8 +1366,22 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
         val libraryState = librarySnapshot()
         val explicitFavorites = libraryState.explicitFavorites
         val library = libraryState.library
+        // A fresh session starts its vibe from the seeds.
+        if (sessionVibe.target() == null) {
+            sessionVibe.seed(Feel.average(acceptedSeeds.takeLast(4).map { seed ->
+                Feel.of(libraryState.byId[seed.id] ?: withAnalysis(seed, libraryState.features), libraryState.embeddings)
+            }))
+        }
+        // Friends in the room (Mix it in): their songs join the pool, tagged with the friend.
+        val friendController = try { friendsInRoom.get() } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled } catch (_: Exception) { null }
+        val friendPool = try { friendController?.mixPool().orEmpty() } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled } catch (_: Exception) { emptyMap() }
+        val friendOf = HashMap<String, String>()
+        for ((friendId, songs) in friendPool) for (song in songs) if (song.id !in libraryState.ownIds) friendOf.putIfAbsent(song.id, friendId)
+        val friendShare = if (friendOf.isEmpty()) 0.0 else friendController?.mixShare() ?: 0.0
+        val friendCandidates = friendPool.values.asSequence().flatten().filter { it.id in friendOf }.distinctBy { it.id }
+            .map { libraryState.byId[it.id] ?: withAnalysis(gatherer.applyCached(it), libraryState.features) }.toList()
         var freshIds: Set<String> = emptySet()
-        val candidates = if (flavor == MixFlavor.NORMAL) library else {
+        val candidates = (if (flavor == MixFlavor.NORMAL) library else {
             val libraryKeys = library.flatMapTo(HashSet(), ::recordingKeys)
             // A locked vibe searches for itself first ("workout songs", "edm songs"…).
             val vibeQueries = lockedVibe?.let { v ->
@@ -844,7 +1412,7 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
             val affinity = MixAffinityIndex(acceptedSeeds)
             gatherer.gatherInBackground(fresh.filter(gatherer::needsGathering).sortedByDescending(affinity::affinity).take(24))
             library + fresh
-        }
+        }) + friendCandidates
         val removed = offVibeSongs()
         val skips = skippedSongs()
         val removedKeys = removed.flatMapTo(HashSet(), ::recordingKeys)
@@ -853,26 +1421,35 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
             .filter { it.contentUriString.isNotBlank() || !it.youtubeId.isNullOrBlank() }
             .filter { song -> recordingKeys(song).none { it in excluded || it in removedKeys } }
             .filter { !feedback.isDisliked(it, mixId) }
+            .filterNot(::isSteeredAway)
             .distinctBy { "rec:" + gatherer.recordingKey(it) }.toList()
         val (vibePool, vibeBoosts) = applyVibe(lockedVibe, eligibleAll, limit)
         val history = history()
         val seedsAnalysed = acceptedSeeds.map { libraryState.byId[it.id] ?: withAnalysis(it, libraryState.features) }
         // Only the few hundred songs worth planning go through the full planner.
-        val eligible = shortlist(vibePool, seedsAnalysed, vibeBoosts, explicitFavorites, libraryState.embeddings, freshIds, steer)
+        val eligible = shortlist(vibePool, seedsAnalysed, vibeBoosts, explicitFavorites, libraryState.embeddings, freshIds, steer,
+            friendOf = if (friendShare > 0.0) friendOf else emptyMap())
         val weights = MixWeights.DEFAULT.withVariety(variety)
         val decisions = MixSequencePlanner.plan(eligible, seedsAnalysed, explicitFavorites,
             libraryState.identities, history, mixId,
             // Normal Mix stays in the library, but the slider still decides how many unplayed
             // library songs vs. familiar favourites it picks.
             discoveryBalance, System.currentTimeMillis(), catalogue = library + eligible + seedsAnalysed, random = kotlin.random.Random.Default, limit = effectiveLimit, direction = steer, directionWeight = directionWeight,
-            penalties = eligible.associate { it.id to feedback.removalPenalty(it) + offVibePenalty(it, removed) + offVibePenalty(it, skips) * SKIP_PENALTY_SHARE },
+            penalties = eligible.associate { it.id to feedback.removalPenalty(it) + offVibePenalty(it, removed) + offVibePenalty(it, skips) * SKIP_PENALTY_SHARE + lessPenalty(it) + reactionPenalty(it) },
             boosts = vibeBoosts,
             identity = { song -> "rec:" + gatherer.recordingKey(song) },
             weights = weights,
             sessionId = learning.sessionId,
-            extras = mapOf("soundAlike" to soundAlike(eligible, seedsAnalysed, libraryState.embeddings, weights.soundAlike)) +
+            extras = mapOf("soundAlike" to soundAlike(eligible, seedsAnalysed, libraryState.embeddings, weights.soundAlike),
+                "feelFit" to feelFitScores(eligible, libraryState.embeddings, weights)) +
                 vibeSignalComponents(eligible, seedsAnalysed, libraryState.embeddings),
-            energyTarget = energyTarget, microSkipCooldowns = cooldowns())
+            microSkipCooldowns = cooldowns(),
+            energyAt = { position -> this@AdaptiveMix.energyAt(position) },
+            energyWeight = energyWeight(weights),
+            friendOf = if (friendShare > 0.0) friendOf else emptyMap(),
+            friendShare = friendShare,
+            friendDeficit = friendDeficit(friendPool.keys),
+            artistGaps = lessArtists.associateWith { LESS_ARTIST_GAP })
         // Stale plans (feedback changed meanwhile) are discarded by the caller, not here: an
         // empty answer used to read as "no suitable songs".
         lastDecisions = decisions
@@ -892,25 +1469,29 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
         val history = history()
         val library = librarySnapshot()
         val keep = songs.map { library.byId[it.id] ?: withAnalysis(gatherer.applyCached(it), library.features) }
-            .filterNot { feedback.isDisliked(it, mixId) }
+            .filterNot { feedback.isDisliked(it, mixId) || isSteeredAway(it) }
         val seedsAnalysed = seeds.map { library.byId[it.id] ?: withAnalysis(gatherer.applyCached(it), library.features) }
         val weights = MixWeights.DEFAULT.withVariety(variety)
-        val (pool, boosts) = applyVibe(vibe, keep, Int.MAX_VALUE / 4)
+        val (pool, boosts) = applyVibe(activeVibe, keep, Int.MAX_VALUE / 4)
         val removed = offVibeSongs()
         val skips = skippedSongs()
         MixSequencePlanner.plan(pool, seedsAnalysed, library.explicitFavorites,
             library.identities, history, mixId,
             discovery = discoveryBalance,
             now = System.currentTimeMillis(), limit = pool.size, catalogue = library.library + pool,
-            penalties = pool.associate { it.id to feedback.removalPenalty(it) + offVibePenalty(it, removed) + offVibePenalty(it, skips) * SKIP_PENALTY_SHARE },
+            penalties = pool.associate { it.id to feedback.removalPenalty(it) + offVibePenalty(it, removed) + offVibePenalty(it, skips) * SKIP_PENALTY_SHARE + lessPenalty(it) + reactionPenalty(it) },
             direction = direction ?: promptSeeds.firstOrNull(),
             boosts = boosts,
             identity = { song -> "rec:" + gatherer.recordingKey(song) },
             weights = weights,
             sessionId = learning.sessionId,
-            extras = mapOf("soundAlike" to soundAlike(pool, seedsAnalysed, library.embeddings, weights.soundAlike)) +
+            extras = mapOf("soundAlike" to soundAlike(pool, seedsAnalysed, library.embeddings, weights.soundAlike),
+                "feelFit" to feelFitScores(pool, library.embeddings, weights)) +
                 vibeSignalComponents(pool, seedsAnalysed, library.embeddings),
-            energyTarget = energyTarget, microSkipCooldowns = cooldowns()
+            microSkipCooldowns = cooldowns(),
+            energyAt = { position -> this@AdaptiveMix.energyAt(position) },
+            energyWeight = energyWeight(weights),
+            artistGaps = lessArtists.associateWith { LESS_ARTIST_GAP }
         ).map { it.song.id }
     }
 
@@ -947,11 +1528,35 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
     }
 
     private companion object {
+        /** A ❤️ / 👎 moves a song's score by this much (about one "liked artist"). */
+        const val REACTION_TASTE_WEIGHT = 1.5
+        /** 🔥 / 😐 / 🥱 nudge a song for the rest of this session only. */
+        const val REACTION_SESSION_WEIGHT = 0.4
+        const val GROUP_MORE_LIKE = "more-like"
+        const val GROUP_TOWARD = "toward"
+        const val GROUP_BLEND = "blend"
+        const val GROUP_PATH = "path"
+        /** Steer chips at once; the oldest goes when a fourth is added. */
+        const val MAX_STEERS = 3
+        /** "less <artist>": score penalty, and the artist can't return for [LESS_ARTIST_GAP] songs. */
+        const val LESS_ARTIST_PENALTY = 3.0
+        const val LESS_ARTIST_GAP = 10
+        const val LESS_GENRE_PENALTY = 1.5
+        /** "start with X, end with Y" moves over this many songs. */
+        const val PATH_SONGS = 20
+        /** A new Energy setting eases in over this many songs. */
+        const val ENERGY_EASE_SONGS = 3.0
+        /** Energy Follow pulls at this share of a chosen setting's weight. */
+        const val FOLLOW_ENERGY_SHARE = 0.67
+        /** Friend songs kept in the shortlist (so the planner can see them). */
+        const val SHORTLIST_FRIENDS = 160
         const val MAX_OFF_VIBE = 8
         const val MAX_SKIPPED = 12
         /** A skip counts half as much as removing the song from the queue. */
         const val SKIP_PENALTY_SHARE = 0.5
         const val MAX_PROMPT_SEEDS = 5
+        /** Seeds kept for a typed prompt with a sound in it (more parts → wider steer). */
+        const val MAX_PROMPT_INTENT_SEEDS = 12
         const val HISTORY_TTL_MS = 60_000L
         /** Candidates the full planner scores (best cheap matches + a random slice for variety). */
         const val SHORTLIST_TOP = 320
@@ -978,4 +1583,15 @@ class AdaptiveMix @Inject constructor(private val music: MusicRepository, privat
         val DEFAULT_DISCOVERY_QUERIES = listOf("top hits", "new music this week")
         const val MAX_INSIGHTS = 300
     }
+}
+
+/**
+ * Whole-word matcher for a genre tag, compiled once per tag. Building a new Regex for every tag
+ * of every song (thousands per mix) churned native ICU memory until pattern compiles failed.
+ */
+private val genreTagRegexes = java.util.concurrent.ConcurrentHashMap<String, Regex>()
+
+private fun genreTagRegex(tag: String): Regex = genreTagRegexes.getOrPut(tag) {
+    if (genreTagRegexes.size > 512) genreTagRegexes.clear()
+    Regex("(?<![a-z0-9])" + Regex.escape(tag) + "(?![a-z0-9])")
 }

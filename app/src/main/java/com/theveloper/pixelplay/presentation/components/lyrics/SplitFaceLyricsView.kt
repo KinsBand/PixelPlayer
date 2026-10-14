@@ -128,13 +128,21 @@ internal fun SplitFaceLyricsView(
     playPauseContent: Color = Color.White,
     /** Side-by-side halves for a phone lying sideways between two people. */
     landscape: Boolean = false,
+    /**
+     * Face-to-face on the Instruments page: each half shows the tab ([tabPane]) instead of the
+     * lyrics, or, with [tabWithLyrics], live lyrics above the tab like the "Lyrics + Tab" page.
+     * The song bars, centre divider and play / pause stay exactly the same.
+     */
+    tabPane: (@Composable (Modifier) -> Unit)? = null,
+    tabWithLyrics: Boolean = false,
+    dividerColor: Color = Color.Unspecified,
 ) {
     val tapModifier = Modifier.clickable(
         interactionSource = remember { MutableInteractionSource() },
         indication = null,
         onClick = onBackgroundTap
     )
-    val half: @Composable (Modifier, Boolean) -> Unit = { halfModifier, rotated ->
+    val lyricsHalf: @Composable (Modifier, Boolean) -> Unit = { halfModifier, rotated ->
         LyricsHalf(
             modifier = halfModifier,
             rotated = rotated,
@@ -156,6 +164,39 @@ internal fun SplitFaceLyricsView(
             onSeekTo = onSeekTo,
             relayoutKey = relayoutKey,
         )
+    }
+    val half: @Composable (Modifier, Boolean) -> Unit = if (tabPane == null) lyricsHalf else { halfModifier, rotated ->
+        // One person's view of the tab page. The whole half turns for the person across the
+        // table; pointer input turns with it, so scrolling and tapping bars feel natural.
+        Column(
+            modifier = halfModifier
+                .clipToBounds()
+                .then(
+                    if (rotated) Modifier
+                        .graphicsLayer { rotationZ = 180f }
+                        // The upright half is read by TalkBack; skip the copy.
+                        .clearAndSetSemantics { }
+                    else Modifier
+                )
+        ) {
+            if (tabWithLyrics) {
+                lyricsHalf(Modifier.weight(1f).fillMaxWidth(), false)
+                Box(
+                    Modifier
+                        .padding(horizontal = 24.dp)
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .graphicsLayer { alpha = 0.12f }
+                        .clip(RoundedCornerShape(1.dp))
+                        .then(
+                            if (dividerColor != Color.Unspecified)
+                                Modifier.drawWithContent { drawRect(dividerColor) }
+                            else Modifier
+                        )
+                )
+            }
+            tabPane(Modifier.weight(1f).fillMaxWidth())
+        }
     }
     val playPause: @Composable () -> Unit = {
         if (onPlayPause != null) {

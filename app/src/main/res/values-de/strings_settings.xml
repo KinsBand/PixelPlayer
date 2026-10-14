@@ -170,7 +170,7 @@
     <string name="settings_app_theme_subtitle">Hell, Dunkel oder System-Design â€“ ganz nach Geschmack.</string>
     <string name="settings_theme_light">Hell</string>
     <string name="settings_theme_dark">Dunkel</string>
-    <string name="settings_theme_follow_system">System folgen</string>
+    <string name="settings_theme_follow_system">System</string>
     <string name="settings_smooth_corners_title">Sanfte Ecken</string>
     <string name="settings_smooth_corners_subtitle">Weichere Eckenform â€“ kann auf Ã¤lteren GerÃ¤ten die Performance leicht beeinflussen.</string>
     <string name="settings_disable_blur_all_over_title">Weichzeichnungseffekte deaktivieren</string>

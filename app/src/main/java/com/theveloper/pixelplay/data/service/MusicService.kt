@@ -45,7 +45,6 @@ import com.theveloper.pixelplay.PixelPlayApplication
 import com.theveloper.pixelplay.MainActivity
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.diagnostics.PerformanceMetrics
-import com.theveloper.pixelplay.data.model.PlayerInfo
 import com.theveloper.pixelplay.data.model.PlaybackQueueItemSnapshot
 import com.theveloper.pixelplay.data.model.PlaybackQueueSnapshot
 import com.theveloper.pixelplay.data.preferences.EqualizerPreferencesRepository
@@ -55,7 +54,6 @@ import com.theveloper.pixelplay.data.recognition.ambient.AmbientSuggestionContro
 import com.theveloper.pixelplay.data.repository.MusicRepository
 import com.theveloper.pixelplay.data.service.player.DualPlayerEngine
 import com.theveloper.pixelplay.data.service.player.TransitionController
-import com.theveloper.pixelplay.ui.glancewidget.PlayerActions
 import com.theveloper.pixelplay.utils.AlbumArtUtils
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -70,7 +68,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import com.theveloper.pixelplay.data.equalizer.EqualizerManager
-import com.theveloper.pixelplay.data.model.WidgetThemeColors
 import com.theveloper.pixelplay.data.preferences.AlbumArtColorAccuracy
 import com.theveloper.pixelplay.data.preferences.AlbumArtPaletteStyle
 import com.theveloper.pixelplay.presentation.viewmodel.ColorSchemeProcessor
@@ -97,43 +94,6 @@ import coil.size.Precision
 import javax.inject.Inject
 import androidx.core.net.toUri
 
-// Acciones personalizadas para compatibilidad con el widget existente
-
-suspend fun loadArtworkBytesViaCoil(context: Context, uri: Uri): ByteArray? {
-    val appContext = context.applicationContext
-    val request = ImageRequest.Builder(appContext)
-        .data(uri)
-        .size(
-            ArtworkTransportSanitizer.WIDGET_CONFIG.maxDimensionPx,
-            ArtworkTransportSanitizer.WIDGET_CONFIG.maxDimensionPx,
-        )
-        .precision(Precision.INEXACT)
-        .allowHardware(false)
-        .memoryCachePolicy(CachePolicy.ENABLED)
-        .networkCachePolicy(CachePolicy.ENABLED)
-        .build()
-
-    return runCatching {
-        val drawable = appContext.imageLoader.execute(request).drawable ?: return@runCatching null
-        val fallbackSizePx = ArtworkTransportSanitizer.WIDGET_CONFIG.maxDimensionPx
-        val bitmap = drawable.toBitmap(
-            width = drawable.intrinsicWidth.takeIf { it > 0 } ?: fallbackSizePx,
-            height = drawable.intrinsicHeight.takeIf { it > 0 } ?: fallbackSizePx,
-            config = Bitmap.Config.ARGB_8888,
-        )
-        val encodedBytes = ByteArrayOutputStream().use { output ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 92, output)
-            output.toByteArray()
-        }
-        ArtworkTransportSanitizer.sanitizeEncodedBytes(
-            data = encodedBytes,
-            config = ArtworkTransportSanitizer.WIDGET_CONFIG,
-        )
-    }.getOrElse { error ->
-        Timber.tag("MusicService_PixelPlay").w(error, "Artwork read failed via Coil for uri=%s", uri)
-        null
-    }
-}
 
 
 @UnstableApi
@@ -142,6 +102,9 @@ class MusicService : MediaLibraryService() {
 
     @Inject
     lateinit var engine: DualPlayerEngine
+    /** Radio: captures stream titles (ICY / ID3), the session history and listening time. */
+    @Inject
+    lateinit var radioNowPlaying: com.theveloper.pixelplay.data.radio.RadioNowPlaying
     @Inject
     lateinit var controller: TransitionController
     @Inject
@@ -276,17 +239,6 @@ class MusicService : MediaLibraryService() {
         CastSyncCoordinator(
             context = this,
             listeningStatsTracker = listeningStatsTracker,
-            requestWidgetUpdate = { force -> widgetUpdateManager.requestFullUpdate(force) },
-        )
-    }
-    // Glance widget update pipeline, extracted to a standalone manager.
-    // State assembly (buildPlayerInfo) stays here and is supplied as a callback;
-    // the manager owns debounce, diffing and rendering.
-    private val widgetUpdateManager by lazy {
-        WidgetUpdateManager(
-            context = applicationContext,
-            scope = serviceScope,
-            buildPlayerInfo = { buildPlayerInfo() },
         )
     }
     private var playbackSnapshotPersistJob: Job? = null
@@ -323,7 +275,14 @@ class MusicService : MediaLibraryService() {
 
     companion object {
         private const val TAG = "MusicService_PixelPlay"
-        const val NOTIFICATION_ID = 101
+        /**
+         * The short "starting up" foreground notification uses the media notification's own id
+         * (Media3 DefaultMediaNotificationProvider.DEFAULT_NOTIFICATION_ID), so the player
+         * notification simply replaces it instead of leaving a second one behind.
+         */
+        const val NOTIFICATION_ID = 1001
+        /** The old placeholder id; any copy left from an earlier version is cleared on start. */
+        private const val LEGACY_PLACEHOLDER_NOTIFICATION_ID = 101
         const val ACTION_SLEEP_TIMER_EXPIRED = "com.theveloper.pixelplay.ACTION_SLEEP_TIMER_EXPIRED"
         private const val SLEEP_FADE_DURATION_MS = 12_000L
         private const val SLEEP_FADE_STEP_MS = 100L
@@ -348,7 +307,6 @@ class MusicService : MediaLibraryService() {
         private const val AUTO_CONTEXT_ARTIST = "artist"
         private const val AUTO_CONTEXT_PLAYLIST = "playlist"
         private const val DEFAULT_STREAM_BUFFER_SIZE = 8 * 1024
-        private const val WIDGET_ART_FAILURE_RETRY_MS = 30_000L
         private const val HEADSET_RECONNECT_RESUME_WINDOW_MS = 15_000L
 
         fun markPendingMediaButtonForegroundStart() {
@@ -410,7 +368,6 @@ class MusicService : MediaLibraryService() {
         updateEqualizerGenre(player.currentMediaItem)
         Timber.tag("MusicService").d(logMessage)
         syncLocalListeningStatsFromPlayer(player)
-        widgetUpdateManager.requestFullUpdate(true)
         refreshMediaSessionUi(session)
     }
 
@@ -489,6 +446,10 @@ class MusicService : MediaLibraryService() {
         // receives the media-button intent.
         temporaryForegroundStartedInOnCreate =
             consumePendingMediaButtonForegroundStart() || Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+        // A "Processing playback action…" notification orphaned by an older version.
+        runCatching {
+            androidx.core.app.NotificationManagerCompat.from(this).cancel(LEGACY_PLACEHOLDER_NOTIFICATION_ID)
+        }
         if (temporaryForegroundStartedInOnCreate) {
             startTemporaryForegroundForCommand()
         }
@@ -594,6 +555,15 @@ class MusicService : MediaLibraryService() {
             }
         }
 
+        // Optional "Up next" notification (Settings → Appearance).
+        upNextNotifier = UpNextNotifier(this, getOpenAppPendingIntent())
+        serviceScope.launch {
+            userPreferencesRepository.upNextNotificationFlow.collect { enabled ->
+                upNextEnabled = enabled
+                withContext(Dispatchers.Main) { refreshUpNext() }
+            }
+        }
+
         serviceScope.launch {
             userPreferencesRepository.hiFiModeEnabledFlow.collect { enabled ->
                 engine.setHiFiMode(enabled)
@@ -672,6 +642,9 @@ class MusicService : MediaLibraryService() {
                 val customCommands = listOf(
                     MusicNotificationProvider.CUSTOM_COMMAND_CLOSE_PLAYER,
                     MusicNotificationProvider.CUSTOM_COMMAND_LIKE,
+                    MusicNotificationProvider.CUSTOM_COMMAND_LIKE_ON,
+                    MusicNotificationProvider.CUSTOM_COMMAND_LIKE_OFF,
+                    MusicNotificationProvider.CUSTOM_COMMAND_SKIP_NEXT,
                     MusicNotificationProvider.CUSTOM_COMMAND_SET_FAVORITE_STATE,
                     MusicNotificationProvider.CUSTOM_COMMAND_TOGGLE_SHUFFLE,
                     MusicNotificationProvider.CUSTOM_COMMAND_SHUFFLE_ON,
@@ -783,7 +756,13 @@ class MusicService : MediaLibraryService() {
                         }
                         session.player.repeatMode = newMode
                         refreshMediaSessionUi(session)
-                        widgetUpdateManager.requestFullUpdate(true)
+                    }
+                    MusicNotificationProvider.CUSTOM_COMMAND_SKIP_NEXT -> {
+                        val player = session.player
+                        if (player.hasNextMediaItem()) {
+                            player.seekToNext()
+                        }
+                        refreshMediaSessionUi(session)
                     }
                     MusicNotificationProvider.CUSTOM_COMMAND_LIKE -> {
                         val songId = session.player.currentMediaItem?.mediaId
@@ -795,6 +774,12 @@ class MusicService : MediaLibraryService() {
                             session = session,
                             targetFavoriteState = targetFavoriteState
                         )
+                    }
+                    MusicNotificationProvider.CUSTOM_COMMAND_LIKE_ON -> {
+                        return setCurrentSongFavoriteState(session = session, targetFavoriteState = true)
+                    }
+                    MusicNotificationProvider.CUSTOM_COMMAND_LIKE_OFF -> {
+                        return setCurrentSongFavoriteState(session = session, targetFavoriteState = false)
                     }
                     MusicNotificationProvider.CUSTOM_COMMAND_SET_FAVORITE_STATE -> {
                         val enabled = args.getBoolean(
@@ -976,6 +961,17 @@ class MusicService : MediaLibraryService() {
             }
         }
 
+        // Radio rewind: where the player is in the current recorded station (main thread).
+        radioNowPlaying.playerPositionProvider = {
+            val player = engine.masterPlayer
+            val uri = player.currentMediaItem?.localConfiguration?.uri
+            if (com.theveloper.pixelplay.data.radio.timeshift.RadioTimeShift.handles(uri)) {
+                player.currentPosition.coerceAtLeast(0L)
+            } else {
+                null
+            }
+        }
+
         mediaSession = MediaLibrarySession.Builder(this, engine.masterPlayer, callback)
             .setSessionActivity(getOpenAppPendingIntent())
             .setBitmapLoader(CoilBitmapLoader(this, serviceScope))
@@ -990,13 +986,15 @@ class MusicService : MediaLibraryService() {
                 delay(2_000L)
                 if (mediaSession?.player?.hasForegroundPlaybackIntent() != true) {
                     stopForeground(STOP_FOREGROUND_REMOVE)
+                    // The placeholder shared the player notification's id: let a paused session
+                    // put its own notification back.
+                    mediaSession?.let { refreshMediaSessionUi(it, force = true) }
                 }
             }
         }
         serviceScope.launch {
             restorePlaybackQueueSnapshotIfNeeded()
             mediaSession?.let { refreshMediaSessionUi(it) }
-            widgetUpdateManager.requestFullUpdate(true)
         }
 
         serviceScope.launch {
@@ -1013,7 +1011,6 @@ class MusicService : MediaLibraryService() {
                         Timber.tag("MusicService")
                             .d("Favorite status changed for current song. Updating notification.")
                         mediaSession?.let { refreshMediaSessionUi(it) }
-                        widgetUpdateManager.requestFullUpdate(true)
                     }
                 }
             }
@@ -1135,13 +1132,17 @@ class MusicService : MediaLibraryService() {
             PixelPlayApplication.NOTIFICATION_CHANNEL_ID
         )
             .setSmallIcon(R.drawable.monochrome_player)
+            // Android needs *a* notification for a moment while the service starts; it carries no
+            // message and is replaced by the player notification (same id) or removed.
             .setContentTitle(getString(R.string.app_name))
-            .setContentText(getString(R.string.service_processing_action))
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
             .setContentIntent(getOpenAppPendingIntent())
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .setOngoing(true)
+            // Never outlives a few seconds, even if something goes wrong.
+            .setTimeoutAfter(8_000L)
             .build()
         // Pass mediaPlayback explicitly. On API 34+ a missing/mismatched type can throw
         // MissingForegroundServiceTypeException; ServiceCompat picks the right overload
@@ -1182,92 +1183,15 @@ class MusicService : MediaLibraryService() {
             (isMediaButtonIntent &&
                 !startedTemporaryForegroundInOnCreate &&
                 !isServiceAlreadyForeground()) ||
-            when (intent?.action) {
-                PlayerActions.PLAY_PAUSE,
-                PlayerActions.NEXT,
-                PlayerActions.PREVIOUS,
-                PlayerActions.FAVORITE,
-                PlayerActions.PLAY_FROM_QUEUE,
-                PlayerActions.SHUFFLE,
-                PlayerActions.REPEAT -> true
-                else -> false
-            }
+            false
         if (needsTemporaryForeground && !startedTemporaryForegroundInOnCreate) {
             startTemporaryForegroundForCommand()
         }
 
         intent?.action?.let { action ->
-            Timber.tag(TAG).d("onStartCommand widget action: %s", action)
+            Timber.tag(TAG).d("onStartCommand action: %s", action)
             val player = mediaSession?.player ?: engine.masterPlayer
             when (action) {
-                PlayerActions.PLAY_PAUSE -> {
-                    engine.cancelPendingFocusResume()
-                    if (player.playbackState == Player.STATE_IDLE) {
-                        player.prepare()
-                    }
-                    player.playWhenReady = !player.playWhenReady
-                    widgetUpdateManager.requestFullUpdate(true)
-                }
-                PlayerActions.NEXT -> {
-                    player.seekToNext()
-                    widgetUpdateManager.requestFullUpdate(true)
-                }
-                PlayerActions.PREVIOUS -> {
-                    player.seekToPrevious()
-                    widgetUpdateManager.requestFullUpdate(true)
-                }
-                PlayerActions.FAVORITE -> {
-                    val songId = player.currentMediaItem?.mediaId
-                    if (!songId.isNullOrBlank()) {
-                        serviceScope.launch {
-                            val updatedFavorite = musicRepository.toggleFavoriteStatus(songId)
-                            favoriteSongIds = if (updatedFavorite) {
-                                favoriteSongIds + songId
-                            } else {
-                                favoriteSongIds - songId
-                            }
-                            mediaSession?.let { refreshMediaSessionUi(it) }
-                            widgetUpdateManager.requestFullUpdate(true)
-                        }
-                    }
-                }
-                PlayerActions.PLAY_FROM_QUEUE -> {
-                    val songId = intent.getLongExtra("song_id", -1L)
-                    if (songId != -1L) {
-                        val timeline = player.currentTimeline
-                        if (!timeline.isEmpty) {
-                            val window = Timeline.Window()
-                            for (i in 0 until timeline.windowCount) {
-                                timeline.getWindow(i, window)
-                                if (window.mediaItem.mediaId.toLongOrNull() == songId) {
-                                    player.seekTo(i, C.TIME_UNSET)
-                                    player.prepare()
-                                    player.play()
-                                    break
-                                }
-                            }
-                        }
-                    }
-                }
-                PlayerActions.SHUFFLE -> {
-                    val newState = !isManualShuffleEnabled
-                    mediaSession?.let { session ->
-                        updateManualShuffleState(session, enabled = newState, broadcast = true)
-                    } ?: run {
-                        // Fallback if session not ready
-                        isManualShuffleEnabled = newState
-                        widgetUpdateManager.requestFullUpdate(true)
-                    }
-                }
-                PlayerActions.REPEAT -> {
-                    val newMode = when (player.repeatMode) {
-                        Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ONE
-                        Player.REPEAT_MODE_ONE -> Player.REPEAT_MODE_ALL
-                        else -> Player.REPEAT_MODE_OFF
-                    }
-                    player.repeatMode = newMode
-                    widgetUpdateManager.requestFullUpdate(true)
-                }
                 ACTION_SLEEP_TIMER_EXPIRED -> {
                     Timber.tag(TAG).d("Sleep timer expired action received. Fading out and pausing.")
                     cancelDurationSleepTimerInternal()
@@ -1279,6 +1203,7 @@ class MusicService : MediaLibraryService() {
         if (needsTemporaryForeground || startedTemporaryForegroundInOnCreate) {
             if (mediaSession?.player?.hasForegroundPlaybackIntent() != true) {
                 stopForeground(STOP_FOREGROUND_REMOVE)
+                mediaSession?.let { refreshMediaSessionUi(it, force = true) }
                 if (needsTemporaryForeground) {
                     stopSelfResult(startId)
                 }
@@ -1338,10 +1263,16 @@ class MusicService : MediaLibraryService() {
             }
             // Push state immediately so the watch can foreground PixelPlay before
             // system media surfaces take over.
-            widgetUpdateManager.requestFullUpdate(true)
             mediaSession?.let { refreshMediaSessionUi(it) }
             schedulePlaybackSnapshotPersist()
             ambientSuggestionController.onPlaybackStateChanged(isPlaying, player.currentMediaItem?.mediaId)
+            radioNowPlaying.onIsPlayingChanged(isPlaying)
+        }
+
+        // Live radio: the station's "now playing" title arrives as timed metadata.
+        override fun onMetadata(metadata: androidx.media3.common.Metadata) {
+            val player = mediaSession?.player ?: engine.masterPlayer
+            radioNowPlaying.onMetadata(player.currentMediaItem?.mediaId, metadata)
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
@@ -1374,7 +1305,6 @@ class MusicService : MediaLibraryService() {
                 }
                 else -> clearHeadsetReconnectResume()
             }
-            widgetUpdateManager.requestFullUpdate(true)
             mediaSession?.let { refreshMediaSessionUi(it) }
             schedulePlaybackSnapshotPersist()
         }
@@ -1386,6 +1316,7 @@ class MusicService : MediaLibraryService() {
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
+            refreshUpNext()
             prewarmNextStream()
             Timber.tag(TAG).d("Playback state changed: $playbackState")
             if (playbackState == Player.STATE_ENDED) {
@@ -1396,8 +1327,10 @@ class MusicService : MediaLibraryService() {
         }
 
         override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+            refreshUpNext()
             prewarmNextStream()
-            widgetUpdateManager.requestFullUpdate(true)
+            // Queue edits can add or remove a next track, which shows or hides Next in the controls.
+            mediaSession?.let { refreshMediaSessionUi(it) }
             schedulePlaybackSnapshotPersist(immediate = timeline.isEmpty)
             // Pre-fetch RG for the next track so the cache is warm before playback starts
             val player = engine.masterPlayer
@@ -1442,6 +1375,7 @@ class MusicService : MediaLibraryService() {
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             pushDiscordPresence(mediaSession?.player ?: engine.masterPlayer)
+            refreshUpNext()
             smartResumePolicy.clear()
             replayGainProcessor.cancelResumeFade()
             updateEqualizerGenre(mediaItem)
@@ -1449,6 +1383,11 @@ class MusicService : MediaLibraryService() {
             val activePlayer = mediaSession?.player ?: engine.masterPlayer
             pendingStatsTransition = true
             ambientSuggestionController.onPlaybackStateChanged(activePlayer.isPlaying, mediaItem?.mediaId)
+            radioNowPlaying.onMediaItem(
+                mediaId = mediaItem?.mediaId,
+                title = mediaItem?.mediaMetadata?.title?.toString(),
+                isPlaying = activePlayer.isPlaying,
+            )
 
             val eotTargetSongId = endOfTrackTimerSongId
             if (!eotTargetSongId.isNullOrBlank()) {
@@ -1478,9 +1417,6 @@ class MusicService : MediaLibraryService() {
             if (nextIndex != androidx.media3.common.C.INDEX_UNSET) {
                 runCatching { replayGainProcessor.prefetch(player.getMediaItemAt(nextIndex)) }
             }
-            // Optimization: Don't force-update widgets on every rapid skip.
-            // Let the debounced updater handle it to prevent UI freezes.
-            widgetUpdateManager.requestFullUpdate(false)
             mediaSession?.let { refreshMediaSessionUi(it) }
             schedulePlaybackSnapshotPersist()
         }
@@ -1488,7 +1424,6 @@ class MusicService : MediaLibraryService() {
         override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
             // Some devices/apps deliver title/artist/art after transition callback.
             // Force an immediate publish for real-time watch metadata.
-            widgetUpdateManager.requestFullUpdate(true)
             mediaSession?.let { refreshMediaSessionUiWithFollowUp(it) }
             // Only recompute RG if the track actually changed — onMediaMetadataChanged
             // also fires on queue edits (add/remove) without a track change, which would
@@ -1497,15 +1432,14 @@ class MusicService : MediaLibraryService() {
         }
 
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+            refreshUpNext()
             Timber.tag("MusicService")
                 .d("playerListener.onShuffleModeEnabledChanged: $shuffleModeEnabled")
-            widgetUpdateManager.requestFullUpdate(true)
             mediaSession?.let { refreshMediaSessionUi(it) }
             schedulePlaybackSnapshotPersist()
         }
 
         override fun onRepeatModeChanged(repeatMode: Int) {
-            widgetUpdateManager.requestFullUpdate(true)
             mediaSession?.let { refreshMediaSessionUi(it) }
             schedulePlaybackSnapshotPersist()
         }
@@ -1572,14 +1506,18 @@ class MusicService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
-        if (::discordPresence.isInitialized) discordPresence.clearNow()
+        // The player is going away: nothing can rewind into a radio recording any more.
+        radioNowPlaying.playerPositionProvider = null
+        com.theveloper.pixelplay.data.radio.timeshift.RadioTimeShiftRecorder.get(this).stop()
+        if (::discordPresence.isInitialized) discordPresence.release()
+        upNextNotifier?.cancel()
+        upNextNotifier = null
         continuousMixRuntime.detach()
         PlaybackActivityTracker.setPlaybackActive(false)
         listeningStatsTracker.finalizeCurrentSession(forceSynchronousPersistence = true)
         playbackSnapshotPersistJob?.cancel()
         mediaSessionButtonRefreshJob?.cancel()
         followUpMediaSessionUiRefreshJob?.cancel()
-        widgetUpdateManager.cancel()
         castSyncCoordinator.stop()
         unregisterHeadsetReconnectMonitor()
         unregisterSystemVolumeObserver()
@@ -1604,26 +1542,6 @@ class MusicService : MediaLibraryService() {
         Thread.currentThread().setUncaughtExceptionHandler(previousMainThreadExceptionHandler)
         previousMainThreadExceptionHandler = null
         super.onDestroy()
-    }
-
-    override fun onTrimMemory(level: Int) {
-        super.onTrimMemory(level)
-        // Release in-process bitmap caches when the system signals memory pressure.
-        // MusicService holds up to ~220 KB in cachedWidgetArtBytes and another copy
-        // inside lastWidgetPlayerInfo.albumArtBitmapData. Under moderate-to-critical
-        // pressure these are safe to drop — the next widget update cycle will reload them.
-        //
-        // Raw int value used instead of deprecated ComponentCallbacks2 constant:
-        //   TRIM_MEMORY_RUNNING_LOW = 10
-        // This single threshold covers all higher-severity levels too
-        // (TRIM_MEMORY_BACKGROUND = 40, TRIM_MEMORY_COMPLETE = 80, etc.).
-        if (level >= 10 /* TRIM_MEMORY_RUNNING_LOW */) {
-            Timber.tag(TAG).d("onTrimMemory(level=%d): releasing widget bitmap caches", level)
-            invalidateCachedWidgetArtwork()
-            // Drop the stale PlayerInfo copy so its embedded ByteArray is GC-eligible.
-            // The next widget update cycle will rebuild it from scratch.
-            widgetUpdateManager.clearCachedState()
-        }
     }
 
     private fun registerHeadsetReconnectMonitor() {
@@ -1937,6 +1855,17 @@ class MusicService : MediaLibraryService() {
             .build()
     }
 
+    private var upNextNotifier: UpNextNotifier? = null
+    @Volatile private var upNextEnabled = false
+
+    /** Main thread (player access). Rebuilds or removes the Up next notification. */
+    private fun refreshUpNext() {
+        val notifier = upNextNotifier ?: return
+        val player = mediaSession?.player ?: engine.masterPlayer
+        runCatching { notifier.update(player, upNextEnabled) }
+            .onFailure { Timber.tag(TAG).w(it, "Up next notification update failed") }
+    }
+
     private fun getOpenAppPendingIntent(): PendingIntent {
         val intent = Intent(this, MainActivity::class.java).apply {
             setPackage(packageName)
@@ -1953,283 +1882,10 @@ class MusicService : MediaLibraryService() {
         )
     }
 
-    // --- LÓGICA PARA ACTUALIZACIÓN DE WIDGETS Y DATOS ---
     private var followUpMediaSessionUiRefreshJob: Job? = null
     private var mediaSessionButtonRefreshJob: Job? = null
     private var lastAppliedMediaButtonSignature: String? = null
 
-    private suspend fun buildPlayerInfo(): PlayerInfo {
-        val player = engine.masterPlayer
-        // Batch all main-thread reads into a single context switch (was 7 separate hops → 1)
-        var currentItem: MediaItem? = null
-        var isPlaying = false
-        var repeatMode = Player.REPEAT_MODE_OFF
-        var currentPosition = 0L
-        var totalDuration = 0L
-        var snapshotWindowIndex = 0
-        var snapshotTimeline: Timeline = Timeline.EMPTY
-
-        withContext(Dispatchers.Main) {
-            currentItem = player.currentMediaItem
-            isPlaying = player.isPlaying
-            repeatMode = player.repeatMode
-            currentPosition = player.currentPosition
-            totalDuration = player.duration.coerceAtLeast(0)
-            snapshotWindowIndex = player.currentMediaItemIndex
-            snapshotTimeline = player.currentTimeline
-        }
-
-        var shuffleEnabled = isManualShuffleEnabled // Manual shuffle for sync with PlayerViewModel
-
-        var title = currentItem?.mediaMetadata?.title?.toString().orEmpty()
-        var artist = currentItem?.mediaMetadata?.artist?.toString().orEmpty()
-        var mediaId = currentItem?.mediaId
-        var artworkUri = resolveWidgetArtworkUriCandidates(currentItem?.mediaMetadata).firstOrNull()
-        var artworkData = currentItem?.mediaMetadata?.artworkData
-
-        castSyncCoordinator.resolveRemoteSnapshot()?.let { remote ->
-            if (remote.title.isNotBlank()) {
-                title = remote.title
-            }
-            if (remote.artist.isNotBlank()) {
-                artist = remote.artist
-            }
-            if (!remote.songId.isNullOrBlank()) {
-                mediaId = remote.songId
-            }
-            if (remote.artworkUri != null) {
-                artworkUri = remote.artworkUri
-            }
-            isPlaying = remote.isPlaying
-            currentPosition = remote.currentPositionMs
-            if (remote.totalDurationMs > 0L) {
-                totalDuration = remote.totalDurationMs
-            }
-            repeatMode = remote.repeatMode
-            shuffleEnabled = remote.isShuffleEnabled
-        }
-
-        val artworkCandidates = resolveWidgetArtworkUriCandidates(
-            metadata = currentItem?.mediaMetadata,
-            preferredArtworkUri = artworkUri,
-        )
-        val (artBytes, artUriString) = getAlbumArtForWidget(
-            mediaId = mediaId,
-            embeddedArt = artworkData,
-            artUris = artworkCandidates,
-        )
-
-        // Merge theme preference reads into a single context switch
-        val (playerTheme, paletteStyle, colorAccuracyLevel) = withContext(Dispatchers.IO) {
-            Triple(
-                themePreferencesRepository.playerThemePreferenceFlow.first(),
-                AlbumArtPaletteStyle.fromStorageKey(themePreferencesRepository.albumArtPaletteStyleFlow.first().storageKey),
-                AlbumArtColorAccuracy.clamp(themePreferencesRepository.albumArtColorAccuracyFlow.first())
-            )
-        }
-
-        val schemePair: ColorSchemePair? = when {
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && playerTheme == ThemePreference.DYNAMIC ->
-                ColorSchemePair(
-                    light = dynamicLightColorScheme(applicationContext),
-                    dark = dynamicDarkColorScheme(applicationContext)
-                )
-            artUriString != null ->
-                // Skip heavy palette recomputation when art, style, and accuracy haven't changed
-                if (
-                    artUriString == cachedSchemeArtUri &&
-                    paletteStyle == cachedSchemePaletteStyle &&
-                    colorAccuracyLevel == cachedSchemeColorAccuracy
-                ) {
-                    cachedColorSchemePair
-                } else {
-                    colorSchemeProcessor.getOrGenerateColorScheme(
-                        albumArtUri = artUriString,
-                        paletteStyle = paletteStyle,
-                        colorAccuracyLevel = colorAccuracyLevel
-                    ).also {
-                        cachedSchemeArtUri = artUriString
-                        cachedSchemePaletteStyle = paletteStyle
-                        cachedSchemeColorAccuracy = colorAccuracyLevel
-                        cachedColorSchemePair = it
-                    }
-                }
-            else -> null
-        }
-
-        val widgetColors = schemePair?.let {
-            WidgetThemeColors(
-                lightSurfaceContainer = it.light.surfaceContainer.toArgb(),
-                lightSurfaceContainerLowest = it.light.surfaceContainerLowest.toArgb(),
-                lightSurfaceContainerLow = it.light.surfaceContainerLow.toArgb(),
-                lightSurfaceContainerHigh = it.light.surfaceContainerHigh.toArgb(),
-                lightSurfaceContainerHighest = it.light.surfaceContainerHighest.toArgb(),
-                lightTitle = it.light.onSurface.toArgb(),
-                lightArtist = it.light.onSurfaceVariant.toArgb(),
-                lightPlayPauseBackground = it.light.primary.toArgb(),
-                lightPlayPauseIcon = it.light.onPrimary.toArgb(),
-                lightPrevNextBackground = it.light.onPrimary.toArgb(),
-                lightPrevNextIcon = it.light.primary.toArgb(),
-                
-                darkSurfaceContainer = it.dark.surfaceContainer.toArgb(),
-                darkSurfaceContainerLowest = it.dark.surfaceContainerLowest.toArgb(),
-                darkSurfaceContainerLow = it.dark.surfaceContainerLow.toArgb(),
-                darkSurfaceContainerHigh = it.dark.surfaceContainerHigh.toArgb(),
-                darkSurfaceContainerHighest = it.dark.surfaceContainerHighest.toArgb(),
-                darkTitle = it.dark.onSurface.toArgb(),
-                darkArtist = it.dark.onSurfaceVariant.toArgb(),
-                darkPlayPauseBackground = it.dark.primary.toArgb(),
-                darkPlayPauseIcon = it.dark.onPrimary.toArgb(),
-                darkPrevNextBackground = it.dark.onPrimary.toArgb(),
-                darkPrevNextIcon = it.dark.primary.toArgb()
-            )
-        }
-        val isFavorite = isSongFavorite(mediaId)
-
-        val queueItems = mutableListOf<com.theveloper.pixelplay.data.model.QueueItem>()
-        // Reuse snapshotTimeline / snapshotWindowIndex captured at the top — no extra main-thread hop
-        if (!snapshotTimeline.isEmpty) {
-            val window = Timeline.Window()
-
-            // Empezar desde la siguiente canción en la cola
-            val startIndex = if (snapshotWindowIndex + 1 < snapshotTimeline.windowCount) snapshotWindowIndex + 1 else 0
-
-            // Limitar el número de elementos de la cola a 4
-            val endIndex = (startIndex + 4).coerceAtMost(snapshotTimeline.windowCount)
-            for (i in startIndex until endIndex) {
-                snapshotTimeline.getWindow(i, window)
-                val mediaItem = window.mediaItem
-                val songId = mediaItem.mediaId.toLongOrNull()
-                if (songId != null) {
-                    val initialQueueArtworkUri = resolveWidgetArtworkUriCandidates(mediaItem.mediaMetadata)
-                        .firstOrNull()
-                    val queueArtworkUri = when {
-                        initialQueueArtworkUri == null -> resolveRepositoryArtworkUri(mediaItem.mediaId)
-                        initialQueueArtworkUri.scheme?.lowercase() == "content" &&
-                            initialQueueArtworkUri.authority == "$packageName.provider" ->
-                            resolveRepositoryArtworkUri(mediaItem.mediaId) ?: initialQueueArtworkUri
-                        else -> initialQueueArtworkUri
-                    }
-                    queueItems.add(
-                        com.theveloper.pixelplay.data.model.QueueItem(
-                            id = songId,
-                            albumArtUri = queueArtworkUri?.toString()
-                        )
-                    )
-                }
-            }
-        }
-
-        return PlayerInfo(
-            songTitle = title,
-            artistName = artist,
-            isPlaying = isPlaying,
-            albumArtUri = artUriString,
-            albumArtBitmapData = artBytes,
-            currentPositionMs = currentPosition,
-            totalDurationMs = totalDuration,
-            isFavorite = isFavorite,
-            queue = queueItems,
-            themeColors = widgetColors,
-            isShuffleEnabled = shuffleEnabled,
-            repeatMode = repeatMode,
-        )
-    }
-
-    // Color scheme cache: skip recomputation when art URI, palette style, and accuracy haven't changed
-    private var cachedSchemeArtUri: String? = null
-    private var cachedSchemePaletteStyle: AlbumArtPaletteStyle? = null
-    private var cachedSchemeColorAccuracy: Int = AlbumArtColorAccuracy.DEFAULT
-    private var cachedColorSchemePair: ColorSchemePair? = null
-    private var cachedWidgetArtSourceKey: String? = null
-    private var cachedWidgetArtResolvedUri: String? = null
-    private var cachedWidgetArtBytes: ByteArray? = null
-    private var cachedWidgetArtLoadFailureKey: String? = null
-    private var cachedWidgetArtLoadFailureAtMs: Long = 0L
-
-    private fun invalidateCachedWidgetArtwork() {
-        cachedWidgetArtSourceKey = null
-        cachedWidgetArtResolvedUri = null
-        cachedWidgetArtBytes = null
-        cachedWidgetArtLoadFailureKey = null
-        cachedWidgetArtLoadFailureAtMs = 0L
-    }
-
-    private suspend fun getAlbumArtForWidget(
-        mediaId: String?,
-        embeddedArt: ByteArray?,
-        artUris: List<Uri>,
-    ): Pair<ByteArray?, String?> = withContext(Dispatchers.IO) {
-        // Try embedded art first — but fall through to URI loading if sanitization fails
-        val sanitizedFromEmbedded = embeddedArt?.takeIf { it.isNotEmpty() }?.let { bytes ->
-            runCatching {
-                ArtworkTransportSanitizer.sanitizeEncodedBytes(
-                    data = bytes,
-                    config = ArtworkTransportSanitizer.WIDGET_CONFIG,
-                )
-            }.getOrNull()
-        }
-        val candidateUriStrings = LinkedHashSet<String>().apply {
-            artUris.forEach { candidate ->
-                candidate.toString()
-                    .takeIf { it.isNotBlank() }
-                    ?.let(::add)
-            }
-        }.toList()
-        val preferredUriString = candidateUriStrings.firstOrNull()
-        val sourceKey = buildWidgetArtworkSourceKey(
-            mediaId = mediaId,
-            candidateUriStrings = candidateUriStrings,
-        )
-
-        if (sanitizedFromEmbedded != null) {
-            cachedWidgetArtSourceKey = sourceKey
-            cachedWidgetArtResolvedUri = preferredUriString
-            cachedWidgetArtBytes = sanitizedFromEmbedded
-            cachedWidgetArtLoadFailureKey = null
-            cachedWidgetArtLoadFailureAtMs = 0L
-            return@withContext sanitizedFromEmbedded to preferredUriString
-        }
-
-        if (sourceKey != null && sourceKey == cachedWidgetArtSourceKey && cachedWidgetArtBytes != null) {
-            return@withContext cachedWidgetArtBytes to (cachedWidgetArtResolvedUri ?: preferredUriString)
-        }
-        if (sourceKey != null && sourceKey == cachedWidgetArtLoadFailureKey) {
-            val failureAgeMs = SystemClock.elapsedRealtime() - cachedWidgetArtLoadFailureAtMs
-            if (failureAgeMs < WIDGET_ART_FAILURE_RETRY_MS) {
-                return@withContext null to preferredUriString
-            }
-        }
-
-        val repositoryArtUriString = if (mediaId.isNullOrBlank()) {
-            null
-        } else {
-            resolveRepositoryArtworkUri(mediaId)?.toString()
-        }
-        val resolvedUriStrings = LinkedHashSet<String>().apply {
-            addAll(candidateUriStrings)
-            repositoryArtUriString
-                ?.takeIf { it.isNotBlank() }
-                ?.let(::add)
-        }
-
-        for (candidateUriString in resolvedUriStrings) {
-            val candidateUri = parseArtworkUriString(candidateUriString) ?: continue
-            val loadedBytes = loadArtworkBytesForWidget(candidateUri)
-            if (loadedBytes != null) {
-                cachedWidgetArtSourceKey = sourceKey
-                cachedWidgetArtResolvedUri = candidateUriString
-                cachedWidgetArtBytes = loadedBytes
-                cachedWidgetArtLoadFailureKey = null
-                cachedWidgetArtLoadFailureAtMs = 0L
-                return@withContext loadedBytes to candidateUriString
-            }
-        }
-
-        cachedWidgetArtLoadFailureKey = sourceKey
-        cachedWidgetArtLoadFailureAtMs = SystemClock.elapsedRealtime()
-        return@withContext null to (repositoryArtUriString ?: preferredUriString)
-    }
 
     private fun resolveStoredArtworkUriString(metadata: MediaMetadata?): String? {
         metadata ?: return null
@@ -2239,23 +1895,6 @@ class MusicService : MediaLibraryService() {
             ?: metadata.artworkUri
                 ?.toString()
                 ?.takeIf { it.isNotBlank() }
-    }
-
-    private fun resolveWidgetArtworkUriCandidates(
-        metadata: MediaMetadata?,
-        preferredArtworkUri: Uri? = null,
-    ): List<Uri> {
-        val candidates = LinkedHashSet<String>()
-        preferredArtworkUri
-            ?.toString()
-            ?.takeIf { it.isNotBlank() }
-            ?.let(candidates::add)
-        resolveStoredArtworkUriString(metadata)?.let(candidates::add)
-        metadata?.artworkUri
-            ?.toString()
-            ?.takeIf { it.isNotBlank() }
-            ?.let(candidates::add)
-        return candidates.mapNotNull(::parseArtworkUriString)
     }
 
     private fun parseArtworkUriString(rawArtworkUri: String?): Uri? {
@@ -2271,26 +1910,6 @@ class MusicService : MediaLibraryService() {
             }
     }
 
-    private fun buildWidgetArtworkSourceKey(
-        mediaId: String?,
-        candidateUriStrings: List<String>,
-    ): String? {
-        val normalizedMediaId = mediaId?.takeIf { it.isNotBlank() }
-        if (normalizedMediaId == null && candidateUriStrings.isEmpty()) {
-            return null
-        }
-        return buildString {
-            normalizedMediaId?.let {
-                append("mediaId=")
-                append(it)
-            }
-            if (candidateUriStrings.isNotEmpty()) {
-                if (isNotEmpty()) append('|')
-                append(candidateUriStrings.joinToString(separator = ","))
-            }
-        }
-    }
-
     private fun resolveArtworkUri(metadata: MediaMetadata?): Uri? {
         metadata ?: return null
         metadata.artworkUri?.let { return it }
@@ -2299,87 +1918,6 @@ class MusicService : MediaLibraryService() {
             ?.takeIf { it.isNotBlank() }
             ?: return null
         return parseArtworkUriString(extrasUri)
-    }
-
-    private suspend fun resolveRepositoryArtworkUri(mediaId: String?): Uri? {
-        val songId = mediaId?.takeIf { it.isNotBlank() } ?: return null
-        val song = withContext(Dispatchers.IO) {
-            musicRepository.getSong(songId).first()
-        } ?: return null
-
-        return MediaItemBuilder.artworkUri(song.albumArtUriString)
-            ?: song.albumArtUriString
-                ?.takeIf { it.isNotBlank() }
-                ?.let { raw ->
-                    if (raw.startsWith("/")) Uri.fromFile(java.io.File(raw))
-                    else runCatching { Uri.parse(raw) }.getOrNull()
-                }
-    }
-
-    public suspend fun loadArtworkBytesForWidget(uri: Uri): ByteArray? {
-        val uriString = uri.toString()
-        val scheme = uri.scheme?.lowercase()
-        val isLocalArtworkUri = com.theveloper.pixelplay.utils.LocalArtworkUri.isLocalArtworkUri(uriString)
-        return when {
-            isLocalArtworkUri || scheme == "content" || scheme == "file" || scheme == "android.resource" -> {
-                runCatching {
-                    AlbumArtUtils.openArtworkInputStream(applicationContext, uri)?.use { input ->
-                        readBytesCapped(input, ArtworkTransportSanitizer.WIDGET_CONFIG.sourceBytesLimit)
-                            ?.let { bytes ->
-                                ArtworkTransportSanitizer.sanitizeEncodedBytes(
-                                    data = bytes,
-                                    config = ArtworkTransportSanitizer.WIDGET_CONFIG,
-                                )
-                            }
-                    }
-                }.getOrElse { error ->
-                    Timber.tag(TAG).w(error, "Widget artwork read failed for local uri=%s", uri)
-                    null
-                }
-            }
-            scheme == "http" || scheme == "https" -> {
-                var connection: HttpURLConnection? = null
-                try {
-                    connection = (URL(uriString).openConnection() as? HttpURLConnection)
-                        ?: return null
-                    connection.connectTimeout = 4_000
-                    connection.readTimeout = 6_000
-                    connection.instanceFollowRedirects = true
-                    connection.doInput = true
-                    connection.inputStream.use { input ->
-                        readBytesCapped(input, ArtworkTransportSanitizer.WIDGET_CONFIG.sourceBytesLimit)
-                            ?.let { bytes ->
-                                ArtworkTransportSanitizer.sanitizeEncodedBytes(
-                                    data = bytes,
-                                    config = ArtworkTransportSanitizer.WIDGET_CONFIG,
-                                )
-                            }
-                    }
-                } catch (error: Exception) {
-                    Timber.tag(TAG).w(error, "Widget artwork read failed for remote uri=%s", uri)
-                    null
-                } finally {
-                    connection?.disconnect()
-                }
-            }
-            else -> loadArtworkBytesViaCoil(applicationContext, uri)
-        }
-    }
-
-    private fun readBytesCapped(input: java.io.InputStream, maxBytes: Int): ByteArray? {
-        // Pre-size to 4× the read-buffer to reduce reallocation churn on typical album art
-        // (50–300 KB). Still far below the maxBytes cap enforced in the loop below.
-        val output = ByteArrayOutputStream(DEFAULT_STREAM_BUFFER_SIZE * 4)
-        val buffer = ByteArray(DEFAULT_STREAM_BUFFER_SIZE)
-        var totalRead = 0
-        while (true) {
-            val read = input.read(buffer)
-            if (read <= 0) break
-            totalRead += read
-            if (totalRead > maxBytes) return null
-            output.write(buffer, 0, read)
-        }
-        return output.toByteArray().takeIf { it.isNotEmpty() }
     }
 
     fun isSongFavorite(songId: String?): Boolean {
@@ -2486,9 +2024,9 @@ class MusicService : MediaLibraryService() {
             reason
         )
         isPlaybackUnloadInProgress = true
+        upNextNotifier?.cancel()
         followUpMediaSessionUiRefreshJob?.cancel()
         mediaSessionButtonRefreshJob?.cancel()
-        widgetUpdateManager.cancel()
         playbackSnapshotPersistJob?.cancel()
 
         val sessionToRelease = mediaSession
@@ -2510,7 +2048,6 @@ class MusicService : MediaLibraryService() {
         player.stop()
         player.clearMediaItems()
 
-        widgetUpdateManager.requestFullUpdate(true)
         stopForeground(STOP_FOREGROUND_REMOVE)
 
         stopSelf()
@@ -2575,7 +2112,6 @@ class MusicService : MediaLibraryService() {
             )
         }
         refreshMediaSessionUi(session)
-        widgetUpdateManager.requestFullUpdate(true)
     }
 
     private fun setCurrentSongFavoriteState(
@@ -2588,7 +2124,6 @@ class MusicService : MediaLibraryService() {
         val isCurrentlyFavorite = favoriteSongIds.contains(songId)
         if (isCurrentlyFavorite == targetFavoriteState) {
             refreshMediaSessionUi(session)
-            widgetUpdateManager.requestFullUpdate(true)
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         }
 
@@ -2599,14 +2134,12 @@ class MusicService : MediaLibraryService() {
         }
 
         refreshMediaSessionUi(session)
-        widgetUpdateManager.requestFullUpdate(true)
 
         serviceScope.launch {
             Timber.tag("MusicService")
                 .d("Applying favorite=$targetFavoriteState for songId: $songId")
             musicRepository.setFavoriteStatus(songId, targetFavoriteState)
             refreshMediaSessionUi(session)
-            widgetUpdateManager.requestFullUpdate(true)
         }
 
         return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
@@ -2755,6 +2288,8 @@ class MusicService : MediaLibraryService() {
             append(player.repeatMode)
             append('|')
             append(isQueueEnded(player))
+            append('|')
+            append(player.hasNextMediaItem())
         }
     }
 
@@ -2765,9 +2300,17 @@ class MusicService : MediaLibraryService() {
         val likeButton = CommandButton.Builder(
             if (isFavorite) CommandButton.ICON_HEART_FILLED else CommandButton.ICON_HEART_UNFILLED
         )
-            .setDisplayName("Like")
-            .setSessionCommand(SessionCommand(MusicNotificationProvider.CUSTOM_COMMAND_LIKE, Bundle.EMPTY))
-            .setSlots(CommandButton.SLOT_OVERFLOW)
+            .setDisplayName(if (isFavorite) "Unlike" else "Like")
+            // A different action per state (like Shuffle below), so System UI redraws the icon.
+            .setSessionCommand(
+                SessionCommand(
+                    if (isFavorite) MusicNotificationProvider.CUSTOM_COMMAND_LIKE_OFF
+                    else MusicNotificationProvider.CUSTOM_COMMAND_LIKE_ON,
+                    Bundle.EMPTY
+                )
+            )
+            // Left of the timeline, where skip-back used to be.
+            .setSlots(CommandButton.SLOT_BACK, CommandButton.SLOT_OVERFLOW)
             .build()
 
         val shuffleOn = isManualShuffleEnabled
@@ -2781,33 +2324,29 @@ class MusicService : MediaLibraryService() {
         )
             .setDisplayName("Shuffle")
             .setSessionCommand(SessionCommand(shuffleCommandAction, Bundle.EMPTY))
-            .setSlots(CommandButton.SLOT_OVERFLOW)
+            // Right of the timeline.
+            .setSlots(CommandButton.SLOT_FORWARD, CommandButton.SLOT_OVERFLOW)
             .build()
 
-        val repeatButton = CommandButton.Builder(
-            when (player.repeatMode) {
-                Player.REPEAT_MODE_ONE -> CommandButton.ICON_REPEAT_ONE
-                Player.REPEAT_MODE_ALL -> CommandButton.ICON_REPEAT_ALL
-                else -> CommandButton.ICON_REPEAT_OFF
-            }
-        )
-            .setDisplayName("Repeat")
-            .setSessionCommand(SessionCommand(MusicNotificationProvider.CUSTOM_COMMAND_CYCLE_REPEAT_MODE, Bundle.EMPTY))
-            .setSlots(CommandButton.SLOT_OVERFLOW)
-            .build()
+        // Skip next sits after Shuffle. It's a custom (overflow) button rather than the player's
+        // next command: SLOT_FORWARD is the spot right of the timeline and Shuffle keeps it, so an
+        // overflow button is drawn after it. Left out when there's no next track, which never
+        // moves Like or Shuffle because it's the last button.
+        val skipNextButton = if (player.hasNextMediaItem()) {
+            CommandButton.Builder(CommandButton.ICON_NEXT)
+                .setDisplayName("Next")
+                .setSessionCommand(SessionCommand(MusicNotificationProvider.CUSTOM_COMMAND_SKIP_NEXT, Bundle.EMPTY))
+                .setSlots(CommandButton.SLOT_OVERFLOW)
+                .build()
+        } else {
+            null
+        }
 
-        val closeButton = CommandButton.Builder(CommandButton.ICON_UNDEFINED)
-            .setCustomIconResId(R.drawable.rounded_close_24)
-            .setDisplayName(getString(R.string.close_notification_player))
-            .setSessionCommand(SessionCommand(MusicNotificationProvider.CUSTOM_COMMAND_CLOSE_PLAYER, Bundle.EMPTY))
-            .setSlots(CommandButton.SLOT_OVERFLOW)
-            .build()
-
-        // Let Media3 provide the primary previous/play-next transport buttons from player
-        // commands instead of advertising custom back/forward slots here. When custom
-        // SLOT_BACK/SLOT_FORWARD buttons are present, Media3 strips the legacy
-        // ACTION_SKIP_TO_PREVIOUS/NEXT flags from PlaybackStateCompat, which causes some
-        // OEM compact system players (including ColorOS Control Center) to gray out skip.
+        // The media controls show exactly: Like · timeline · Shuffle · Next (plus play/pause).
+        // Like and Shuffle take the back/forward slots, so the system player shows them on either
+        // side of the timeline instead of skip back / skip next. Close (X) and repeat are left
+        // out on purpose. Skipping still works from headphone / Bluetooth buttons and
+        // the in-app player, since the player still supports previous/next.
         // Queue finished: the central play button becomes Replay. PLAY_PAUSE on an ended player
         // seeks to the start of the current item and plays, i.e. restarts the last song.
         if (isQueueEnded(player)) {
@@ -2817,9 +2356,9 @@ class MusicService : MediaLibraryService() {
                 .setPlayerCommand(Player.COMMAND_PLAY_PAUSE)
                 .setSlots(CommandButton.SLOT_CENTRAL)
                 .build()
-            return listOf(replayButton, likeButton, closeButton, shuffleButton, repeatButton)
+            return listOf(replayButton, likeButton, shuffleButton)
         }
-        return listOf(likeButton, closeButton, shuffleButton, repeatButton)
+        return listOfNotNull(likeButton, shuffleButton, skipNextButton)
     }
 
     private fun isQueueEnded(player: Player): Boolean =

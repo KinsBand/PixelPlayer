@@ -7,12 +7,17 @@ import java.util.Locale
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
-/** Sort orders offered by the artist page's song list. */
-enum class ArtistSongSort(val label: String) {
-    POPULAR("Popular"),
-    NEWEST("Newest"),
-    YOUR_PLAYS("Your plays"),
-    A_Z("A–Z")
+/**
+ * Sort orders offered by the artist page's song list. Labels are string resources in the UI
+ * (`ArtistSongSort.labelRes()`). ALBUM groups songs that share a cover / album, newest first.
+ */
+enum class ArtistSongSort {
+    POPULAR,
+    NEWEST,
+    ALBUM,
+    /** Shown as "Plays": only songs you've played, most played first. */
+    YOUR_PLAYS,
+    A_Z
 }
 
 /**
@@ -119,28 +124,109 @@ object ArtistCatalog {
         }
     }
 
+    /** A size segment at the end of a cover URL ("…/250x250-000000-80-0-0.jpg", "…/100x100bb.jpg"). */
+    private val COVER_SIZE_SEGMENT = Regex("""/\d{2,4}x\d{2,4}[^/]*$""")
+
+    /**
+     * What groups songs for the Album sort: the cover (same picture = same release, so standard and
+     * deluxe editions with one cover stay together), else the album title, else "" (ungrouped, last).
+     * Size variants of one cover URL map to the same key.
+     */
+    fun albumKey(track: ArtistTrack): String {
+        val cover = track.song.albumArtUriString?.trim().orEmpty()
+        if (cover.isNotEmpty()) return "cover:" + COVER_SIZE_SEGMENT.replace(cover.substringBefore('?'), "")
+        val album = fold(track.song.album)
+        return if (album.isEmpty()) "" else "album:$album"
+    }
+
+    /**
+     * Primary key with unknown values always last, whichever way it's ordered. [descending] is the
+     * effective direction (natural direction already flipped by the caller when reversed).
+     */
+    private fun <K : Comparable<K>> keyed(
+        descending: Boolean,
+        unknown: (ArtistTrack) -> Boolean,
+        key: (ArtistTrack) -> K
+    ): Comparator<ArtistTrack> = Comparator { a, b ->
+        val ua = unknown(a)
+        val ub = unknown(b)
+        when {
+            ua && ub -> 0
+            ua -> 1
+            ub -> -1
+            descending -> key(b).compareTo(key(a))
+            else -> key(a).compareTo(key(b))
+        }
+    }
+
+    /**
+     * Sorts the song list. [reversed] flips only the primary key of [sort] (its natural order is
+     * Popular high→low, Newest new→old, Album newest album first, Plays most→least, A–Z A→Z); songs
+     * whose primary value is unknown stay at the end both ways. Album: the albums' order flips,
+     * songs inside an album stay in track order.
+     */
     fun sort(
         tracks: List<ArtistTrack>,
         sort: ArtistSongSort,
-        playsByKey: Map<String, Int> = emptyMap()
+        playsByKey: Map<String, Int> = emptyMap(),
+        reversed: Boolean = false
     ): List<ArtistTrack> {
         val byTitle = compareBy<ArtistTrack> { it.song.title.lowercase(Locale.ROOT) }
         val byPopularity = compareByDescending<ArtistTrack> { it.popularity ?: -1 }
         return when (sort) {
-            ArtistSongSort.POPULAR -> tracks.sortedWith(byPopularity.then(compareByDescending { it.releaseDate ?: "" }).then(byTitle))
-            ArtistSongSort.NEWEST -> tracks.sortedWith(
-                compareBy<ArtistTrack> { if (it.releaseDate == null) 1 else 0 }
+            ArtistSongSort.POPULAR -> tracks.sortedWith(
+                keyed(!reversed, { it.popularity == null }, { it.popularity ?: 0 })
                     .then(compareByDescending { it.releaseDate ?: "" })
+                    .then(byTitle)
+            )
+            ArtistSongSort.NEWEST -> tracks.sortedWith(
+                keyed(!reversed, { it.releaseDate == null }, { it.releaseDate.orEmpty() })
                     .then(byPopularity)
                     .then(byTitle)
             )
+            ArtistSongSort.ALBUM -> sortByAlbum(tracks, reversed, byTitle)
             ArtistSongSort.YOUR_PLAYS -> tracks.sortedWith(
-                compareByDescending<ArtistTrack> { playsByKey[baseKey(it.song.title)] ?: 0 }
+                keyed(!reversed, { false }, { playsByKey[baseKey(it.song.title)] ?: 0 })
                     .then(byPopularity)
                     .then(byTitle)
             )
-            ArtistSongSort.A_Z -> tracks.sortedWith(byTitle)
+            ArtistSongSort.A_Z -> tracks.sortedWith(
+                keyed(reversed, { false }, { it.song.title.lowercase(Locale.ROOT) })
+            )
         }
+    }
+
+    private fun sortByAlbum(tracks: List<ArtistTrack>, reversed: Boolean, byTitle: Comparator<ArtistTrack>): List<ArtistTrack> {
+        val groups = LinkedHashMap<String, MutableList<ArtistTrack>>()
+        for (track in tracks) groups.getOrPut(albumKey(track)) { mutableListOf() } += track
+        val newest = groups.mapValues { (_, group) -> group.mapNotNull { it.releaseDate }.maxOrNull() }
+        val order = groups.keys.sortedWith(Comparator { a, b ->
+            // The ungrouped "" bucket is always last; then groups without a date; then by date.
+            val ga = if (a.isEmpty()) 2 else if (newest[a] == null) 1 else 0
+            val gb = if (b.isEmpty()) 2 else if (newest[b] == null) 1 else 0
+            if (ga != gb) return@Comparator ga - gb
+            val da = newest[a].orEmpty()
+            val db = newest[b].orEmpty()
+            val byDate = if (reversed) da.compareTo(db) else db.compareTo(da)
+            if (byDate != 0) byDate else a.compareTo(b)
+        })
+        val inAlbum = compareBy<ArtistTrack> { it.song.discNumber ?: 1 }
+            .thenBy { if (it.song.trackNumber > 0) 0 else 1 }
+            .thenBy { it.song.trackNumber }
+            .then(byTitle)
+        return order.flatMap { key -> groups.getValue(key).sortedWith(inAlbum) }
+    }
+
+    /** Where each album group starts in an Album-sorted list (index → group key), for group headers. */
+    fun albumGroupStarts(sorted: List<ArtistTrack>): Map<Int, String> {
+        val starts = LinkedHashMap<Int, String>()
+        var previous: String? = null
+        sorted.forEachIndexed { index, track ->
+            val key = albumKey(track)
+            if (key != previous) starts[index] = key
+            previous = key
+        }
+        return starts
     }
 
     /** Every word of [query] must appear in the title, album or a version's title (accents ignored). */

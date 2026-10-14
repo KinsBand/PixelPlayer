@@ -12,7 +12,6 @@ import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.Widgets
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.theveloper.pixelplay.R
@@ -20,8 +19,8 @@ import com.theveloper.pixelplay.R
 /**
  * Settings pages.
  *
- * The root shows ten rows (see SettingsScreen): General, Appearance, Player & Lyrics,
- * Widgets, Playback, Library, Accounts & Services, AI, Backup and About.
+ * The root shows nine rows (see SettingsScreen): General, Appearance, Player & Lyrics,
+ * Playback, Library, Accounts & Services, AI, Backup and About.
  *
  * [NOW_PLAYING] and [NAVIGATION] are no longer pages of their own. Their settings were
  * folded into [LYRICS] ("Player & Lyrics"), [APPEARANCE] and [GENERAL]. The constants and
@@ -79,12 +78,6 @@ enum class SettingsCategory(
         titleRes = R.string.settings_category_navigation_title,
         subtitleRes = R.string.settings_category_navigation_subtitle,
         icon = Icons.Rounded.Explore
-    ),
-    WIDGETS(
-        id = "widgets",
-        titleRes = R.string.settings_category_widgets_island_title,
-        subtitleRes = R.string.settings_category_widgets_subtitle,
-        icon = Icons.Rounded.Widgets
     ),
     SERVICES(
         id = "services",
@@ -148,7 +141,10 @@ enum class SettingsCategory(
          */
         private val LEGACY_ID_ALIASES = mapOf(
             "player" to GENERAL,
-            "behavior" to GENERAL
+            "behavior" to GENERAL,
+            // Home-screen widgets were removed; the camera island they shared a page with
+            // lives in Appearance.
+            "widgets" to APPEARANCE
         )
 
         /** Resolves an id (current, merged or legacy) to the page that renders it. */

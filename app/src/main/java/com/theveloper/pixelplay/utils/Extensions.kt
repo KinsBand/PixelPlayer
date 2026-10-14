@@ -11,6 +11,9 @@ fun Color.toHexString(): String {
     return String.format("#%08X", this.toArgb())
 }
 
+/** Mojibake markers; allocated once (this runs for every text field of every song loaded). */
+private val SUSPICIOUS_METADATA_PATTERNS = listOf("Ã", "â", "�", "ð", "Ÿ")
+
 /**
  * Attempts to fix incorrectly encoded metadata strings that frequently appear when
  * tags are saved using Windows-1252/ISO-8859-1 but are later read as UTF-8. This results
@@ -24,8 +27,11 @@ fun String?.normalizeMetadataText(): String? {
     val trimmed = this.trim()
     if (trimmed.isEmpty()) return trimmed
 
-    val suspiciousPatterns = listOf("Ã", "â", "�", "ð", "Ÿ")
-    val needsFix = suspiciousPatterns.any { trimmed.contains(it) }
+    // Fast path: plain ASCII without NUL can't contain mojibake and is already NFC.
+    // Most titles, artists and albums take this path with no extra allocation.
+    if (trimmed.all { it.code in 1..0x7F }) return trimmed
+
+    val needsFix = SUSPICIOUS_METADATA_PATTERNS.any { trimmed.contains(it) }
 
     val reencoded = if (needsFix) {
         runCatching {
@@ -37,7 +43,9 @@ fun String?.normalizeMetadataText(): String? {
 
     val cleaned = candidate.replace("\u0000", "")
 
-    return Normalizer.normalize(cleaned, Normalizer.Form.NFC)
+    // isNormalized is a cheap scan; skip the copy when the text is already NFC.
+    return if (Normalizer.isNormalized(cleaned, Normalizer.Form.NFC)) cleaned
+    else Normalizer.normalize(cleaned, Normalizer.Form.NFC)
 }
 
 fun String?.normalizeMetadataTextOrEmpty(): String {
@@ -56,11 +64,54 @@ private const val ESCAPE_SEQUENCE = "\\\\"
  */
 private const val ESCAPE_PLACEHOLDER = "\u0000ESCAPED\u0000"
 
+/** Stands in for a protected artist name while splitting. */
+private const val PROTECT_PLACEHOLDER = "\u0001KEEP\u0001"
+
+/** Lookahead: the separator isn't followed by the word "the". */
+private const val NOT_BEFORE_THE = "(?!\\s*the\\s)"
+
 /**
  * Default word-based delimiters for splitting multi-artist strings.
  * These are matched case-insensitively with word boundaries.
  */
-val DEFAULT_WORD_DELIMITERS = listOf("featuring", "feat.", "feat", "ft.", "ft", "vs.", "vs", "versus", "with", "prod.", "prod")
+val DEFAULT_WORD_DELIMITERS = listOf(
+    // Features and collaborations
+    "featuring", "feat.", "feat", "ft.", "ft", "fea.", "with", "w/", "duet with",
+    "vs.", "vs", "v.", "versus", "meets", "presents", "pres.",
+    // Producers
+    "produced by", "prod. by", "prod.", "prod",
+    // Joiners, only when written with spaces around them ("A & B", never "W&W" or "AC/DC")
+    "x", "×", "&", "+", "/", "and",
+    // Other languages ("with" / "and")
+    "con", "avec", "mit", "und"
+)
+
+/**
+ * Real artist names that contain a separator. They are never split, whatever the
+ * separators are set to. (Names like "X & the Y" / "Tyler, the Creator" don't need to be
+ * listed: a separator right before "the" never splits.)
+ */
+val PROTECTED_ARTIST_NAMES = listOf(
+    "Simon & Garfunkel", "Simon and Garfunkel", "Hall & Oates", "Hall and Oates", "Daryl Hall & John Oates",
+    "Mumford & Sons", "Mumford and Sons", "Earth, Wind & Fire", "Earth, Wind and Fire", "Earth Wind & Fire",
+    "Crosby, Stills, Nash & Young", "Crosby, Stills & Nash", "Emerson, Lake & Palmer", "Blood, Sweat & Tears",
+    "Peter, Paul and Mary", "Black Country, New Road", "Lost & Found", "Years & Years", "Above & Beyond",
+    "Chase & Status", "Iron & Wine", "She & Him", "Belle & Sebastian", "Angus & Julia Stone", "Matt and Kim",
+    "Of Monsters and Men", "Of Mice & Men", "Coheed and Cambria", "Brooks & Dunn", "Big & Rich", "Dan + Shay",
+    "Maddie & Tae", "Love and Theft", "Sam & Dave", "Ike & Tina Turner", "Peaches & Herb", "Captain & Tennille",
+    "Sonny & Cher", "Ashford & Simpson", "Loggins & Messina", "Seals & Crofts", "Zager & Evans", "Sly & Robbie",
+    "Eric B. & Rakim", "Rodgers & Hammerstein", "Macklemore & Ryan Lewis", "Aly & AJ", "Aly & Fila", "Nico & Vinz",
+    "Jack & Jack", "Lil Nas X", "Chloe x Halle", "Florence + the Machine", "Mike + the Mechanics", "AC/DC",
+    "Kool & the Gang", "Marina and the Diamonds",
+    "Siouxsie and the Banshees", "Derek and the Dominos", "Huey Lewis & the News", "Bob Marley & the Wailers",
+)
+
+/** [PROTECTED_ARTIST_NAMES] as whole-name patterns, longest first, compiled once. */
+private val ProtectedNameRegexes: List<Regex> by lazy {
+    PROTECTED_ARTIST_NAMES.sortedByDescending { it.length }.map { name ->
+        Regex("(?<![\\p{L}\\p{N}])" + Regex.escape(name) + "(?![\\p{L}\\p{N}])", RegexOption.IGNORE_CASE)
+    }
+}
 
 /**
  * Splits an artist string by the given character delimiters and word delimiters,
@@ -92,6 +143,18 @@ fun String.splitArtistsByDelimiters(
 
     var working = this
 
+    // Real names that contain a separator are kept whole (see PROTECTED_ARTIST_NAMES).
+    val protectedMappings = mutableMapOf<String, String>()
+    if (working.any { it == '&' || it == '+' || it == ',' || it == '/' || it == ' ' }) {
+        ProtectedNameRegexes.forEachIndexed { index, nameRegex ->
+            working = nameRegex.replace(working) { match ->
+                val placeholder = "${PROTECT_PLACEHOLDER}${index}${PROTECT_PLACEHOLDER}"
+                protectedMappings[placeholder] = match.value
+                placeholder
+            }
+        }
+    }
+
     // Replace escaped delimiters with placeholders
     val escapedMappings = mutableMapOf<String, String>()
     sortedDelimiters.forEachIndexed { index, delimiter ->
@@ -112,18 +175,20 @@ fun String.splitArtistsByDelimiters(
     for (wd in sortedWordDelimiters) {
         val escaped = Regex.escape(wd)
         if (wd.length == 1) {
-            // Single-char word delimiters (e.g., "x") — require spaces on both sides
-            patternParts.add("\\s+$escaped\\s+")
+            // Single-char word delimiters (e.g., "x") — require spaces on both sides.
+            // Never right before "the" ("Kool & the Gang", "Florence + the Machine").
+            patternParts.add("\\s+$escaped\\s+$NOT_BEFORE_THE")
         } else {
             // Multi-char word delimiters — require word boundary or whitespace
-            patternParts.add("\\s+$escaped\\s+|\\s+$escaped$|^$escaped\\s+")
+            patternParts.add("\\s+$escaped\\s+$NOT_BEFORE_THE|\\s+$escaped$|^$escaped\\s+")
         }
     }
 
     // Character delimiters
     if (sortedDelimiters.isNotEmpty()) {
         val charPattern = sortedDelimiters.joinToString("|") { Regex.escape(it) }
-        patternParts.add(charPattern)
+        // "Tyler, the Creator": a separator right before "the" doesn't split.
+        patternParts.add("(?:$charPattern)$NOT_BEFORE_THE")
     }
 
     if (patternParts.isEmpty()) {
@@ -142,6 +207,9 @@ fun String.splitArtistsByDelimiters(
             var restored = part
             escapedMappings.forEach { (placeholder, delimiter) ->
                 restored = restored.replace(placeholder, delimiter)
+            }
+            protectedMappings.forEach { (placeholder, name) ->
+                restored = restored.replace(placeholder, name)
             }
             restored.trim()
         }
@@ -168,7 +236,10 @@ fun String.extractArtistsFromTitle(
     if (this.isBlank()) return this to emptyList()
 
     // Match patterns like (feat. ...), [ft. ...], (with ...), etc.
-    val featureKeywords = listOf("featuring", "feat\\.", "feat", "ft\\.", "ft", "with", "prod\\.", "prod")
+    val featureKeywords = listOf(
+        "featuring", "feat\\.", "feat", "ft\\.", "ft", "fea\\.", "duet with", "with", "w/",
+        "vs\\.", "vs", "versus", "con", "avec", "prod\\. by", "prod\\.", "prod", "produced by"
+    )
     val keywordPattern = featureKeywords.joinToString("|")
     val bracketPattern = Regex(
         """[\(\[]\\?\s*(?:$keywordPattern)\s+(.+?)\s*[\)\]]""",

@@ -25,7 +25,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
+import com.theveloper.pixelplay.presentation.components.SmartImage
 import com.theveloper.pixelplay.data.model.Playlist
 import com.theveloper.pixelplay.data.model.PlaylistShapeType
 import com.theveloper.pixelplay.data.model.Song
@@ -84,11 +84,13 @@ fun PlaylistCover(
             .clip(shape)
     ) {
         if (playlist.coverImageUri != null) {
-            AsyncImage(
+            SmartImage(
                 model = playlist.coverImageUri,
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
+                shape = shape,
+                contentScale = ContentScale.Crop,
+                indicatorSize = 24.dp
             )
         } else if (playlist.coverColorArgb != null) {
             Box(

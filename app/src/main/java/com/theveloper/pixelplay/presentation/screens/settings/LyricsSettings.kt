@@ -1,6 +1,7 @@
 package com.theveloper.pixelplay.presentation.screens.settings
 
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForwardIos
@@ -25,6 +26,12 @@ import androidx.compose.material.icons.rounded.ViewAgenda
 import androidx.compose.material.icons.rounded.TextFields
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.AutoFixHigh
+import androidx.compose.material.icons.rounded.SignalCellularAlt
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.DownloadDone
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -61,6 +68,9 @@ import com.theveloper.pixelplay.presentation.navigation.Screen
 import com.theveloper.pixelplay.presentation.screens.SettingsItem
 import com.theveloper.pixelplay.presentation.screens.SliderSettingsItem
 import com.theveloper.pixelplay.presentation.screens.SwitchSettingItem
+import com.theveloper.pixelplay.presentation.screens.ActionSettingsItem
+import com.theveloper.pixelplay.presentation.screens.SettingsBranch
+import com.theveloper.pixelplay.presentation.screens.rememberSettingsBranchExpanded
 import com.theveloper.pixelplay.presentation.screens.ThemeSelectorItem
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.SettingsUiState
@@ -83,61 +93,11 @@ internal fun LyricsSettingsContent(
     val scope = rememberCoroutineScope()
     val lyricsDisplayPrefs by rememberLyricsDisplayPrefs()
     val lyricsAutoSyncEnabled by settingsViewModel.lyricsAutoSyncEnabled.collectAsStateWithLifecycle()
-
-    SettingsSubsection(title = stringResource(R.string.settings_lyrics_sources_section)) {
-        ThemeSelectorItem(
-            settingKey = "lyrics_priority",
-            label = stringResource(R.string.settings_lyrics_source_priority_title),
-            description = stringResource(R.string.settings_lyrics_source_priority_subtitle),
-            options = mapOf(
-                LyricsSourcePreference.EMBEDDED_FIRST.name to stringResource(R.string.settings_lyrics_embedded_first),
-                LyricsSourcePreference.API_FIRST.name to stringResource(R.string.settings_lyrics_online_first),
-                LyricsSourcePreference.LOCAL_FIRST.name to stringResource(R.string.settings_lyrics_local_first)
-            ),
-            selectedKey = uiState.lyricsSourcePreference.name,
-            onSelectionChanged = { key ->
-                settingsViewModel.setLyricsSourcePreference(
-                    LyricsSourcePreference.fromName(key)
-                )
-            },
-            leadingIcon = { Icon(painterResource(R.drawable.rounded_lyrics_24), null, tint = MaterialTheme.colorScheme.secondary) }
-        )
-        SettingsItem(
-            settingKey = "reset_lyrics",
-            title = stringResource(R.string.settings_reset_imported_lyrics_title),
-            subtitle = stringResource(R.string.settings_reset_imported_lyrics_subtitle),
-            leadingIcon = { Icon(Icons.Outlined.ClearAll, null, tint = MaterialTheme.colorScheme.secondary) },
-            onClick = { showClearLyricsDialog = true }
-        )
-        SwitchSettingItem(
-            settingKey = "auto_scan_lrc",
-            title = stringResource(R.string.settings_auto_scan_lrc_title),
-            subtitle = stringResource(R.string.settings_auto_scan_lrc_subtitle),
-            checked = uiState.autoScanLrcFiles,
-            onCheckedChange = { settingsViewModel.setAutoScanLrcFiles(it) },
-            leadingIcon = { Icon(Icons.Outlined.Folder, null, tint = MaterialTheme.colorScheme.secondary) }
-        )
-        SwitchSettingItem(
-            settingKey = "lyrics_integration",
-            title = stringResource(R.string.settings_lyrics_lrclib_title),
-            subtitle = stringResource(R.string.settings_lyrics_lrclib_subtitle),
-            checked = uiState.lyricsIntegrationEnabled,
-            onCheckedChange = { settingsViewModel.setLyricsIntegrationEnabled(it) },
-            leadingIcon = { Icon(painterResource(R.drawable.rounded_music_note_24), null, tint = MaterialTheme.colorScheme.secondary) }
-        )
-        SwitchSettingItem(
-            settingKey = "lyrics_auto_sync",
-            title = stringResource(R.string.settings_lyrics_auto_sync_title),
-            subtitle = stringResource(R.string.settings_lyrics_auto_sync_subtitle),
-            checked = lyricsAutoSyncEnabled,
-            onCheckedChange = { settingsViewModel.setLyricsAutoSyncEnabled(it) },
-            leadingIcon = { Icon(Icons.Rounded.AutoFixHigh, null, tint = MaterialTheme.colorScheme.secondary) }
-        )
-    }
+    val lyricsWordAlignEnabled by settingsViewModel.lyricsWordAlignEnabled.collectAsStateWithLifecycle()
+    val lyricsWordAlignMobileData by settingsViewModel.lyricsWordAlignMobileData.collectAsStateWithLifecycle()
 
     SettingsSubsection(
-        title = stringResource(R.string.settings_lyrics_display_section),
-        addBottomSpace = navController != null
+        title = stringResource(R.string.settings_lyrics_display_section)
     ) {
         SwitchSettingItem(
             settingKey = "cover_lyrics",
@@ -149,17 +109,60 @@ internal fun LyricsSettingsContent(
                     context.editLyricsDisplayPrefs { it[LyricsDisplayPrefKeys.COVER_LYRICS_ENABLED] = enabled }
                 }
             },
-            leadingIcon = { Icon(Icons.Rounded.Album, null, tint = MaterialTheme.colorScheme.secondary) }
+            leadingIcon = { Icon(Icons.Rounded.Album, null, tint = MaterialTheme.colorScheme.secondary) },
+            preview = { on -> CoverLyricsPreview(on) }
         )
 
+        var immersiveBranchOpen by rememberSettingsBranchExpanded("auto_hide_delay", "lyrics_split_face")
         SwitchSettingItem(
             settingKey = "immersive_lyrics",
             title = stringResource(R.string.settings_immersive_lyrics_title),
             subtitle = stringResource(R.string.settings_immersive_lyrics_subtitle),
             checked = uiState.immersiveLyricsEnabled,
-            onCheckedChange = { settingsViewModel.setImmersiveLyricsEnabled(it) },
-            leadingIcon = { Icon(painterResource(R.drawable.rounded_lyrics_24), null, tint = MaterialTheme.colorScheme.secondary) }
+            onCheckedChange = { if (it) immersiveBranchOpen = true; settingsViewModel.setImmersiveLyricsEnabled(it) },
+            leadingIcon = { Icon(painterResource(R.drawable.rounded_lyrics_24), null, tint = MaterialTheme.colorScheme.secondary) },
+            branchExpanded = if (uiState.immersiveLyricsEnabled) immersiveBranchOpen else null,
+            onBranchToggle = { immersiveBranchOpen = !immersiveBranchOpen },
+            preview = { on -> ImmersiveLyricsPreview(on) }
         )
+        // Settings that only exist while immersive is on hang off it like a skill tree.
+        SettingsBranch(visible = uiState.immersiveLyricsEnabled && immersiveBranchOpen) {
+            SkillTreeBranch(depth = 1, isLast = false, lineColor = MaterialTheme.colorScheme.primary) {
+                ThemeSelectorItem(
+                    settingKey = "auto_hide_delay",
+                    label = stringResource(R.string.settings_auto_hide_delay_title),
+                    description = if (uiState.immersiveLyricsTimeout <= IMMERSIVE_TIMEOUT_OFF) {
+                        "Off: swipe the controls down to hide them and up to bring them back"
+                    } else {
+                        stringResource(R.string.settings_auto_hide_delay_subtitle)
+                    },
+                    options = mapOf(
+                        "0" to "Off (manual)",
+                        "3000" to stringResource(R.string.settings_auto_hide_delay_3s),
+                        "4000" to stringResource(R.string.settings_auto_hide_delay_4s),
+                        "5000" to stringResource(R.string.settings_auto_hide_delay_5s),
+                        "6000" to stringResource(R.string.settings_auto_hide_delay_6s)
+                    ),
+                    selectedKey = uiState.immersiveLyricsTimeout.toString(),
+                    onSelectionChanged = { settingsViewModel.setImmersiveLyricsTimeout(it.toLong()) },
+                    leadingIcon = { Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.secondary) }
+                )
+            }
+            SkillTreeBranch(depth = 1, isLast = true, lineColor = MaterialTheme.colorScheme.primary) {
+                SwitchSettingItem(
+                    settingKey = "lyrics_split_face",
+                    title = stringResource(R.string.settings_lyrics_split_face_title),
+                    subtitle = stringResource(R.string.settings_lyrics_split_face_subtitle),
+                    checked = lyricsDisplayPrefs.splitFaceView,
+                    onCheckedChange = { enabled ->
+                        scope.launch {
+                            context.editLyricsDisplayPrefs { it[LyricsDisplayPrefKeys.SPLIT_FACE_VIEW] = enabled }
+                        }
+                    },
+                    leadingIcon = { Icon(Icons.Rounded.ScreenRotation, null, tint = MaterialTheme.colorScheme.secondary) }
+                )
+            }
+        }
 
         // Settings → Lyrics → Animation style (its own screen with a live preview).
         SettingsItem(
@@ -198,44 +201,6 @@ internal fun LyricsSettingsContent(
             leadingIcon = { Icon(Icons.Rounded.Fullscreen, null, tint = MaterialTheme.colorScheme.secondary) }
         )
 
-        // Settings that only exist while immersive is on hang off it like a skill tree.
-        if (uiState.immersiveLyricsEnabled) {
-            SkillTreeBranch(depth = 1, isLast = false, lineColor = MaterialTheme.colorScheme.primary) {
-                ThemeSelectorItem(
-                    settingKey = "auto_hide_delay",
-                    label = stringResource(R.string.settings_auto_hide_delay_title),
-                    description = if (uiState.immersiveLyricsTimeout <= IMMERSIVE_TIMEOUT_OFF) {
-                        "Off: swipe the controls down to hide them and up to bring them back"
-                    } else {
-                        stringResource(R.string.settings_auto_hide_delay_subtitle)
-                    },
-                    options = mapOf(
-                        "0" to "Off (manual)",
-                        "3000" to stringResource(R.string.settings_auto_hide_delay_3s),
-                        "4000" to stringResource(R.string.settings_auto_hide_delay_4s),
-                        "5000" to stringResource(R.string.settings_auto_hide_delay_5s),
-                        "6000" to stringResource(R.string.settings_auto_hide_delay_6s)
-                    ),
-                    selectedKey = uiState.immersiveLyricsTimeout.toString(),
-                    onSelectionChanged = { settingsViewModel.setImmersiveLyricsTimeout(it.toLong()) },
-                    leadingIcon = { Icon(Icons.Rounded.Timer, null, tint = MaterialTheme.colorScheme.secondary) }
-                )
-            }
-            SkillTreeBranch(depth = 1, isLast = true, lineColor = MaterialTheme.colorScheme.primary) {
-                SwitchSettingItem(
-                    settingKey = "lyrics_split_face",
-                    title = stringResource(R.string.settings_lyrics_split_face_title),
-                    subtitle = stringResource(R.string.settings_lyrics_split_face_subtitle),
-                    checked = lyricsDisplayPrefs.splitFaceView,
-                    onCheckedChange = { enabled ->
-                        scope.launch {
-                            context.editLyricsDisplayPrefs { it[LyricsDisplayPrefKeys.SPLIT_FACE_VIEW] = enabled }
-                        }
-                    },
-                    leadingIcon = { Icon(Icons.Rounded.ScreenRotation, null, tint = MaterialTheme.colorScheme.secondary) }
-                )
-            }
-        }
 
         // Landscape lyrics sheet: which half holds the lyrics.
         SwitchSettingItem(
@@ -252,20 +217,24 @@ internal fun LyricsSettingsContent(
         )
 
         // Expressive typography: next to Immersive lyrics. Its choices hang off it while it's on.
+        var typographyBranchOpen by rememberSettingsBranchExpanded("lyrics_adaptive_typography", "lyrics_font", "lyrics_text_size", "lyrics_font_weight", "lyrics_line_spacing")
         SwitchSettingItem(
             settingKey = "lyrics_expressive_typography",
             title = stringResource(R.string.settings_lyrics_expressive_typography_title),
             subtitle = stringResource(R.string.settings_lyrics_expressive_typography_subtitle),
             checked = lyricsDisplayPrefs.expressiveTypography,
             onCheckedChange = { enabled ->
+                if (enabled) typographyBranchOpen = true
                 scope.launch {
                     context.editLyricsDisplayPrefs { it[LyricsDisplayPrefKeys.EXPRESSIVE_TYPOGRAPHY] = enabled }
                 }
             },
-            leadingIcon = { Icon(Icons.Rounded.TextFields, null, tint = MaterialTheme.colorScheme.secondary) }
+            leadingIcon = { Icon(Icons.Rounded.TextFields, null, tint = MaterialTheme.colorScheme.secondary) },
+            branchExpanded = if (lyricsDisplayPrefs.expressiveTypography) typographyBranchOpen else null,
+            onBranchToggle = { typographyBranchOpen = !typographyBranchOpen }
         )
 
-        if (lyricsDisplayPrefs.expressiveTypography) {
+        SettingsBranch(visible = lyricsDisplayPrefs.expressiveTypography && typographyBranchOpen) {
             SkillTreeBranch(depth = 1, isLast = false, lineColor = MaterialTheme.colorScheme.primary) {
                 SwitchSettingItem(
                     settingKey = "lyrics_adaptive_typography",
@@ -379,6 +348,96 @@ internal fun LyricsSettingsContent(
                 }
             },
             leadingIcon = { Icon(androidx.compose.material.icons.Icons.Rounded.ViewAgenda, null, tint = MaterialTheme.colorScheme.secondary) }
+        )
+    }
+
+    // Sources and sync after the look: they're set once, the display settings get changed often.
+    SettingsSubsection(
+        title = stringResource(R.string.settings_lyrics_sources_section),
+        addBottomSpace = navController != null
+    ) {
+        ThemeSelectorItem(
+            settingKey = "lyrics_priority",
+            label = stringResource(R.string.settings_lyrics_source_priority_title),
+            description = stringResource(R.string.settings_lyrics_source_priority_subtitle),
+            options = mapOf(
+                LyricsSourcePreference.EMBEDDED_FIRST.name to stringResource(R.string.settings_lyrics_embedded_first),
+                LyricsSourcePreference.API_FIRST.name to stringResource(R.string.settings_lyrics_online_first),
+                LyricsSourcePreference.LOCAL_FIRST.name to stringResource(R.string.settings_lyrics_local_first)
+            ),
+            selectedKey = uiState.lyricsSourcePreference.name,
+            onSelectionChanged = { key ->
+                settingsViewModel.setLyricsSourcePreference(
+                    LyricsSourcePreference.fromName(key)
+                )
+            },
+            leadingIcon = { Icon(painterResource(R.drawable.rounded_lyrics_24), null, tint = MaterialTheme.colorScheme.secondary) }
+        )
+        SwitchSettingItem(
+            settingKey = "auto_scan_lrc",
+            title = stringResource(R.string.settings_auto_scan_lrc_title),
+            subtitle = stringResource(R.string.settings_auto_scan_lrc_subtitle),
+            checked = uiState.autoScanLrcFiles,
+            onCheckedChange = { settingsViewModel.setAutoScanLrcFiles(it) },
+            leadingIcon = { Icon(Icons.Outlined.Folder, null, tint = MaterialTheme.colorScheme.secondary) }
+        )
+        SwitchSettingItem(
+            settingKey = "lyrics_integration",
+            title = stringResource(R.string.settings_lyrics_lrclib_title),
+            subtitle = stringResource(R.string.settings_lyrics_lrclib_subtitle),
+            checked = uiState.lyricsIntegrationEnabled,
+            onCheckedChange = { settingsViewModel.setLyricsIntegrationEnabled(it) },
+            leadingIcon = { Icon(painterResource(R.drawable.rounded_music_note_24), null, tint = MaterialTheme.colorScheme.secondary) }
+        )
+        SwitchSettingItem(
+            settingKey = "lyrics_auto_sync",
+            title = stringResource(R.string.settings_lyrics_auto_sync_title),
+            subtitle = stringResource(R.string.settings_lyrics_auto_sync_subtitle),
+            checked = lyricsAutoSyncEnabled,
+            onCheckedChange = { settingsViewModel.setLyricsAutoSyncEnabled(it) },
+            leadingIcon = { Icon(Icons.Rounded.AutoFixHigh, null, tint = MaterialTheme.colorScheme.secondary) }
+        )
+        var wordAlignBranchOpen by rememberSettingsBranchExpanded("lyrics_word_align_mobile_data", "lyrics_word_sync_model")
+        SwitchSettingItem(
+            settingKey = "lyrics_word_align",
+            title = stringResource(R.string.settings_lyrics_word_align_title),
+            subtitle = stringResource(R.string.settings_lyrics_word_align_subtitle),
+            checked = lyricsWordAlignEnabled,
+            onCheckedChange = { if (it) wordAlignBranchOpen = true; settingsViewModel.setLyricsWordAlignEnabled(it) },
+            leadingIcon = { Icon(Icons.Rounded.AutoFixHigh, null, tint = MaterialTheme.colorScheme.secondary) },
+            branchExpanded = if (lyricsWordAlignEnabled) wordAlignBranchOpen else null,
+            onBranchToggle = { wordAlignBranchOpen = !wordAlignBranchOpen }
+        )
+        SettingsBranch(visible = lyricsWordAlignEnabled && wordAlignBranchOpen) {
+            // The model: download it now on Wi-Fi or mobile data, see progress, or remove it.
+            SkillTreeBranch(depth = 1, isLast = false, lineColor = MaterialTheme.colorScheme.primary) {
+                WordSyncModelItem(settingsViewModel)
+            }
+            SkillTreeBranch(depth = 1, isLast = false, lineColor = MaterialTheme.colorScheme.primary) {
+                TrainingExportItem(settingsViewModel)
+            }
+            SkillTreeBranch(depth = 1, isLast = true, lineColor = MaterialTheme.colorScheme.primary) {
+                SwitchSettingItem(
+                    settingKey = "lyrics_word_align_mobile_data",
+                    title = "Download automatically on mobile data",
+                    subtitle = if (lyricsWordAlignMobileData) {
+                        "The model can download on Wi-Fi or mobile data the first time a song needs it"
+                    } else {
+                        "Off: it downloads by itself on Wi-Fi only. The Download button works on either"
+                    },
+                    checked = lyricsWordAlignMobileData,
+                    onCheckedChange = { settingsViewModel.setLyricsWordAlignMobileData(it) },
+                    leadingIcon = { Icon(Icons.Rounded.SignalCellularAlt, null, tint = MaterialTheme.colorScheme.secondary) }
+                )
+            }
+        }
+        // Rarely needed and destructive, so it sits last.
+        SettingsItem(
+            settingKey = "reset_lyrics",
+            title = stringResource(R.string.settings_reset_imported_lyrics_title),
+            subtitle = stringResource(R.string.settings_reset_imported_lyrics_subtitle),
+            leadingIcon = { Icon(Icons.Outlined.ClearAll, null, tint = MaterialTheme.colorScheme.secondary) },
+            onClick = { showClearLyricsDialog = true }
         )
     }
 
@@ -524,6 +583,157 @@ private fun PlayerTweaksSection(settingsViewModel: SettingsViewModel, uiState: S
             onOptionSelected = settingsViewModel::setAlbumArtQuality,
             leadingIcon = { Icon(Icons.Rounded.HighQuality, null, tint = MaterialTheme.colorScheme.secondary) },
             settingKey = "album_art_quality"
+        )
+    }
+}
+
+/**
+ * The word-sync model row: "Not downloaded · about 95 MB" with a Download button that works on
+ * Wi-Fi or mobile data (asks first on mobile data), a progress bar while it downloads (tap ✕ to
+ * pause; Download resumes), and "Downloaded · 95 MB" with a delete button once it's on the phone.
+ */
+/**
+ * Export training set: downloaded songs that have synced lyrics (every download saves a .lrc next
+ * to the file) are copied with their .lrc to Download/PixelPlay-training, ready to upload as a
+ * private dataset for the word-sync fine-tune.
+ */
+@Composable
+private fun TrainingExportItem(settingsViewModel: SettingsViewModel) {
+    val state by settingsViewModel.trainingExport.collectAsStateWithLifecycle()
+    val current = state
+    val running = current?.running == true
+    val doneMessage = current?.message
+    ActionSettingsItem(
+        settingKey = "lyrics_training_export",
+        title = "Export training set",
+        subtitle = when {
+            running && (current?.total ?: 0) > 0 -> "Exporting ${current?.done} of ${current?.total}…"
+            running -> "Looking at your downloads…"
+            doneMessage != null -> doneMessage
+            else -> "Copies your downloaded songs that have synced lyrics, with their .lrc, to " +
+                "Download/PixelPlay-training. Upload that folder as a private dataset to train word sync."
+        },
+        icon = { Icon(Icons.Rounded.AutoFixHigh, null, tint = MaterialTheme.colorScheme.secondary) },
+        primaryActionLabel = if (running) "Exporting…" else "Export",
+        onPrimaryAction = { settingsViewModel.exportTrainingSet() },
+        secondaryActionLabel = if (running) null else "Export all again",
+        onSecondaryAction = if (running) null else ({ settingsViewModel.exportTrainingSet(again = true) }),
+        enabled = !running
+    )
+}
+
+@Composable
+private fun WordSyncModelItem(settingsViewModel: SettingsViewModel) {
+    val state by settingsViewModel.wordSyncModelState.collectAsStateWithLifecycle()
+    var confirmMobileData by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    val colors = MaterialTheme.colorScheme
+    val current = state
+    val status = current?.status ?: com.theveloper.pixelplay.data.lyrics.align.AlignmentModelManager.Status.NOT_DOWNLOADED
+    fun mb(bytes: Long): String = "%.0f MB".format(bytes / (1024f * 1024f))
+    fun startDownload() {
+        if (settingsViewModel.isOnMobileData()) confirmMobileData = true
+        else settingsViewModel.downloadWordSyncModel()
+    }
+
+    androidx.compose.material3.Surface(
+        color = colors.surfaceContainer,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        androidx.compose.foundation.layout.Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)
+        ) {
+            androidx.compose.foundation.layout.Row(
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+            ) {
+                Icon(
+                    if (status == com.theveloper.pixelplay.data.lyrics.align.AlignmentModelManager.Status.READY) Icons.Rounded.DownloadDone else Icons.Rounded.Download,
+                    contentDescription = null,
+                    tint = colors.secondary,
+                    modifier = Modifier.size(24.dp)
+                )
+                androidx.compose.foundation.layout.Spacer(Modifier.size(16.dp))
+                androidx.compose.foundation.layout.Column(Modifier.weight(1f)) {
+                    Text("Word sync model", style = MaterialTheme.typography.titleMedium, color = colors.onSurface)
+                    Text(
+                        text = when (status) {
+                            com.theveloper.pixelplay.data.lyrics.align.AlignmentModelManager.Status.READY ->
+                                "Downloaded · ${mb(current?.totalBytes ?: 0L)} on this phone"
+                            com.theveloper.pixelplay.data.lyrics.align.AlignmentModelManager.Status.DOWNLOADING ->
+                                "Downloading… ${mb(current?.downloadedBytes ?: 0L)} of ${mb(current?.totalBytes ?: 0L)}"
+                            com.theveloper.pixelplay.data.lyrics.align.AlignmentModelManager.Status.PAUSED ->
+                                (current?.message ?: "Paused") + " · ${mb(current?.downloadedBytes ?: 0L)} of ${mb(current?.totalBytes ?: 0L)}"
+                            com.theveloper.pixelplay.data.lyrics.align.AlignmentModelManager.Status.FAILED ->
+                                current?.message ?: "Download failed. Tap Download to try again"
+                            com.theveloper.pixelplay.data.lyrics.align.AlignmentModelManager.Status.NOT_DOWNLOADED ->
+                                "Not downloaded · about 95 MB. Download on Wi-Fi or mobile data"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.onSurfaceVariant
+                    )
+                }
+                androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
+                when (status) {
+                    com.theveloper.pixelplay.data.lyrics.align.AlignmentModelManager.Status.READY ->
+                        androidx.compose.material3.IconButton(onClick = { confirmDelete = true }) {
+                            Icon(Icons.Rounded.Delete, contentDescription = "Delete word sync model")
+                        }
+                    com.theveloper.pixelplay.data.lyrics.align.AlignmentModelManager.Status.DOWNLOADING ->
+                        androidx.compose.material3.IconButton(onClick = { settingsViewModel.cancelWordSyncModelDownload() }) {
+                            Icon(Icons.Rounded.Close, contentDescription = "Pause download")
+                        }
+                    else ->
+                        androidx.compose.material3.FilledTonalButton(onClick = { startDownload() }) {
+                            Text(
+                                if (status == com.theveloper.pixelplay.data.lyrics.align.AlignmentModelManager.Status.PAUSED) "Resume" else "Download"
+                            )
+                        }
+                }
+            }
+            if (status == com.theveloper.pixelplay.data.lyrics.align.AlignmentModelManager.Status.DOWNLOADING ||
+                status == com.theveloper.pixelplay.data.lyrics.align.AlignmentModelManager.Status.PAUSED
+            ) {
+                androidx.compose.material3.LinearProgressIndicator(
+                    progress = { current?.progress ?: 0f },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+
+    if (confirmMobileData) {
+        AlertDialog(
+            onDismissRequest = { confirmMobileData = false },
+            icon = { Icon(Icons.Rounded.SignalCellularAlt, null) },
+            title = { Text("Download on mobile data?") },
+            text = { Text("The word sync model is about 95 MB. Your carrier may charge for this data.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmMobileData = false
+                    settingsViewModel.downloadWordSyncModel()
+                }) { Text("Download") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmMobileData = false }) { Text("Cancel") }
+            }
+        )
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete the word sync model?") },
+            text = { Text("Songs you've already synced keep their word timing. New songs need the model again.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    settingsViewModel.deleteWordSyncModel()
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text("Cancel") }
+            }
         )
     }
 }

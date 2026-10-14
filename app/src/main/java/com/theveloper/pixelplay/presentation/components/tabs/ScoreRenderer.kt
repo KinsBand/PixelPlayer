@@ -681,6 +681,35 @@ class ScoreRenderer(
         }
     }
 
+    /** Edit mode: a faint wash behind every bar in [bars] (changed against the original). */
+    fun drawChangedBars(p: ScorePainter, s: ScoreSystem, bars: Set<Int>, color: Int) {
+        if (bars.isEmpty()) return
+        for (pm in s.measures) {
+            if (pm.realMeasures.none { it in bars }) continue
+            p.rect(pm.x + 2 * d, s.staffTop - 1.6f * s.gap, pm.right - 2 * d, s.staffBottom + 1.6f * s.gap, color, true, 6 * d)
+        }
+    }
+
+    /** Edit mode: the selected beats, from [x0] to [x1] on this line. */
+    fun drawSelection(p: ScorePainter, s: ScoreSystem, x0: Float, x1: Float, color: Int) {
+        if (x1 <= x0) return
+        p.rect(x0, s.staffTop - 1.8f * s.gap, x1, s.staffBottom + 1.8f * s.gap, color, true, 6 * d)
+    }
+
+    /**
+     * Edit mode caret: a bar of [color] through the staff at [x], with a small grab dot top and
+     * bottom, and a faint column where the next note lands.
+     */
+    fun drawEditCaret(p: ScorePainter, s: ScoreSystem, x: Float, color: Int) {
+        val top = s.staffTop - 1.6f * s.gap
+        val bottom = s.staffBottom + 1.6f * s.gap
+        val w = 9 * d
+        p.rect(x - w, top, x + w, bottom, (color and 0x00FFFFFF) or 0x2E000000, true, w)
+        p.line(x, top, x, bottom, 2.5f * d, color)
+        p.circle(x, top, 3.5f * d, color, true)
+        p.circle(x, bottom, 3.5f * d, color, true)
+    }
+
     fun drawCursor(p: ScorePainter, s: ScoreSystem, x: Float, alpha: Float = 1f) {
         if (alpha <= 0.01f) return
         val top = s.staffTop - 1.2f * s.gap

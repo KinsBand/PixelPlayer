@@ -219,12 +219,15 @@ data class IslandMetrics(
      * and states 3–4 (around the controls), hidden in state 2. Follows a drag smoothly.
      */
     fun outlineAlpha(height: Dp): Float {
+        val hp = peekHeight.value
         val h1 = height(CutoutExpansionLevel.LEVEL_1_SINGLE).value
         val h2 = height(CutoutExpansionLevel.LEVEL_2_THREE).value
         val h3 = height(CutoutExpansionLevel.LEVEL_3_SIX).value
         val h = height.value
         return when {
-            h <= h1 -> morphFraction(height)
+            // The title-only peek has no outline; it fades in on the way to state 1.
+            h <= hp -> 0f
+            h <= h1 -> if (h1 > hp) (h - hp) / (h1 - hp) else 1f
             h <= h2 -> 1f - (h - h1) / (h2 - h1)
             h <= h3 -> (h - h2) / (h3 - h2)
             else -> 1f
@@ -234,11 +237,18 @@ data class IslandMetrics(
     val maxHeight: Dp get() = fullHeight
 
     /**
-     * 0 at the pill, 1 once the surface is as tall as level 1. Drives the morph (width,
-     * corners, colour, content fade) so tap, drag and collapse all share one path.
+     * Track-change peek: just the header row (title / artist), no lyrics. Not a
+     * [CutoutExpansionLevel], so drag snapping and level content are unaffected.
+     */
+    val peekHeight: Dp get() = headerHeight + statusHintHeight
+
+    /**
+     * 0 at the pill, 1 once the surface is tall enough for the header row (the peek). Drives
+     * the morph (width, corners, colour, content fade) so tap, drag, peek and collapse all
+     * share one path, and the peek is a fully formed surface rather than a half-morphed one.
      */
     fun morphFraction(height: Dp): Float {
-        val span = (height(CutoutExpansionLevel.LEVEL_1_SINGLE) - pillSize).value
+        val span = (peekHeight - pillSize).value
         if (span <= 0f) return 1f
         return ((height - pillSize).value / span).coerceIn(0f, 1f)
     }

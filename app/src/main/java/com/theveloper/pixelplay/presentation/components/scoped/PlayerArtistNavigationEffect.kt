@@ -1,6 +1,7 @@
 package com.theveloper.pixelplay.presentation.components.scoped
 
 import com.theveloper.pixelplay.presentation.navigation.navigateSafelyReplacing
+import com.theveloper.pixelplay.presentation.navigation.navigateToTopLevelSafely
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -28,6 +29,24 @@ internal fun PlayerArtistNavigationEffect(
                 route = Screen.ArtistDetail.createRoute(artistId),
                 patternToPop = Screen.ArtistDetail.route
             )
+        }
+    }
+    // Radio: the player's map button opens the Radio tab (the station is picked up there).
+    LaunchedEffect(navController) {
+        playerViewModel.radioMapNavigationRequests.collectLatest {
+            sheetMotionController.snapCollapsed(latestSheetCollapsedTargetY)
+            playerViewModel.collapsePlayerSheet()
+            if (navController.currentDestination?.route != Screen.Radio.route) {
+                navController.navigateToTopLevelSafely(Screen.Radio.route)
+            }
+        }
+    }
+    // Any other page opened from the player or a song sheet (e.g. a collab page).
+    LaunchedEffect(navController) {
+        com.theveloper.pixelplay.presentation.navigation.RouteRequests.flow.collectLatest { route ->
+            sheetMotionController.snapCollapsed(latestSheetCollapsedTargetY)
+            playerViewModel.collapsePlayerSheet()
+            navController.navigate(route) { launchSingleTop = true }
         }
     }
     // Online artists (no library id) are opened by name.

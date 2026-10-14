@@ -1,4 +1,4 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 package com.theveloper.pixelplay.presentation.screens
 
 import androidx.compose.foundation.clickable
@@ -46,7 +46,20 @@ fun ConnectedPlaylistsTab(local: List<Playlist>, navController: NavController, p
     var opened by remember { mutableStateOf<ConnectedPlaylist?>(null) }
     var adding by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf<Pair<String, String>?>(null) }
-    androidx.compose.material3.pulltorefresh.PullToRefreshBox(isRefreshing = syncing, onRefresh = { viewModel.refresh(); onRefresh() }) {
+    // Same M3 Expressive shape indicator as Friends' pull to refresh.
+    val pullState = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
+    androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+        isRefreshing = syncing,
+        onRefresh = { viewModel.refresh(); onRefresh() },
+        state = pullState,
+        indicator = {
+            androidx.compose.material3.pulltorefresh.PullToRefreshDefaults.LoadingIndicator(
+                state = pullState,
+                isRefreshing = syncing,
+                modifier = Modifier.align(Alignment.TopCenter)
+            )
+        }
+    ) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = bottomPadding + 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {

@@ -1,13 +1,16 @@
 package com.theveloper.pixelplay.presentation.screens.settings
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.History
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -26,6 +29,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.theveloper.pixelplay.R
+import com.theveloper.pixelplay.data.presence.DiscordPresenceManager.Readiness
 import com.theveloper.pixelplay.presentation.navigation.Screen
 import com.theveloper.pixelplay.presentation.navigation.navigateSafely
 import com.theveloper.pixelplay.presentation.screens.SettingsItem
@@ -76,53 +80,14 @@ internal fun ServicesSettingsContent(
     DiscordStatusSetting()
 
     if (showListenBrainzDialog) {
-        var tokenInput by remember { mutableStateOf(listenBrainzToken) }
-        AlertDialog(
-            onDismissRequest = { showListenBrainzDialog = false },
-            title = { Text(stringResource(R.string.settings_listenbrainz_dialog_title)) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        stringResource(R.string.settings_listenbrainz_dialog_body),
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    OutlinedTextField(
-                        value = tokenInput,
-                        onValueChange = { tokenInput = it },
-                        label = { Text(stringResource(R.string.settings_listenbrainz_token_label)) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    settingsViewModel.setListenBrainzToken(tokenInput)
-                    showListenBrainzDialog = false
-                }) { Text(stringResource(R.string.common_save)) }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    if (listenBrainzToken.isNotBlank()) settingsViewModel.setListenBrainzToken("")
-                    showListenBrainzDialog = false
-                }) {
-                    Text(
-                        if (listenBrainzToken.isNotBlank()) {
-                            stringResource(R.string.settings_listenbrainz_turn_off)
-                        } else {
-                            stringResource(R.string.common_cancel)
-                        }
-                    )
-                }
-            }
-        )
+        ListenBrainzDialog(settingsViewModel, listenBrainzToken) { showListenBrainzDialog = false }
     }
 }
 
 
 /**
- * "Discord status": shows what you play in PixelPlayer as "Listening to" on your Discord
- * profile. Signs in with your own Discord application (official OAuth2, no user token).
+ * "Discord status": shows what you play in PixelPlayer as your status on Discord, through the
+ * Discord app on this phone (Discord Social SDK). No Discord sign-in in PixelPlayer.
  */
 @Composable
 private fun DiscordStatusSetting(
@@ -131,17 +96,22 @@ private fun DiscordStatusSetting(
 ) {
     val status by viewModel.status.collectAsStateWithLifecycle()
     val enabled by viewModel.enabled.collectAsStateWithLifecycle()
-    val error by viewModel.error.collectAsStateWithLifecycle()
+    val readiness by viewModel.readiness.collectAsStateWithLifecycle()
     var showDialog by remember { mutableStateOf(false) }
-    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
-    val connected = status is com.theveloper.pixelplay.data.presence.DiscordPresenceManager.Status.Connected
+    val ready = readiness == com.theveloper.pixelplay.data.presence.DiscordPresenceManager.Readiness.READY
 
     val subtitle = when (val s = status) {
-        is com.theveloper.pixelplay.data.presence.DiscordPresenceManager.Status.Connected ->
-            if (enabled) "On \u00B7 ${s.userName}" else "Off \u00B7 connected as ${s.userName}"
-        is com.theveloper.pixelplay.data.presence.DiscordPresenceManager.Status.Waiting -> s.message
         is com.theveloper.pixelplay.data.presence.DiscordPresenceManager.Status.Error -> s.message
-        else -> "Show what you're playing on your Discord profile"
+        else -> when (readiness) {
+            com.theveloper.pixelplay.data.presence.DiscordPresenceManager.Readiness.READY ->
+                stringResource(if (enabled) R.string.discord_status_subtitle_on else R.string.discord_status_subtitle_off)
+            com.theveloper.pixelplay.data.presence.DiscordPresenceManager.Readiness.NO_SDK_IN_BUILD ->
+                stringResource(R.string.discord_status_no_sdk)
+            com.theveloper.pixelplay.data.presence.DiscordPresenceManager.Readiness.DISCORD_NOT_INSTALLED ->
+                stringResource(R.string.discord_status_install_short)
+            com.theveloper.pixelplay.data.presence.DiscordPresenceManager.Readiness.NO_APPLICATION_ID ->
+                stringResource(R.string.discord_status_need_id_short)
+        }
     }
 
     SettingsSubsection(title = "Discord", addBottomSpace = false) {
@@ -151,7 +121,7 @@ private fun DiscordStatusSetting(
             subtitle = subtitle,
             onClick = { showDialog = true },
             leadingIcon = { Icon(Icons.Rounded.AccountCircle, null, tint = MaterialTheme.colorScheme.secondary) },
-            trailingContent = if (connected) {
+            trailingContent = if (ready) {
                 {
                     androidx.compose.material3.Switch(
                         checked = enabled,
@@ -164,66 +134,181 @@ private fun DiscordStatusSetting(
     }
 
     if (showDialog) {
-        var clientId by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { showDialog = false },
-            title = { Text("Discord status") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (connected) {
-                        Text(
-                            "Songs you play in PixelPlayer show as \u201CListening to\u201D on your Discord profile. " +
-                                "The status clears 30 seconds after you pause.",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    } else {
-                        Text(
-                            "1. In the Discord Developer Portal, create an application.\n" +
-                                "2. Under OAuth2, turn on Public Client and add these redirects:",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        viewModel.redirectUris.forEach {
-                            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Text("3. Paste its Application ID here and connect.", style = MaterialTheme.typography.bodyMedium)
-                        OutlinedTextField(
-                            value = clientId,
-                            onValueChange = { clientId = it.filter(Char::isDigit) },
-                            label = { Text("Application ID") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Text(
-                            "Discord may only allow status updates for approved apps. If it refuses, you'll see why here.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    (error ?: (status as? com.theveloper.pixelplay.data.presence.DiscordPresenceManager.Status.Error)?.message)?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                    }
-                }
-            },
-            confirmButton = {
-                if (connected) {
-                    TextButton(onClick = { showDialog = false }) { Text(stringResource(R.string.common_save)) }
-                } else {
-                    TextButton(
-                        enabled = clientId.length >= 17,
-                        onClick = {
-                            viewModel.error.value = null
-                            viewModel.connect(clientId) { url -> uriHandler.openUri(url) }
-                        }
-                    ) { Text("Connect") }
-                }
-            },
-            dismissButton = {
-                if (connected) {
-                    TextButton(onClick = { viewModel.disconnect(); showDialog = false }) { Text("Disconnect") }
-                } else {
-                    TextButton(onClick = { showDialog = false }) { Text(stringResource(R.string.common_cancel)) }
-                }
+        DiscordStatusDialog(viewModel) { showDialog = false }
+    }
+}
+
+/** ListenBrainz sheet (token in, save / turn off); shared by Settings and the Profile service tiles. */
+@Composable
+internal fun ListenBrainzDialog(
+    settingsViewModel: SettingsViewModel,
+    listenBrainzToken: String,
+    onDismiss: () -> Unit
+) {
+    var tokenInput by remember { mutableStateOf(listenBrainzToken) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val connected = listenBrainzToken.isNotBlank()
+    com.theveloper.pixelplay.presentation.components.ServiceSheet(
+        title = stringResource(R.string.settings_listenbrainz_title),
+        status = stringResource(if (connected) R.string.service_sheet_listenbrainz_on else R.string.service_sheet_listenbrainz_off),
+        icon = androidx.compose.ui.graphics.vector.rememberVectorPainter(Icons.Rounded.History),
+        brandColor = ListenBrainzOrange,
+        onDismiss = onDismiss,
+    ) {
+        OutlinedTextField(
+            value = tokenInput,
+            onValueChange = { tokenInput = it.trim() },
+            label = { Text(stringResource(R.string.settings_listenbrainz_token_label)) },
+            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        com.theveloper.pixelplay.presentation.components.ServiceSheetPrimaryButton(
+            text = stringResource(R.string.common_save),
+            enabled = tokenInput.isNotBlank() && tokenInput != listenBrainzToken,
+            onClick = {
+                settingsViewModel.setListenBrainzToken(tokenInput)
+                onDismiss()
             }
         )
+        androidx.compose.foundation.layout.Row(modifier = Modifier.fillMaxWidth()) {
+            TextButton(onClick = {
+                runCatching {
+                    context.startActivity(
+                        android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://listenbrainz.org/settings/"))
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                }
+            }) { Text(stringResource(R.string.service_sheet_listenbrainz_get_token)) }
+            androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+            if (connected) {
+                TextButton(onClick = {
+                    settingsViewModel.setListenBrainzToken("")
+                    onDismiss()
+                }) { Text(stringResource(R.string.settings_listenbrainz_turn_off), color = MaterialTheme.colorScheme.error) }
+            }
+        }
+    }
+}
+
+private val ListenBrainzOrange = androidx.compose.ui.graphics.Color(0xFFEB743B)
+private val DiscordBlurple = androidx.compose.ui.graphics.Color(0xFF5865F2)
+
+/**
+ * Discord status sheet: one line of state, then only what's needed next (the switch when ready,
+ * "Get Discord" when it's missing, the Application ID field when it isn't set). The ID is kept
+ * only on this phone (never built into the app). Shared with the Profile tiles.
+ */
+@Composable
+internal fun DiscordStatusDialog(
+    viewModel: com.theveloper.pixelplay.presentation.viewmodel.DiscordPresenceViewModel,
+    onDismiss: () -> Unit
+) {
+    val status by viewModel.status.collectAsStateWithLifecycle()
+    val enabled by viewModel.enabled.collectAsStateWithLifecycle()
+    val readiness by viewModel.readiness.collectAsStateWithLifecycle()
+    val savedId by viewModel.applicationId.collectAsStateWithLifecycle()
+    val error by viewModel.error.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // Discord may have been installed while the app was in the background.
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        viewModel.refreshReadiness()
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) viewModel.refreshReadiness()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    var idInput by remember(savedId) { mutableStateOf(savedId) }
+    var editingId by remember { mutableStateOf(false) }
+    val showIdField = readiness == Readiness.NO_APPLICATION_ID || (readiness == Readiness.READY && editingId)
+    val shownError = error ?: (status as? com.theveloper.pixelplay.data.presence.DiscordPresenceManager.Status.Error)?.message
+
+    com.theveloper.pixelplay.presentation.components.ServiceSheet(
+        title = "Discord",
+        status = when (readiness) {
+            Readiness.READY -> stringResource(if (enabled) R.string.discord_status_subtitle_on else R.string.discord_status_subtitle_off)
+            Readiness.NO_SDK_IN_BUILD -> stringResource(R.string.discord_status_no_sdk)
+            Readiness.DISCORD_NOT_INSTALLED -> stringResource(R.string.discord_status_install_short)
+            Readiness.NO_APPLICATION_ID -> stringResource(R.string.discord_status_need_id_short)
+        },
+        icon = androidx.compose.ui.graphics.vector.rememberVectorPainter(Icons.Rounded.Forum),
+        brandColor = DiscordBlurple,
+        onDismiss = onDismiss,
+        error = shownError,
+        moreOptions = if (readiness == Readiness.READY && !editingId) {
+            {
+                androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth()) {
+                    TextButton(onClick = { editingId = true }) { Text(stringResource(R.string.discord_status_change_id)) }
+                    androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { viewModel.disconnect(); onDismiss() }) {
+                        Text(stringResource(R.string.discord_status_forget_id), color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        } else null
+    ) {
+        when (readiness) {
+            Readiness.READY -> if (!editingId) {
+                androidx.compose.material3.Surface(
+                    shape = racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape(20.dp, 60),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .toggleable(value = enabled, role = androidx.compose.ui.semantics.Role.Switch, onValueChange = { viewModel.setEnabled(it) })
+                ) {
+                    androidx.compose.foundation.layout.Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        Text(
+                            stringResource(R.string.discord_status_switch),
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.weight(1f)
+                        )
+                        androidx.compose.material3.Switch(checked = enabled, onCheckedChange = null)
+                    }
+                }
+            }
+            Readiness.DISCORD_NOT_INSTALLED -> com.theveloper.pixelplay.presentation.components.ServiceSheetPrimaryButton(
+                text = stringResource(R.string.discord_status_get_discord),
+                onClick = {
+                    val market = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("market://details?id=com.discord"))
+                    val web = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://play.google.com/store/apps/details?id=com.discord"))
+                    try {
+                        context.startActivity(market)
+                    } catch (_: android.content.ActivityNotFoundException) {
+                        context.startActivity(web)
+                    }
+                }
+            )
+            Readiness.NO_SDK_IN_BUILD, Readiness.NO_APPLICATION_ID -> Unit
+        }
+        if (showIdField) {
+            OutlinedTextField(
+                value = idInput,
+                onValueChange = { idInput = it.filter(Char::isDigit).take(20) },
+                label = { Text(stringResource(R.string.discord_status_id_label)) },
+                supportingText = { Text(stringResource(R.string.discord_status_id_help)) },
+                singleLine = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+            androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                if (editingId) {
+                    TextButton(onClick = { editingId = false; idInput = savedId }) { Text(stringResource(R.string.common_cancel)) }
+                    androidx.compose.foundation.layout.Spacer(Modifier.width(8.dp))
+                }
+                com.theveloper.pixelplay.presentation.components.ServiceSheetPrimaryButton(
+                    text = stringResource(R.string.common_save),
+                    enabled = idInput.length >= 17,
+                    onClick = { if (viewModel.saveApplicationId(idInput)) editingId = false },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
     }
 }

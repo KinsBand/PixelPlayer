@@ -11,8 +11,12 @@ import com.theveloper.pixelplay.data.recognition.RecentlyHeardRepository
 import com.theveloper.pixelplay.data.recognition.RecentlyHeardSource
 import com.theveloper.pixelplay.data.repository.HeardSongsRepository
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import timber.log.Timber
-import java.util.UUID
 import javax.inject.Inject
 
 /**
@@ -28,6 +32,17 @@ class NowPlayingNotificationListener : NotificationListenerService() {
     @Inject
     lateinit var recentlyHeardRepository: RecentlyHeardRepository
 
+    @Inject
+    lateinit var heardSongResolver: HeardSongResolver
+
+    /** Resolves heard titles to playable songs off the main thread; cancelled with the service. */
+    private val resolveScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    override fun onDestroy() {
+        resolveScope.cancel()
+        super.onDestroy()
+    }
+
     override fun onListenerConnected() {
         super.onListenerConnected()
         // Pick up a Now Playing notification that was already showing when access was granted.
@@ -35,7 +50,28 @@ class NowPlayingNotificationListener : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
-        handle(sbn ?: return, live = true)
+        val s = sbn ?: return
+        checkVerificationCode(s)
+        handle(s, live = true)
+    }
+
+    private fun checkVerificationCode(sbn: StatusBarNotification) {
+        if (!com.theveloper.pixelplay.data.spotify.web.SpotifyAuthCodeDetector.isListening.value) return
+        val notif = sbn.notification ?: return
+        val extras = notif.extras ?: return
+        val title = extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString().orEmpty()
+        val text = extras.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString().orEmpty()
+        val bigText = extras.getCharSequence(android.app.Notification.EXTRA_BIG_TEXT)?.toString().orEmpty()
+        val subText = extras.getCharSequence(android.app.Notification.EXTRA_SUB_TEXT)?.toString().orEmpty()
+        val summaryText = extras.getCharSequence(android.app.Notification.EXTRA_SUMMARY_TEXT)?.toString().orEmpty()
+        val lines = extras.getCharSequenceArray(android.app.Notification.EXTRA_TEXT_LINES)
+            ?.joinToString("\n") { it.toString() }.orEmpty()
+        val ticker = notif.tickerText?.toString().orEmpty()
+        val combined = "$title\n$text\n$bigText\n$subText\n$summaryText\n$lines\n$ticker"
+        com.theveloper.pixelplay.data.spotify.web.SpotifyAuthCodeDetector.onNotification(
+            sbn.packageName.orEmpty(),
+            combined
+        )
     }
 
     private fun handle(sbn: StatusBarNotification, live: Boolean) {
@@ -53,15 +89,20 @@ class NowPlayingNotificationListener : NotificationListenerService() {
             announce = live
         )
         if (live) {
-            heardSongsRepository.addOrUpvote(
-                song = Song.emptySong().copy(
-                    id = UUID.randomUUID().toString(),
-                    title = title,
-                    artist = artist.ifBlank { "Unknown Artist" }
-                ),
-                isOnlineMatch = true,
-                rawPhrase = "Pixel Now Playing Notification"
-            )
+            // Resolve to a real, playable song first (library, then YouTube Music search). A bare
+            // title with no source can't play, which is why approving these used to fail.
+            resolveScope.launch {
+                val resolved = heardSongResolver.resolve(title, artist)
+                if (resolved == null) {
+                    Timber.d("NowPlayingNotification: no playable match for %s by %s", title, artist)
+                    return@launch
+                }
+                heardSongsRepository.addOrUpvote(
+                    song = resolved.song,
+                    isOnlineMatch = !resolved.isLocal,
+                    rawPhrase = "Pixel Now Playing Notification"
+                )
+            }
         }
     }
 

@@ -168,9 +168,9 @@
     <string name="settings_language_turkish">åœŸè€³å…¶è¯­</string>
     <string name="settings_app_theme_title">åº”ç”¨ä¸»é¢˜</string>
     <string name="settings_app_theme_subtitle">åœ¨æµ…è‰²ã€æ·±è‰²ä¹‹é—´åˆ‡æ¢ï¼Œæˆ–è·Ÿéšç³»ç»Ÿå¤–è§‚ã€‚</string>
-    <string name="settings_theme_light">æµ…è‰²ä¸»é¢˜</string>
-    <string name="settings_theme_dark">æ·±è‰²ä¸»é¢˜</string>
-    <string name="settings_theme_follow_system">è·Ÿéšç³»ç»Ÿ</string>
+    <string name="settings_theme_light">浅色</string>
+    <string name="settings_theme_dark">深色</string>
+    <string name="settings_theme_follow_system">跟随系统</string>
     <string name="settings_smooth_corners_title">ä½¿ç”¨å¹³æ»‘åœ†è§’</string>
     <string name="settings_smooth_corners_subtitle">ä½¿ç”¨å¤æ‚çš„åœ†è§’å½¢çŠ¶ä»¥æœ‰æ•ˆæå‡ç¾Žè§‚åº¦ï¼Œä½†å¯èƒ½ä¼šå½±å“ä½Žç«¯è®¾å¤‡çš„æ€§èƒ½</string>
     <string name="settings_disable_blur_all_over_title">å…³é—­æ¨¡ç³Šæ•ˆæžœ</string>

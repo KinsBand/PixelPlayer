@@ -65,7 +65,13 @@ class SongInfoBottomSheetViewModel @Inject constructor(
     private val downloadNotificationManager: DownloadNotificationManager,
     private val cloudSongDao: CloudSongDao,
     private val metadataGatherer: com.theveloper.pixelplay.data.metadata.SongMetadataGatherer,
+    private val themeStateHolder: ThemeStateHolder,
 ) : ViewModel() {
+
+    /** The song's album-art palette (light + dark), generated on demand; null until ready / no art. */
+    fun albumColorSchemeFlow(albumArtUri: String?): kotlinx.coroutines.flow.StateFlow<ColorSchemePair?> =
+        themeStateHolder.getAlbumColorSchemeFlow(albumArtUri.orEmpty())
+
 
     /**
      * The song as shown on the Details tab: duration, genre, album and artist filled in for
@@ -92,6 +98,32 @@ class SongInfoBottomSheetViewModel @Inject constructor(
                 // Someone is reading this song's details: worth asking MusicBrainz too.
                 val filled = runCatching { metadataGatherer.gatherDeep(current, timeoutMs = 15_000) }.getOrNull()
                 if (filled != null && filled != current && _detailsSong.value?.id == song.id) _detailsSong.value = filled
+            }
+        }
+    }
+
+    private val _refreshingMetadata = MutableStateFlow(false)
+    /** "Search metadata again" is running. */
+    val refreshingMetadata: StateFlow<Boolean> = _refreshingMetadata.asStateFlow()
+
+    /** Searches every metadata source again for [song], ignoring anything cached. */
+    fun refreshMetadata(song: Song) {
+        if (_refreshingMetadata.value) return
+        _refreshingMetadata.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val fresh = runCatching { metadataGatherer.refresh(_detailsSong.value?.takeIf { it.id == song.id } ?: song) }
+                    .getOrNull()
+                if (fresh != null && _detailsSong.value?.id == song.id) _detailsSong.value = fresh
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        appContext,
+                        if (fresh != null) "Metadata updated" else "No new metadata found",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+            } finally {
+                _refreshingMetadata.value = false
             }
         }
     }

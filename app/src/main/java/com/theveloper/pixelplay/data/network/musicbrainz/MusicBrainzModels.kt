@@ -62,6 +62,41 @@ data class MbTag(
     @SerializedName("count") val count: Int = 0
 )
 
+// ─── Artist entity (links + members) ─────────────────────────────────────────
+
+data class MbArtistSearchResponse(
+    @SerializedName("artists") val artists: List<MbArtistHit> = emptyList()
+)
+
+data class MbArtistHit(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("name") val name: String = "",
+    @SerializedName("score") val score: Int = 0,
+    @SerializedName("type") val type: String? = null,
+    @SerializedName("disambiguation") val disambiguation: String? = null
+)
+
+data class MbArtistDetails(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("name") val name: String = "",
+    @SerializedName("type") val type: String? = null,
+    @SerializedName("relations") val relations: List<MbArtistRelation> = emptyList()
+)
+
+data class MbArtistRelation(
+    @SerializedName("type") val type: String = "",
+    @SerializedName("direction") val direction: String? = null,
+    @SerializedName("target-type") val targetType: String? = null,
+    @SerializedName("url") val url: MbUrl? = null,
+    @SerializedName("artist") val artist: MbArtist? = null,
+    @SerializedName("attributes") val attributes: List<String> = emptyList(),
+    @SerializedName("ended") val ended: Boolean = false
+)
+
+data class MbUrl(
+    @SerializedName("resource") val resource: String = ""
+)
+
 // ─── Work entity ────────────────────────────────────────────────────────────
 
 data class MbWork(

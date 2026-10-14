@@ -268,6 +268,16 @@ interface MusicRepository {
         reset: Boolean
     ): SearchSongsPage = SearchSongsPage(emptyList(), hasMore = false)
 
+    /**
+     * The next page of albums, artists or playlists for [query] under [filter] (online only).
+     * [reset] starts paging over from page two. Throws when the page can't load.
+     */
+    suspend fun moreCollections(
+        query: String,
+        filter: SearchFilterType,
+        reset: Boolean
+    ): SearchItemsPage = SearchItemsPage(emptyList(), hasMore = false)
+
     // Search History
     suspend fun addSearchHistoryItem(query: String)
     suspend fun getRecentSearchHistory(limit: Int): List<SearchHistoryItem>
@@ -324,6 +334,13 @@ interface MusicRepository {
      */
     fun getFavoriteSongIdsByRecentFlow(): Flow<List<String>> =
         getFavoriteSongIdsFlow().map { it.toList() }
+
+    /**
+     * Song id → time it was liked in PixelPlayer (epoch ms). Empty for implementations without
+     * the favourites table; platform likes have no entry.
+     */
+    fun getFavoriteLikeTimesFlow(): Flow<Map<String, Long>> =
+        kotlinx.coroutines.flow.flowOf(emptyMap())
 
     /**
      * Obtiene una canción específica por su ID.
@@ -398,3 +415,6 @@ interface MusicRepository {
 
 /** One "Show more" page of song search results. */
 data class SearchSongsPage(val songs: List<Song>, val hasMore: Boolean)
+
+/** One further page of non-song search results (albums, artists or playlists). */
+data class SearchItemsPage(val items: List<SearchResultItem>, val hasMore: Boolean)

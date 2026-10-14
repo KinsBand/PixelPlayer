@@ -22,6 +22,15 @@ class AccountVault @Inject constructor(@ApplicationContext context: Context) {
         check(prefs.edit().apply { values.forEach { (k, v) -> putString(k, v) } }.commit())
         revision.value++
     }
+    /** Every stored credential (for the encrypted copy kept with the PixelPlay account). */
+    @Synchronized fun snapshot(): Map<String, String> =
+        prefs.all.mapNotNull { (k, v) -> (v as? String)?.let { k to it } }.toMap()
+    /** Puts back a [snapshot]; keys not in it are left alone. */
+    @Synchronized fun restoreAll(values: Map<String, String>) {
+        if (values.isEmpty()) return
+        check(prefs.edit().apply { values.forEach { (k, v) -> putString(k, v) } }.commit())
+        revision.value++
+    }
     @Synchronized fun clear(prefix: String) {
         check(prefs.edit().apply { prefs.all.keys.filter { it.startsWith(prefix) }.forEach { remove(it) } }.commit())
         revision.value++

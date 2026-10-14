@@ -164,9 +164,9 @@
     <string name="settings_language_turkish">Turki</string>
     <string name="settings_app_theme_title">Tema Aplikasi</string>
     <string name="settings_app_theme_subtitle">Beralih antara terang, gelap, atau ikuti tampilan sistem.</string>
-    <string name="settings_theme_light">Tema Terang</string>
-    <string name="settings_theme_dark">Tema Gelap</string>
-    <string name="settings_theme_follow_system">Ikuti Sistem</string>
+    <string name="settings_theme_light">Terang</string>
+    <string name="settings_theme_dark">Gelap</string>
+    <string name="settings_theme_follow_system">Sistem</string>
     <string name="settings_smooth_corners_title">Gunakan Sudut Halus</string>
     <string name="settings_smooth_corners_subtitle">Gunakan sudut berbentuk kompleks yang secara efektif meningkatkan estetika tetapi mungkin memengaruhi performa pada perangkat berspesifikasi rendah</string>
     <string name="settings_disable_blur_all_over_title">Nonaktifkan Efek Blur</string>

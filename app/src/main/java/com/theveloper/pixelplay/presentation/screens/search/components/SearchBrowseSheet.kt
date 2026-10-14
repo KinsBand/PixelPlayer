@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.presentation.screens.search.components
 
+import com.theveloper.pixelplay.presentation.components.rememberAnimatedSheetDismiss
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -30,7 +31,9 @@ fun SearchBrowseSheet(id: String, title: String, player: PlayerViewModel, onDism
     LaunchedEffect(addSongSession) {
         if (addSongSession != null) sawSession = true else if (sawSession) onDismiss()
     }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState()
+    val dismissSheetAnimated = rememberAnimatedSheetDismiss(sheetState, onDismiss)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         com.theveloper.pixelplay.utils.KeepSystemBarsHiddenInDialog()
         Text(title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(16.dp))
         LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp),
@@ -42,7 +45,7 @@ fun SearchBrowseSheet(id: String, title: String, player: PlayerViewModel, onDism
                         if (songTap != null) {
                             songTap.onSongTap(song, state.songs, title)
                         } else {
-                            player.showAndPlaySong(song, state.songs, title); onDismiss()
+                            player.showAndPlaySong(song, state.songs, title); dismissSheetAnimated()
                         }
                     })
             }

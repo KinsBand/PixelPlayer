@@ -129,6 +129,7 @@ fun ReorderTabsSheet(
     )
     var isLoading by remember { mutableStateOf(false) }
 
+    val dismissSheetAnimated = rememberAnimatedSheetDismiss(sheetState, onDismiss)
     ModalBottomSheet(
         onDismissRequest = { onDismiss() },
         sheetState = sheetState,
@@ -162,7 +163,7 @@ fun ReorderTabsSheet(
                             delay(700) // Simulate network/db operation
                             onReorder(localTabs)
                             isLoading = false
-                            onDismiss()
+                            dismissSheetAnimated()
                         }
                     }
                 )
@@ -211,17 +212,19 @@ fun ReorderTabsSheet(
                                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 18.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.DragIndicator,
-                                            contentDescription = stringResource(R.string.reorder_tabs_cd_drag_handle),
-                                            modifier = Modifier.draggableHandle()
-                                        )
-                                        Spacer(modifier = Modifier.width(16.dp))
                                         Text(
                                             text = LibraryTabId.fromStableKey(tab)
                                                 ?.let { if (it.labelRes != 0) stringResource(it.labelRes) else it.label.lowercase().replaceFirstChar { c -> c.titlecase() } }
                                                 ?: tab,
-                                            style = MaterialTheme.typography.bodyLarge
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        Spacer(modifier = Modifier.width(16.dp))
+                                        // Reorder handle on the right.
+                                        Icon(
+                                            imageVector = Icons.Rounded.DragIndicator,
+                                            contentDescription = stringResource(R.string.reorder_tabs_cd_drag_handle),
+                                            modifier = Modifier.draggableHandle()
                                         )
                                     }
                                 }
@@ -287,4 +290,4 @@ fun FloatingToolBar(
             )
         }
     }
-}
+}

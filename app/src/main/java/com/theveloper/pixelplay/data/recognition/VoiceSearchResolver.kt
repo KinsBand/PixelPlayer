@@ -55,6 +55,37 @@ class VoiceSearchResolver @Inject constructor(
     }
 
     /**
+     * Free text such as Google's search box ("Whirr Color Change": artist and title, no
+     * separator) → a library song, only when the text is exactly "artist title" or
+     * "title artist" of one song (punctuation and case ignored). Null when not that sure; no
+     * online guess is made.
+     */
+    suspend fun findConfidentMatch(query: String): Song? = withContext(Dispatchers.IO) {
+        val wanted = normalizeFreeText(query)
+        if (wanted.isBlank()) return@withContext null
+        val localSongs = runCatching { musicRepository.getAudioFiles().firstOrNull().orEmpty() }
+            .onFailure { Timber.w(it, "VoiceSearchResolver: Error during free-text match") }
+            .getOrNull().orEmpty()
+        val matches = localSongs.filter { song ->
+            val title = normalizeFreeText(song.title)
+            val artist = normalizeFreeText(song.artist)
+            title.isNotBlank() && artist.isNotBlank() &&
+                (wanted == "$artist $title" || wanted == "$title $artist")
+        }
+        // Several different songs fit → not confident.
+        val distinct = matches.distinctBy { normalizeFreeText(it.title) to normalizeFreeText(it.artist) }
+        distinct.singleOrNull()?.let { found ->
+            val isFav = runCatching { favoritesDao.isFavorite(found.id) }.getOrNull() ?: false
+            found.copy(isFavorite = isFav)
+        }
+    }
+
+    private fun normalizeFreeText(text: String): String =
+        text.lowercase()
+            .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+            .trim()
+
+    /**
      * Resolves recognized song information into a concrete [Song] with favorite state
      * and fetches any available synced [Lyrics].
      */

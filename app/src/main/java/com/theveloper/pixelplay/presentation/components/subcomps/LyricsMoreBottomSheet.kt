@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.presentation.components.subcomps
 
+import com.theveloper.pixelplay.presentation.components.rememberAnimatedSheetDismiss
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
@@ -145,7 +146,7 @@ fun LyricsMoreBottomSheet(
     tertiaryColor: Color = MaterialTheme.colorScheme.tertiary,
     onTertiaryColor: Color = MaterialTheme.colorScheme.onTertiary,
     /** Guitar / drum page options; shown first (before the lyrics group) when set. */
-    tabOptions: (@Composable () -> Unit)? = null,
+    tabOptions: (@Composable (dismissMenu: () -> Unit) -> Unit)? = null,
     /** Opens the editor to write / time lyrics by hand. */
     onWriteCustomLyrics: () -> Unit = {},
     /** Opens the lyrics search. */
@@ -155,9 +156,12 @@ fun LyricsMoreBottomSheet(
     var showResetDialog by remember { mutableStateOf(false) }
     var showLyricsActions by remember { mutableStateOf(false) }
     var showAdvanced by remember { mutableStateOf(false) }
+    // The immersive branch starts minimised, like the Advanced family trees.
+    var immersiveBranchOpen by remember { mutableStateOf(false) }
     val settingsViewModel: com.theveloper.pixelplay.presentation.viewmodel.SettingsViewModel = androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel()
     val settingsState by settingsViewModel.uiState.collectAsStateWithLifecycle()
 
+    val dismissSheetAnimated = rememberAnimatedSheetDismiss(sheetState, onDismissRequest)
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = sheetState,
@@ -178,7 +182,7 @@ fun LyricsMoreBottomSheet(
         ) {
             val itemBackgroundColor = contentColor.copy(alpha = 0.08f)
 
-            tabOptions?.invoke()
+            tabOptions?.invoke(dismissSheetAnimated)
 
             // Lyrics Actions Group
             Column(
@@ -288,22 +292,22 @@ fun LyricsMoreBottomSheet(
                         Column {
                             androidx.compose.material3.TextButton(onClick = {
                                 showLyricsActions = false
-                                onDismissRequest()
+                                dismissSheetAnimated()
                                 onWriteCustomLyrics()
                             }) { Text(if (lyrics == null) "Write your own lyrics" else "Edit lyrics & timings") }
                             androidx.compose.material3.TextButton(onClick = {
                                 showLyricsActions = false
-                                onDismissRequest()
+                                dismissSheetAnimated()
                                 onFindLyrics()
                             }) { Text("Search for lyrics") }
                             androidx.compose.material3.TextButton(enabled = lyrics != null, onClick = {
                                 showLyricsActions = false
-                                onDismissRequest()
+                                dismissSheetAnimated()
                                 onSaveLyricsAsLrc()
                             }) { Text("Save lyrics") }
                             androidx.compose.material3.TextButton(enabled = lyrics != null, onClick = {
                                 showLyricsActions = false
-                                onDismissRequest()
+                                dismissSheetAnimated()
                                 onTranslateViaAi()
                             }) { Text("Translate lyrics") }
                             androidx.compose.material3.TextButton(onClick = {
@@ -324,7 +328,7 @@ fun LyricsMoreBottomSheet(
                         androidx.compose.material3.TextButton(
                             onClick = {
                                 showResetDialog = false
-                                onDismissRequest()
+                                dismissSheetAnimated()
                                 onResetImportedLyrics()
                             }
                         ) {
@@ -346,7 +350,8 @@ fun LyricsMoreBottomSheet(
 
             // Control Settings Group
             val isSyncVisible = showSyncedLyrics
-            val isRomanizationVisible = hasRomanizedLyrics
+            // Romanization is set from Settings → Lyrics; the quick toggle was removed from this sheet.
+            val isRomanizationVisible = false
             val isTranslationVisible = hasTranslatedLyrics
             // Always offered with synced lyrics, so immersive (auto-hide) can be turned on or off here.
             val isImmersiveVisible = showImmersiveToggle
@@ -403,7 +408,7 @@ fun LyricsMoreBottomSheet(
                                 )
                                 .background(itemBackgroundColor)
                                 .clickable {
-                                    onDismissRequest()
+                                    dismissSheetAnimated()
                                     onToggleSyncControls()
                                 },
                             colors = ListItemDefaults.colors(
@@ -518,10 +523,30 @@ fun LyricsMoreBottomSheet(
                                 )
                             },
                             trailingContent = {
+                              Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (immersiveLyricsEnabled && !isImmersiveTemporarilyDisabled) {
+                                    val immersiveChevron by androidx.compose.animation.core.animateFloatAsState(
+                                        targetValue = if (immersiveBranchOpen) 180f else 0f,
+                                        label = "immersiveBranchChevron"
+                                    )
+                                    androidx.compose.material3.IconButton(
+                                        onClick = { immersiveBranchOpen = !immersiveBranchOpen },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.ExpandMore,
+                                            contentDescription = if (immersiveBranchOpen) "Collapse" else "Expand",
+                                            tint = contentColor.copy(alpha = 0.8f),
+                                            modifier = Modifier.graphicsLayer { rotationZ = immersiveChevron }
+                                        )
+                                    }
+                                }
                                 Switch(
                                     modifier = Modifier,
                                     checked = immersiveLyricsEnabled && !isImmersiveTemporarilyDisabled,
                                     onCheckedChange = { on ->
+                                        // Turning it on opens the branch, like the Advanced trees.
+                                        if (on) immersiveBranchOpen = true
                                         settingsViewModel.setImmersiveLyricsEnabled(on)
                                         onSetImmersiveTemporarilyDisabled(false)
                                     },
@@ -532,6 +557,7 @@ fun LyricsMoreBottomSheet(
                                         uncheckedTrackColor = contentColor.copy(alpha = 0.3f)
                                     )
                                 )
+                              }
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -551,7 +577,7 @@ fun LyricsMoreBottomSheet(
                             )
                         )
                         // Only there while immersive is on, so it hangs off it as a branch.
-                        androidx.compose.animation.AnimatedVisibility(visible = immersiveLyricsEnabled && !isImmersiveTemporarilyDisabled) {
+                        androidx.compose.animation.AnimatedVisibility(visible = immersiveLyricsEnabled && !isImmersiveTemporarilyDisabled && immersiveBranchOpen) {
                             SkillTreeBranch(depth = 1, isLast = true, lineColor = accentColor) {
                                 ImmersiveDelayRow(
                                     selectedMs = settingsState.immersiveLyricsTimeout,
@@ -827,11 +853,6 @@ private fun LyricsAdvancedSettings(
                             checked = uiState.autoScanLrcFiles,
                             onCheckedChange = { settingsViewModel.setAutoScanLrcFiles(it) }
                         ))
-                        add(AdvancedRow(
-                            icon = Icons.Rounded.ClearAll,
-                            title = stringResource(R.string.settings_reset_imported_lyrics_title),
-                            onClick = { confirmResetAll = true }
-                        ))
                     },
                     itemBackgroundColor = itemBackgroundColor,
                     contentColor = contentColor,
@@ -839,46 +860,15 @@ private fun LyricsAdvancedSettings(
                     onAccentColor = onAccentColor
                 )
 
-                val immersive = uiState.immersiveLyricsEnabled
                 AdvancedGroup(
                     title = stringResource(R.string.settings_lyrics_display_section),
                     rows = buildList {
-                        add(AdvancedRow(
-                            icon = Icons.Rounded.Album,
-                            title = stringResource(R.string.settings_cover_lyrics_title),
-                            checked = displayPrefs.coverLyricsEnabled,
-                            onCheckedChange = { enabled -> editPrefs { it[com.theveloper.pixelplay.presentation.components.LyricsDisplayPrefKeys.COVER_LYRICS_ENABLED] = enabled } }
-                        ))
                         add(AdvancedRow(
                             icon = Icons.Rounded.ViewAgenda,
                             title = "Song structure",
                             checked = displayPrefs.showSongStructure,
                             onCheckedChange = { enabled -> editPrefs { it[com.theveloper.pixelplay.presentation.components.LyricsDisplayPrefKeys.SHOW_SONG_STRUCTURE] = enabled } }
                         ))
-                        add(AdvancedRow(
-                            icon = Icons.Rounded.Fullscreen,
-                            title = stringResource(R.string.settings_immersive_lyrics_title),
-                            checked = immersive,
-                            onCheckedChange = { settingsViewModel.setImmersiveLyricsEnabled(it) }
-                        ))
-                        if (immersive) {
-                            add(AdvancedRow(
-                                icon = Icons.Rounded.Timer,
-                                title = "Immersive delay",
-                                subtitle = if (uiState.immersiveLyricsTimeout <= com.theveloper.pixelplay.presentation.components.IMMERSIVE_TIMEOUT_OFF) "Off: swipe down to hide, swipe up to show" else null,
-                                options = immersiveDelayOptions(),
-                                selectedKey = uiState.immersiveLyricsTimeout.toString(),
-                                onSelect = { settingsViewModel.setImmersiveLyricsTimeout(it.toLong()) },
-                                depth = 1
-                            ))
-                            add(AdvancedRow(
-                                icon = Icons.Rounded.ScreenRotation,
-                                title = "Face-to-face lyrics",
-                                checked = displayPrefs.splitFaceView,
-                                onCheckedChange = { enabled -> editPrefs { it[com.theveloper.pixelplay.presentation.components.LyricsDisplayPrefKeys.SPLIT_FACE_VIEW] = enabled } },
-                                depth = 1
-                            ))
-                        }
                         add(AdvancedRow(
                             icon = Icons.Rounded.ScreenRotation,
                             title = stringResource(R.string.settings_lyrics_landscape_lyrics_left_title),
@@ -1036,11 +1026,46 @@ private fun AdvancedGroup(
             header()
             Spacer(Modifier.height(6.dp))
         }
+        // Collapsible family trees: a row with children shows a chevron; its children (and
+        // their children) only show while every ancestor is expanded. Parents start collapsed.
+        var expandedBranches by remember { mutableStateOf(emptySet<String>()) }
+        val ancestorKeys: List<List<String>> = run {
+            val stack = ArrayList<Pair<Int, String>>()
+            rows.map { r ->
+                while (stack.isNotEmpty() && stack[stack.lastIndex].first >= r.depth) stack.removeAt(stack.lastIndex)
+                val ancestors = stack.map { it.second }
+                stack.add(r.depth to r.title)
+                ancestors
+            }
+        }
+        val hasChildren = rows.mapIndexed { i, r -> (rows.getOrNull(i + 1)?.depth ?: -1) > r.depth }
+        fun toggleBranch(key: String) {
+            expandedBranches = if (key in expandedBranches) expandedBranches - key else expandedBranches + key
+        }
         rows.forEachIndexed { index, row ->
+          val rowVisible = ancestorKeys[index].all { it in expandedBranches }
+          androidx.compose.animation.AnimatedVisibility(
+            visible = rowVisible,
+            enter = androidx.compose.animation.expandVertically() + androidx.compose.animation.fadeIn(),
+            exit = androidx.compose.animation.shrinkVertically() + androidx.compose.animation.fadeOut()
+          ) {
             val first = index == 0
             val last = index == rows.lastIndex
+            val isParent = hasChildren[index]
+            val branchOpen = isParent && row.title in expandedBranches
             // Last child of its parent: the next row isn't at this depth or deeper.
             val lastChild = rows.getOrNull(index + 1)?.let { it.depth < row.depth } ?: true
+            val chevronRotation by androidx.compose.animation.core.animateFloatAsState(
+                targetValue = if (branchOpen) 180f else 0f,
+                label = "branchChevron"
+            )
+            // Turning a parent on opens its branch so the new child settings are visible.
+            val onChecked: ((Boolean) -> Unit)? = row.onCheckedChange?.let { cb ->
+                { on: Boolean ->
+                    if (on) expandedBranches = expandedBranches + row.title
+                    cb(on)
+                }
+            }
             var menuOpen by remember { mutableStateOf(false) }
             val rowAlpha = if (row.enabled) 1f else 0.45f
             val selectedLabel = row.options.firstOrNull { it.first == row.selectedKey }?.second
@@ -1048,8 +1073,9 @@ private fun AdvancedGroup(
                 RoundedCornerShape(14.dp)
             } else {
                 // A parent with children rounds its bottom less: the branch hangs off it.
-                val nextIsChild = (rows.getOrNull(index + 1)?.depth ?: 0) > 0
-                val prevWasChild = (rows.getOrNull(index - 1)?.depth ?: 0) > 0
+                val nextIsChild = branchOpen && (rows.getOrNull(index + 1)?.depth ?: 0) > 0
+                val prevWasChild = (rows.getOrNull(index - 1)?.depth ?: 0) > 0 &&
+                    ancestorKeys[index - 1].all { it in expandedBranches }
                 RoundedCornerShape(
                     topStart = if (first || prevWasChild) 18.dp else 8.dp,
                     topEnd = if (first || prevWasChild) 18.dp else 8.dp,
@@ -1084,12 +1110,13 @@ private fun AdvancedGroup(
                     headlineContent = { Text(row.title) },
                     supportingContent = if (row.subtitle != null) { { Text(row.subtitle) } } else null,
                     leadingContent = { Icon(row.icon, contentDescription = null) },
-                    trailingContent = when {
+                    trailingContent = run {
+                      val baseTrailing: (@Composable () -> Unit)? = when {
                         row.checked != null -> ({
                             Switch(
                                 checked = row.checked,
                                 enabled = row.enabled,
-                                onCheckedChange = row.onCheckedChange,
+                                onCheckedChange = onChecked,
                                 colors = SwitchDefaults.colors(
                                     checkedThumbColor = onAccentColor,
                                     checkedTrackColor = accentColor,
@@ -1129,6 +1156,24 @@ private fun AdvancedGroup(
                             }
                         })
                         else -> null
+                      }
+                      val parentTrailing: @Composable () -> Unit = {
+                              Row(verticalAlignment = Alignment.CenterVertically) {
+                                  androidx.compose.material3.IconButton(
+                                      onClick = { toggleBranch(row.title) },
+                                      modifier = Modifier.size(36.dp)
+                                  ) {
+                                      Icon(
+                                          imageVector = Icons.Rounded.ExpandMore,
+                                          contentDescription = if (branchOpen) "Collapse ${row.title}" else "Expand ${row.title}",
+                                          tint = contentColor.copy(alpha = 0.8f),
+                                          modifier = Modifier.graphicsLayer { rotationZ = chevronRotation }
+                                      )
+                                  }
+                                  baseTrailing?.invoke()
+                              }
+                      }
+                      if (isParent) parentTrailing else baseTrailing
                     },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1137,7 +1182,7 @@ private fun AdvancedGroup(
                         .graphicsLayer { alpha = rowAlpha }
                         .clickable(enabled = row.enabled) {
                             when {
-                                row.checked != null -> row.onCheckedChange?.invoke(!row.checked)
+                                row.checked != null -> onChecked?.invoke(!row.checked)
                                 row.options.isNotEmpty() -> menuOpen = true
                                 else -> row.onClick?.invoke()
                             }
@@ -1150,6 +1195,7 @@ private fun AdvancedGroup(
                     )
                 )
             }
+          }
         }
     }
 }

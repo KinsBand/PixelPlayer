@@ -54,6 +54,9 @@ import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material.icons.rounded.Deselect
@@ -76,6 +79,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
@@ -254,6 +258,14 @@ val ListExtraBottomGap = 30.dp
 internal const val JUST_ADDED_WINDOW_MS = 24L * 60 * 60 * 1000
 val PlayerSheetCollapsedCornerRadius = 32.dp
 private const val MAX_ALBUM_MULTI_SELECTION = 6
+/**
+ * Opening Library composes only the visible tab; the tabs either side (each a full list with
+ * its own queries) are added after the screen transition has finished, so they don't compete
+ * with it for frames.
+ */
+private const val LIBRARY_NEIGHBOUR_TABS_DELAY_MS = 600L
+/** The album / artist shelves rebuild from the whole play history; start that after entry. */
+private const val LIBRARY_INSIGHTS_DELAY_MS = 900L
 private const val ENABLE_FOLDERS_SOURCE_TOGGLE = true
 private const val ENABLE_FOLDERS_STORAGE_FILTER = false
 private const val FOLDER_NAVIGATION_ROOT_KEY = "__folder_root__"
@@ -381,7 +393,7 @@ fun LibraryScreen(
     var aiGenerationRequestedFromDialog by remember { mutableStateOf(false) }
 
     val m3uImportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let { playlistViewModel.importM3u(it) }
     }
@@ -736,12 +748,16 @@ fun LibraryScreen(
     Scaffold(
         modifier = Modifier.background(brush = gradientBrush),
         topBar = {
-            Column(
-                modifier = Modifier.background(headerContainerColor)
-            ) {
-                TopAppBar(
-                    title = {
-                        if (isCompactNavigation) {
+            // Shared tab header: "Library" (or the tab pill in compact mode) + round settings.
+            // No tinted band and no mic (voice search lives on Search only).
+            Column {
+                com.theveloper.pixelplay.presentation.components.TabHeader(
+                    title = stringResource(R.string.library_screen_title),
+                    onSettingsClick = {
+                        navController.navigateSafely(Screen.Settings.route)
+                    },
+                    titleContent = if (isCompactNavigation) {
+                        {
                             LibraryNavigationPill(
                                 modifier = Modifier,
                                 title = currentTabTitle,
@@ -754,39 +770,8 @@ fun LibraryScreen(
                                 },
                                 onArrowClick = { showTabSwitcherSheet = true }
                             )
-                        } else {
-                            Text(
-                                modifier = Modifier.padding(start = 8.dp),
-                                text = stringResource(R.string.library_screen_title),
-                                fontFamily = GoogleSansRounded,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontSize = 40.sp,
-                                letterSpacing = 1.sp
-                            )
                         }
-                    },
-                    actions = {
-                        FilledIconButton(
-                            modifier = Modifier.padding(end = 14.dp),
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                            ),
-                            onClick = {
-                                navController.navigateSafely(Screen.Settings.route)
-                            }
-                        ) {
-                            Icon(
-                                painter = painterResource(R.drawable.rounded_settings_24),
-                                contentDescription = stringResource(R.string.library_cd_open_settings)
-                            )
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Transparent,
-                        scrolledContainerColor = Color.Transparent
-                    )
+                    } else null
                 )
                 if (!isCompactNavigation) {
                     val showTabIndicator = false
@@ -875,9 +860,7 @@ fun LibraryScreen(
                 .fillMaxSize()
         ) {
             Column(
-                modifier = Modifier
-                    .background(color = headerContainerColor)
-                    .fillMaxSize()
+                modifier = Modifier.fillMaxSize()
             ) {
                 Surface(
                     modifier = Modifier
@@ -1079,7 +1062,7 @@ fun LibraryScreen(
                                     onLocateClick = { locateAction?.invoke() },
                                     isPlaylistTab = currentTabId == LibraryTabId.PLAYLISTS,
                                     isFoldersTab = currentTabId == LibraryTabId.FOLDERS && (!playerUiState.isFoldersPlaylistView || playerUiState.currentFolder != null),
-                                    onImportM3uClick = { m3uImportLauncher.launch("audio/x-mpegurl") },
+                                    onImportM3uClick = { m3uImportLauncher.launch(com.theveloper.pixelplay.data.playlist.M3U_PICKER_MIME_TYPES) },
                                     currentFolder = playerUiState.currentFolder,
                                     folderRootPath = playerUiState.folderSourceRootPath.ifBlank {
                                         Environment.getExternalStorageDirectory().path
@@ -1122,6 +1105,8 @@ fun LibraryScreen(
 
                             val isAlbumTab = currentTabId == LibraryTabId.ALBUMS
                             val isFoldersTab = currentTabId == LibraryTabId.FOLDERS
+                            val syncedBadgeOn by com.theveloper.pixelplay.data.lyrics.training.SyncedLyricsBadgePrefs
+                                .enabled(context).collectAsStateWithLifecycle()
                             val isPlaylistsTab = currentTabId == LibraryTabId.PLAYLISTS
 
                             LibrarySortBottomSheet(
@@ -1142,6 +1127,12 @@ fun LibraryScreen(
                                 viewToggleChecked = playerUiState.isFoldersPlaylistView,
                                 onViewToggleChange = { isChecked ->
                                     playerViewModel.setFoldersPlaylistView(isChecked)
+                                },
+                                // Folders only: mark songs that have a synced .lrc saved next to them.
+                                secondToggleLabel = if (isFoldersTab) "Synced lyrics badge" else null,
+                                secondToggleChecked = syncedBadgeOn,
+                                onSecondToggleChange = { on ->
+                                    com.theveloper.pixelplay.data.lyrics.training.SyncedLyricsBadgePrefs.set(context, on)
                                 },
                                 viewToggleContent = if (isAlbumTab) {
                                     {
@@ -1279,6 +1270,11 @@ fun LibraryScreen(
                             )
                         }
 
+                        var preloadNeighbourTabs by remember { mutableStateOf(false) }
+                        LaunchedEffect(Unit) {
+                            kotlinx.coroutines.delay(LIBRARY_NEIGHBOUR_TABS_DELAY_MS)
+                            preloadNeighbourTabs = true
+                        }
                         // Box wrapper to allow floating SelectionCountPill overlay
                         Box(modifier = Modifier.fillMaxSize()) {
                             HorizontalPager(
@@ -1287,7 +1283,10 @@ fun LibraryScreen(
                                     .fillMaxSize()
                                     .padding(top = 8.dp),
                                 pageSpacing = 0.dp,
-                                beyondViewportPageCount = 1, // Pre-load adjacent tabs to reduce lag when switching
+                                // Adjacent tabs pre-load (smoother swipes), but only once the
+                                // screen has settled: composing three lists in the first frame
+                                // made opening Library stutter.
+                                beyondViewportPageCount = if (preloadNeighbourTabs) 1 else 0,
                                 key = { it }
                             ) { page ->
                                 val tabIndex = resolveTabIndex(
@@ -1324,7 +1323,10 @@ fun LibraryScreen(
                                         val isLoading = playerUiState.isLoadingLibraryCategories
                                         val insights by collectionViewModel.insights.collectAsStateWithLifecycle()
                                         val mergedAlbumCounts by collectionViewModel.mergedAlbumCounts.collectAsStateWithLifecycle()
-                                        LaunchedEffect(Unit) { collectionViewModel.followInsights() }
+                                        LaunchedEffect(Unit) {
+                                            kotlinx.coroutines.delay(LIBRARY_INSIGHTS_DELAY_MS)
+                                            collectionViewModel.followInsights()
+                                        }
 
                                         val stableOnAlbumClick: (Long) -> Unit = remember(navController) {
                                             { albumId: Long ->
@@ -1378,7 +1380,10 @@ fun LibraryScreen(
                                         val isLoading = playerUiState.isLoadingLibraryCategories
                                         val insights by collectionViewModel.insights.collectAsStateWithLifecycle()
                                         val mergedArtistCounts by collectionViewModel.mergedArtistCounts.collectAsStateWithLifecycle()
-                                        LaunchedEffect(Unit) { collectionViewModel.followInsights() }
+                                        LaunchedEffect(Unit) {
+                                            kotlinx.coroutines.delay(LIBRARY_INSIGHTS_DELAY_MS)
+                                            collectionViewModel.followInsights()
+                                        }
                                         val openArtist: (Long) -> Unit = { artistId ->
                                             navController.navigateSafelyReplacing(
                                                 route = Screen.ArtistDetail.createRoute(artistId),
@@ -1622,8 +1627,22 @@ fun LibraryScreen(
         isAiEnabled = hasActiveAiProviderApiKey,
         onSetupAiClick = {
             navController.navigateSafely(Screen.SettingsCategory.createRoute("ai"))
+        },
+        onImportM3uSelected = {
+            showPlaylistCreationTypeDialog = false
+            m3uImportLauncher.launch(com.theveloper.pixelplay.data.playlist.M3U_PICKER_MIME_TYPES)
         }
     )
+
+    // .m3u import: new playlist, merge into one, or replace one.
+    val m3uImportPreview by playlistViewModel.m3uImportPreview.collectAsStateWithLifecycle()
+    m3uImportPreview?.let { preview ->
+        com.theveloper.pixelplay.presentation.components.M3uImportDialog(
+            preview = preview,
+            onDismiss = playlistViewModel::dismissM3uImport,
+            onConfirm = { mode, targetId, name -> playlistViewModel.confirmM3uImport(mode, targetId, name) }
+        )
+    }
 
     CreatePlaylistDialog(
         visible = showCreatePlaylistDialog,
@@ -1637,7 +1656,7 @@ fun LibraryScreen(
                 Toast.makeText(context, context.getString(R.string.library_toast_set_ai_provider_api_key_first), Toast.LENGTH_SHORT).show()
             }
         },
-        onCreate = { name, imageUri, color, icon, songIds, cropScale, cropPanX, cropPanY, shapeType, d1, d2, d3, d4, smartRuleKey ->
+        onCreate = { name, imageUri, color, icon, songIds, cropScale, cropPanX, cropPanY, shapeType, d1, d2, d3, d4, smartRuleKey, imageEdits ->
             playlistViewModel.createPlaylist(
                 name = name,
                 coverImageUri = imageUri,
@@ -1654,7 +1673,10 @@ fun LibraryScreen(
                 coverShapeDetail2 = d2,
                 coverShapeDetail3 = d3,
                 coverShapeDetail4 = d4,
-                smartRuleKey = smartRuleKey
+                smartRuleKey = smartRuleKey,
+                coverFlipHorizontal = imageEdits.flipHorizontal,
+                coverFilterId = imageEdits.filterId,
+                coverRotationDegrees = imageEdits.rotationDegrees
             )
         }
     )
@@ -1689,6 +1711,8 @@ fun LibraryScreen(
 
         if (currentSong != null) {
             SongInfoBottomSheet(
+                onSelect = { multiSelectionState.toggleSelection(currentSong) },
+                onStartSongRadio = { seedSong -> playerViewModel.startSongRadio(seedSong) },
                 song = currentSong,
                 isFavorite = isFavorite,
                 onToggleFavorite = {
@@ -1707,16 +1731,21 @@ fun LibraryScreen(
                     playerViewModel.addSongNextToQueue(currentSong)
                     playerViewModel.sendToast(context.getString(R.string.library_toast_playing_next))
                 },
+                // Hold Next → Soon (the "after which song" slider).
+                soonPlayer = playerViewModel,
+                onAddSoon = { k -> playerViewModel.addSongAfterUpcoming(currentSong, k) },
                 onAddToPlayList = {
                     playlistSheetSongs = listOf(currentSong)
                     showPlaylistBottomSheet = true
                 },
                 onDeleteFromDevice = playerViewModel::deleteFromDevice,
                 onNavigateToAlbum = {
-                    navController.navigateSafelyReplacing(
-                        route = Screen.AlbumDetail.createRoute(currentSong.albumId),
-                        patternToPop = Screen.AlbumDetail.route
-                    )
+                    Screen.AlbumDetail.createRouteForSong(currentSong)?.let { route ->
+                        navController.navigateSafelyReplacing(
+                            route = route,
+                            patternToPop = Screen.AlbumDetail.route
+                        )
+                    }
                     showSongInfoBottomSheet = false
                 },
                 onNavigateToArtist = {
@@ -1878,28 +1907,75 @@ fun LibraryScreen(
             onDismiss = {
                 showPlaylistMultiSelectionSheet = false
             },
-            onDeleteAll = {
-                playlistViewModel.deletePlaylistsInBatch(selectedPlaylistIds.toList())
+            onDelete = { playlists ->
+                playlistViewModel.deletePlaylistsInBatch(playlists.map { it.id })
                 showPlaylistMultiSelectionSheet = false
                 playlistMultiSelectionState.clearSelection()
             },
-            onExportAll = {
-                playlistViewModel.exportPlaylistsAsM3u(selectedPlaylistIds.toList())
-                showPlaylistMultiSelectionSheet = false
-                playlistMultiSelectionState.clearSelection()
-            },
-            onMergeAll = {
-                pendingMergePlaylistIds = selectedPlaylistIds.toList()
+            onMerge = { playlists ->
+                pendingMergePlaylistIds = playlists.map { it.id }
                 showMergePlaylistDialog = true
                 showPlaylistMultiSelectionSheet = false
             },
-            onShareAll = {
+            // One playlist: a single .m3u; several: a .zip of .m3u files.
+            onShareFiles = { playlists ->
                 activity?.let {
-                    playlistViewModel.shareSelectedPlaylistsAsZip(selectedPlaylistIds.toList(), it)
+                    playlistViewModel.shareSelectedPlaylistsAsZip(playlists.map { p -> p.id }, it)
                 }
                 showPlaylistMultiSelectionSheet = false
                 playlistMultiSelectionState.clearSelection()
-            }
+            },
+            // Queue / Next / Soon: the active playlists as one block, in the order shown.
+            onQueue = { playlists, placement ->
+                scope.launch {
+                    val songs = playlistViewModel.getPlaylistsWithSongs(playlists.map { it.id }).flatMap { it.second }
+                    val name = when (playlists.size) {
+                        1 -> playlists.first().name
+                        2 -> playlists.joinToString(" + ") { it.name }
+                        else -> "${playlists.size} playlists"
+                    }
+                    if (songs.isNotEmpty()) playerViewModel.queuePlaylist(songs, name, playlists.singleOrNull()?.id, placement)
+                }
+                showPlaylistMultiSelectionSheet = false
+                playlistMultiSelectionState.clearSelection()
+            },
+            // Soon's shuffle: the same block, in a random order.
+            onQueueShuffled = { playlists, placement ->
+                scope.launch {
+                    val songs = playlistViewModel.getPlaylistsWithSongs(playlists.map { it.id }).flatMap { it.second }
+                    val name = when (playlists.size) {
+                        1 -> playlists.first().name
+                        2 -> playlists.joinToString(" + ") { it.name }
+                        else -> "${playlists.size} playlists"
+                    }
+                    if (songs.isNotEmpty()) {
+                        playerViewModel.queuePlaylist(songs, name, playlists.singleOrNull()?.id, placement, shuffled = true)
+                    }
+                }
+                showPlaylistMultiSelectionSheet = false
+                playlistMultiSelectionState.clearSelection()
+            },
+            // Play: the active playlists as one queue, in the order shown, from the first song.
+            onPlay = { playlists ->
+                scope.launch {
+                    val songs = playlistViewModel.getPlaylistsWithSongs(playlists.map { it.id }).flatMap { it.second }
+                    val name = when (playlists.size) {
+                        1 -> playlists.first().name
+                        2 -> playlists.joinToString(" + ") { it.name }
+                        else -> "${playlists.size} playlists"
+                    }
+                    songs.firstOrNull()?.let { first -> playerViewModel.playSongs(songs, first, name, playlists.singleOrNull()?.id) }
+                }
+                showPlaylistMultiSelectionSheet = false
+                playlistMultiSelectionState.clearSelection()
+            },
+            // Download: .m3u files into Music/PixelPlayer Exports (the view model toasts the result).
+            onExport = { playlists ->
+                playlistViewModel.exportPlaylistsAsM3u(playlists.map { it.id })
+                showPlaylistMultiSelectionSheet = false
+                playlistMultiSelectionState.clearSelection()
+            },
+            playerViewModel = playerViewModel,
         )
     }
 
@@ -2685,6 +2761,8 @@ fun LibraryFoldersTab(
     onRequestCrossFolderLocate: (String) -> Unit = {},
     searchQuery: String = ""
 ) {
+    val showSyncedBadge by com.theveloper.pixelplay.data.lyrics.training.SyncedLyricsBadgePrefs
+        .enabled(LocalContext.current).collectAsStateWithLifecycle()
     val visibilityCallback by rememberUpdatedState(onLocateCurrentSongVisibilityChanged)
     val registerActionCallback by rememberUpdatedState(onRegisterLocateCurrentSongAction)
 
@@ -2751,6 +2829,8 @@ fun LibraryFoldersTab(
                 }
             }
         }.toImmutableList()
+        // One playback collector shared by the folder's song rows.
+        val playbackSnapshot = rememberLibraryPlaybackSnapshot(playerViewModel)
         val currentSong by remember(playerViewModel) {
             playerViewModel.stablePlayerState
                 .map { it.currentSong }
@@ -2937,11 +3017,15 @@ fun LibraryFoldersTab(
                                     LibraryPlaybackAwareSongItem(
                                         song = song,
                                         playerViewModel = playerViewModel,
+                                        playback = playbackSnapshot,
                                         isSelected = selectedSongIds.contains(song.id),
                                         selectionIndex = if (isSelectionMode) getSelectionIndex(song.id) else null,
                                         isSelectionMode = isSelectionMode,
                                         onLongPress = { onSongLongPress(song) },
                                         onMoreOptionsClick = { onMoreOptionsClick(song) },
+                                        extraTrailing = if (showSyncedBadge) {
+                                            { SyncedLyricsBadge(song.path) }
+                                        } else null,
                                         onClick = {
                                             if (isSelectionMode) {
                                                 onSongSelectionToggle(song)
@@ -3116,7 +3200,9 @@ fun AlbumGridItemRedesigned(
     isSelected: Boolean = false,
     selectionIndex: Int? = null,
     onLongPress: () -> Unit = {},
-    onSelectionToggle: () -> Unit = {}
+    onSelectionToggle: () -> Unit = {},
+    /** Shown after the song count when sorted by year / date added ("[♪] 12 · 2026"). */
+    dateLabel: String? = null
 ) {
     val albumColorSchemePair by albumColorSchemePairFlow.collectAsStateWithLifecycle()
     val systemIsDark = LocalPixelPlayDarkTheme.current
@@ -3232,7 +3318,6 @@ fun AlbumGridItemRedesigned(
                     )
                 ) {
                     Box(contentAlignment = Alignment.BottomStart) {
-                        var isLoadingImage by remember { mutableStateOf(true) }
                         SmartImage(
                             model = album.albumArtUriString,
                             contentDescription = stringResource(R.string.common_album_art_for_title, album.title),
@@ -3240,20 +3325,11 @@ fun AlbumGridItemRedesigned(
                             // Reducido el tamaño para mejorar el rendimiento del scroll, como se sugiere en el informe.
                             // ContentScale.Crop se encargará de ajustar la imagen al aspect ratio.
                             targetSize = Size(256, 256),
+                            indicatorSize = 28.dp,
                             modifier = Modifier
                                 .aspectRatio(3f / 2f)
-                                .fillMaxSize(),
-                            onState = { state ->
-                                isLoadingImage = state is AsyncImagePainter.State.Loading
-                            }
+                                .fillMaxSize()
                         )
-                        if (isLoadingImage) {
-                            ShimmerBox(
-                                modifier = Modifier
-                                    .aspectRatio(3f / 2f)
-                                    .fillMaxSize()
-                            )
-                        }
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -3284,7 +3360,12 @@ fun AlbumGridItemRedesigned(
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(album.artist, style = MaterialTheme.typography.bodySmall, color = onGradientColor.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(formatSongCount(album.songCount), style = MaterialTheme.typography.bodySmall, color = onGradientColor.copy(alpha = 0.7f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        com.theveloper.pixelplay.presentation.components.CompactCountBadge(
+                            count = album.songCount,
+                            trailing = dateLabel,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = onGradientColor.copy(alpha = 0.7f)
+                        )
                     }
                 }
 
@@ -3348,41 +3429,36 @@ fun ArtistListItem(artist: Artist, onClick: () -> Unit, isLoading: Boolean = fal
                     )
                 }
             } else {
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (!artist.effectiveImageUrl.isNullOrEmpty()) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(LocalContext.current)
-                                .data(artist.effectiveImageUrl)
-                                .crossfade(true)
-                                .build(),
-                            contentDescription = artist.name,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        Icon(
-                            painter = painterResource(R.drawable.rounded_artist_24),
-                            contentDescription = stringResource(R.string.common_artist),
-                            modifier = Modifier.padding(8.dp),
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    }
-                }
+                SmartImage(
+                    model = artist.effectiveImageUrl,
+                    contentDescription = artist.name,
+                    contentScale = ContentScale.Crop,
+                    shape = CircleShape,
+                    modifier = Modifier.size(48.dp),
+                    placeholderResId = R.drawable.rounded_artist_24,
+                    errorResId = R.drawable.rounded_artist_24,
+                    indicatorSize = 20.dp
+                )
                 Spacer(modifier = Modifier.width(16.dp))
                 Column {
                     Text(artist.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    com.theveloper.pixelplay.presentation.screens.library.CloudAwareText(
-                        text = formatSongCount(artist.songCount) + (extraInfo?.let { " · $it" } ?: ""),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1
-                    )
+                    // "[♪] 38 · extra" (the extra can carry the cloud mark, so it stays a CloudAwareText).
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Rounded.MusicNote,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(Modifier.width(3.dp))
+                        com.theveloper.pixelplay.presentation.screens.library.CloudAwareText(
+                            text = com.theveloper.pixelplay.presentation.components.CompactMeta.join(artist.songCount.toString(), extraInfo),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            modifier = Modifier.semantics { contentDescription = formatSongCount(artist.songCount) + (extraInfo?.let { ", $it" } ?: "") }
+                        )
+                    }
                 }
             }
         }
@@ -3400,7 +3476,9 @@ fun AlbumListItem(
     isSelected: Boolean = false,
     selectionIndex: Int? = null,
     onLongPress: () -> Unit = {},
-    onSelectionToggle: () -> Unit = {}
+    onSelectionToggle: () -> Unit = {},
+    /** Shown after the song count when sorted by year / date added ("[♪] 12 · 2026"). */
+    dateLabel: String? = null
 ) {
     val albumColorSchemePair by albumColorSchemePairFlow.collectAsStateWithLifecycle()
     val systemIsDark = LocalPixelPlayDarkTheme.current
@@ -3504,20 +3582,14 @@ fun AlbumListItem(
                             .aspectRatio(1f)
                             .fillMaxHeight()
                     ) {
-                        var isLoadingImage by remember { mutableStateOf(true) }
                         SmartImage(
                             model = album.albumArtUriString,
                             contentDescription = stringResource(R.string.common_album_art_for_title, album.title),
                             contentScale = ContentScale.Crop,
                             targetSize = Size(256, 256),
-                            modifier = Modifier.fillMaxSize(),
-                            onState = { state ->
-                                isLoadingImage = state is AsyncImagePainter.State.Loading
-                            }
+                            indicatorSize = 28.dp,
+                            modifier = Modifier.fillMaxSize()
                         )
-                        if (isLoadingImage) {
-                            ShimmerBox(modifier = Modifier.fillMaxSize())
-                        }
 
                         // Gradient Overlay
                         Box(
@@ -3569,12 +3641,11 @@ fun AlbumListItem(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            Text(
-                                formatSongCount(album.songCount),
+                            com.theveloper.pixelplay.presentation.components.CompactCountBadge(
+                                count = album.songCount,
+                                trailing = dateLabel,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = onGradientColor.copy(alpha = 0.7f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                color = onGradientColor.copy(alpha = 0.7f)
                             )
                         }
                     }

@@ -12,9 +12,17 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
-import androidx.media3.exoplayer.audio.DefaultAudioSink
+import com.theveloper.pixelplay.data.dsp.TimeStretchGuard
 import com.theveloper.pixelplay.data.service.player.HiResSampleRateCapAudioProcessor
 import com.theveloper.pixelplay.data.service.player.SurroundDownmixProcessor
+
+/**
+ * How a deck's speed slider changes the sound.
+ * - [ON]: time-stretch (Sonic): tempo changes, key stays. Post-limited by [TimeStretchGuard].
+ * - [OFF]: vinyl / turntable: plain resampling, pitch follows speed (`pitch = speed`), so there
+ *   are no time-stretch phase artifacts at all.
+ */
+enum class KeyLockMode { ON, OFF }
 
 @OptIn(UnstableApi::class)
 class DeckController(
@@ -24,12 +32,18 @@ class DeckController(
     var player: ExoPlayer? = null
         private set
 
+    private var speed = 1f
+    var keyLockMode: KeyLockMode = KeyLockMode.ON
+        private set
+
     fun loadSong(songUri: Uri) {
         release()
         player = buildSafePlayer().apply {
             setMediaItem(MediaItem.fromUri(songUri))
             prepare()
         }
+        // A new song keeps the deck's speed and key-lock setting.
+        applyPlaybackParameters()
     }
 
     private fun buildSafePlayer(): ExoPlayer {
@@ -44,15 +58,8 @@ class DeckController(
                     SurroundDownmixProcessor()
                 )
                 dspEngineManager?.let { processors.add(it.createAudioProcessor()) }
-                return DefaultAudioSink.Builder(context)
-                    .setEnableFloatOutput(false)
-                    .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
-                    .setAudioProcessorChain(
-                        DefaultAudioSink.DefaultAudioProcessorChain(
-                            *processors.toTypedArray()
-                        )
-                    )
-                    .build()
+                // Speed / pitch always in software, with a limiter after Sonic.
+                return TimeStretchGuard.buildSink(context, false, *processors.toTypedArray())
             }
 
             override fun buildVideoRenderers(
@@ -130,7 +137,18 @@ class DeckController(
     }
 
     fun setSpeed(speed: Float) {
-        player?.playbackParameters = PlaybackParameters(speed)
+        this.speed = speed
+        applyPlaybackParameters()
+    }
+
+    fun setKeyLockMode(mode: KeyLockMode) {
+        keyLockMode = mode
+        applyPlaybackParameters()
+    }
+
+    private fun applyPlaybackParameters() {
+        val pitch = if (keyLockMode == KeyLockMode.ON) 1f else speed
+        player?.playbackParameters = PlaybackParameters(speed, pitch)
     }
 
     fun nudge(amountMs: Long) {

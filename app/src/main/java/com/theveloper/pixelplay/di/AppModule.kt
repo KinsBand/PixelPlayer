@@ -734,6 +734,26 @@ object AppModule {
         return retrofit.create(DeezerApiService::class.java)
     }
 
+    /** Retrofit + service for Ticketmaster Discovery (artist tour dates). */
+    @Provides
+    @Singleton
+    @javax.inject.Named("ticketmaster")
+    fun provideTicketmasterRetrofit(okHttpClient: OkHttpClient): Retrofit {
+        return Retrofit.Builder()
+            .baseUrl("https://app.ticketmaster.com/")
+            .client(okHttpClient)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+    }
+
+    @Provides
+    @Singleton
+    fun provideTicketmasterApiService(
+        @javax.inject.Named("ticketmaster") retrofit: Retrofit
+    ): com.theveloper.pixelplay.data.network.ticketmaster.TicketmasterApiService {
+        return retrofit.create(com.theveloper.pixelplay.data.network.ticketmaster.TicketmasterApiService::class.java)
+    }
+
     /**
      * Provee una instancia de Retrofit para la API de Apple iTunes.
      */

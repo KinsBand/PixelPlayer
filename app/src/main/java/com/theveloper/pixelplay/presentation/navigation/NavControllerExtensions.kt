@@ -1,6 +1,7 @@
 package com.theveloper.pixelplay.presentation.navigation
 
 import androidx.lifecycle.Lifecycle
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavController
 import androidx.navigation.NavOptionsBuilder
 
@@ -58,4 +59,33 @@ fun NavController.navigateToTopLevelSafely(route: String): Boolean {
         restoreState = true
     }
     return true
+}
+
+private val lastSafePopAt = java.util.WeakHashMap<NavController, Long>()
+
+/** Long enough to cover a pop transition (350 ms) at normal animator scale. */
+private const val SAFE_POP_DEBOUNCE_MS = 400L
+
+/**
+ * Back arrow / close button pop that can't break the exit animation:
+ *
+ * - Never pops the last screen. A plain popBackStack() on the start destination empties the
+ *   NavHost and leaves a blank screen (easy to hit by double-tapping a back arrow).
+ * - When [from] is given (the NavBackStackEntry that owns the button), it only pops if that
+ *   entry is still on top, so a second tap while the screen is sliding out is ignored.
+ * - Without [from], taps within one transition of the previous pop are ignored, so a
+ *   double tap can't skip a screen (A -> B -> C, tap tap -> B, not A).
+ */
+fun NavController.popBackStackSafely(from: NavBackStackEntry? = null): Boolean {
+    val current = currentBackStackEntry ?: return false
+    if (previousBackStackEntry == null) return false
+    val now = android.os.SystemClock.uptimeMillis()
+    if (from != null) {
+        if (from.id != current.id) return false
+    } else {
+        val last = lastSafePopAt[this]
+        if (last != null && now - last < SAFE_POP_DEBOUNCE_MS) return false
+    }
+    lastSafePopAt[this] = now
+    return popBackStack()
 }

@@ -258,11 +258,17 @@ private fun PageButtons(
         val hasToggle = showSyncedLyrics != null
         val gap = 8.dp
         val round = 50.dp
-        val lyricsLeft = if (hasToggle) (maxWidth - gap) * (1f / 2.2f) else 0.dp
+        val addButtonSize = 48.dp
+        // On the Lyrics page Synced and Tabs share the row equally, with Add centred between them.
+        val equalButtonWidth = if (onAddSongClick != null) {
+            (maxWidth - addButtonSize - gap * 2) / 2f
+        } else {
+            (maxWidth - gap) / 2f
+        }
+        val lyricsLeft = if (hasToggle) equalButtonWidth.coerceAtLeast(round) else 0.dp
         val p = progress.coerceIn(0f, 1.05f)
         val leftW = androidx.compose.ui.unit.lerp(lyricsLeft, round, p).coerceAtLeast(0.dp)
         val gapW = if (hasToggle) gap else androidx.compose.ui.unit.lerp(0.dp, gap, progress.coerceIn(0f, 1f))
-        val addButtonSize = 48.dp
         val addW = if (onAddSongClick != null) addButtonSize + gap else 0.dp
         val rightW = (maxWidth - leftW - gapW - addW).coerceAtLeast(round)
 
@@ -335,10 +341,10 @@ private fun PageButtons(
                     ),
                     onClick = onAddSongClick
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Add,
-                        contentDescription = "Add a song",
-                        tint = onBackgroundColor
+                    MusicNoteAddIcon(
+                        noteSize = 20.dp,
+                        tint = onBackgroundColor,
+                        contentDescription = "Add a song"
                     )
                 }
                 Spacer(Modifier.width(gap))

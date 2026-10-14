@@ -52,3 +52,9 @@ markdown.xml
 **/.env
 **/.env.*
 !**/.env.example
+
+# Instrument sounds (hosted on the GitHub release, never committed)
+*.sf2
+
+# Discord Social SDK (download it from the Discord Developer Portal; Discord's terms, not ours to share)
+app/libs/discord_partner_sdk.aar

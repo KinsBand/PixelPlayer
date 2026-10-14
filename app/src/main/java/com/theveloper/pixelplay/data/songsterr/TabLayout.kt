@@ -13,7 +13,8 @@ object TabLayout {
     private const val UNMARKED_SECTION_BARS = 8
     private const val MAX_RIFF_BARS = 4
 
-    fun sections(track: RenderedTrack): List<TabSection> {
+    /** [foldRiffs] = false (edit mode): no folded riffs and no "same as" sections, every bar drawn. */
+    fun sections(track: RenderedTrack, foldRiffs: Boolean = true): List<TabSection> {
         val measures = track.measures
         if (measures.isEmpty()) return emptyList()
 
@@ -34,14 +35,14 @@ object TabLayout {
                 ?: if (hasMarkers) "Intro" else "Bars ${start + 1}–$end"
             val key = bars.joinToString("‖") { it.contentKey }
             val isRest = bars.all { it.isEmpty }
-            val sameAs = if (isRest) null else firstByKey[key]
+            val sameAs = if (isRest || !foldRiffs) null else firstByKey[key]
             if (!isRest && sameAs == null) firstByKey[key] = sections.size
             sections += TabSection(
                 index = sections.size,
                 name = name,
                 startMeasure = start,
                 endMeasure = end,
-                segments = fold(bars),
+                segments = if (foldRiffs) fold(bars) else bars.map { TabSegment(listOf(it), 1) },
                 isRest = isRest,
                 sameAs = sameAs,
             )

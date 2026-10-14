@@ -38,6 +38,8 @@ internal class StringSynthPlayer(private val engine: ScorePcmSource) {
     private val chunkFrames = 256
     private val chunk = ShortArray(chunkFrames * 2)
     @Volatile private var running = false
+    @Volatile private var paused = false
+    private var startedAt = 0L
     private var thread: Thread? = null
 
     /** Shift changes as (frame from which it applies, shift ms), oldest first. */
@@ -88,10 +90,16 @@ internal class StringSynthPlayer(private val engine: ScorePcmSource) {
     fun start() {
         if (running) return
         running = true
+        startedAt = System.nanoTime()
         track.play()
         thread = Thread({
             Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
             while (running) {
+                if (paused) {
+                    // Held: nothing to render until resume (checked every few ms).
+                    runCatching { Thread.sleep(4) }
+                    continue
+                }
                 val nudge = pendingNudgeMs
                 if (nudge != 0.0) {
                     pendingNudgeMs = 0.0
@@ -115,12 +123,32 @@ internal class StringSynthPlayer(private val engine: ScorePcmSource) {
         }, "StringSynth").apply { start() }
     }
 
+    /** Holds the strings where they are (buffer, ringing notes and clock are kept). */
+    fun pause() {
+        if (!running || paused) return
+        paused = true
+        runCatching { track.pause() }
+    }
+
+    /** Carries on from exactly where [pause] stopped. */
+    fun resume() {
+        if (!running || !paused) return
+        runCatching { track.play() }
+        // Re-judge the clock from scratch: the MIDI player restarts with its own latency.
+        samples = 0
+        errEma = 0.0
+        startedAt = System.nanoTime()
+        paused = false
+    }
+
     fun release() {
         running = false
-        runCatching { thread?.join(300) }
-        thread = null
+        paused = false
+        // Pause + flush first so a write blocked on a full buffer returns at once.
         runCatching { track.pause() }
         runCatching { track.flush() }
+        runCatching { thread?.join(300) }
+        thread = null
         runCatching { track.release() }
     }
 
@@ -145,8 +173,12 @@ internal class StringSynthPlayer(private val engine: ScorePcmSource) {
         errEma = if (samples == 0) err else errEma * 0.8 + err * 0.2
         samples++
         val threshold = if (precise) 8.0 else 30.0
-        val settle = 250_000_000L // let a nudge reach the speaker before judging again
-        if (samples >= 4 && abs(errEma) > threshold && nowNanos - lastNudgeAt > settle) {
+        // Just after a start / resume the two players' start latencies differ: correct quickly
+        // so the first notes don't flam, then settle into gentle tracking.
+        val warm = nowNanos - startedAt < 1_000_000_000L
+        val settle = if (warm) 80_000_000L else 250_000_000L // let a nudge reach the speaker first
+        val minSamples = if (warm) 2 else 4
+        if (samples >= minSamples && abs(errEma) > threshold && nowNanos - lastNudgeAt > settle) {
             pendingNudgeMs -= errEma
             lastNudgeAt = nowNanos
             samples = 0
@@ -177,9 +209,16 @@ internal class StringSynthPlayer(private val engine: ScorePcmSource) {
                 .getOrNull()
 
         /** Every part on recorded instruments: the MIDI file's parts plus guitar / bass [strings]. */
-        fun createSampled(font: SoundFont, midiFile: ByteArray, strings: StringScore?): StringSynthPlayer? =
+        fun createSampled(
+            font: SoundFont,
+            midiFile: ByteArray,
+            strings: StringScore?,
+            style: com.theveloper.pixelplay.data.soundfont.SoundStyle = com.theveloper.pixelplay.data.soundfont.SoundStyle.current,
+            /** Speed the MIDI file was built at (TabMidi.Options.speed). */
+            speed: Float = 1f,
+        ): StringSynthPlayer? =
             runCatching {
-                StringSynthPlayer(SampledScoreEngine(font, MidiEvents.parse(midiFile), strings, StringSynth.SAMPLE_RATE))
+                StringSynthPlayer(SampledScoreEngine(font, MidiEvents.parse(midiFile), strings, StringSynth.SAMPLE_RATE, style, speed))
             }
                 .onFailure { Log.w(TAG, "Sampled synth unavailable: ${it.message}") }
                 .getOrNull()

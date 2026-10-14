@@ -31,6 +31,7 @@ import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import com.theveloper.pixelplay.presentation.components.ExpressiveFilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -49,7 +50,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import com.theveloper.pixelplay.presentation.components.SmartImage
 import coil.request.ImageRequest
 import com.theveloper.pixelplay.data.library.LibraryInsightsRepository
 import com.theveloper.pixelplay.data.library.NewReleasesRepository
@@ -128,15 +129,15 @@ private fun Shelf(
 
 @Composable
 private fun Artwork(url: String?, modifier: Modifier, shape: androidx.compose.ui.graphics.Shape, placeholder: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit = {}) {
-    val context = LocalContext.current
     Box(modifier = modifier.clip(shape).background(MaterialTheme.colorScheme.surfaceContainerHighest)) {
         if (url.isNullOrBlank()) {
             placeholder()
         } else {
-            AsyncImage(
-                model = remember(url) { ImageRequest.Builder(context).data(url).size(320).crossfade(true).build() },
+            SmartImage(
+                model = url,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
+                targetSize = coil.size.Size(320, 320),
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -407,13 +408,17 @@ fun GenreDetailHeader(
             Spacer(Modifier.height(6.dp))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 item(key = "sub_all") {
-                    FilterChip(selected = selectedSubgenre == null, onClick = { onSubgenreSelected(null) }, label = { Text("All") })
+                    ExpressiveFilterChip(
+                        selected = selectedSubgenre == null,
+                        onClick = { onSubgenreSelected(null) },
+                        label = "All"
+                    )
                 }
                 items(subgenres, key = { "sub_${it.first}" }) { (name, count) ->
-                    FilterChip(
+                    ExpressiveFilterChip(
                         selected = selectedSubgenre.equals(name, ignoreCase = true),
                         onClick = { onSubgenreSelected(name) },
-                        label = { Text("$name · $count") }
+                        label = "$name · $count"
                     )
                 }
             }

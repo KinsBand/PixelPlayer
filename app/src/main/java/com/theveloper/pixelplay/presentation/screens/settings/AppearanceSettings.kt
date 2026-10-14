@@ -4,6 +4,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.LightMode
 import androidx.compose.material.icons.outlined.Style
 import androidx.compose.material.icons.rounded.Animation
+import androidx.compose.material.icons.rounded.SwipeLeft
 import androidx.compose.material.icons.rounded.BlurOff
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Fullscreen
@@ -14,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.material.icons.rounded.Radio
+import androidx.compose.material.icons.rounded.School
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -22,6 +24,7 @@ import androidx.navigation.NavController
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.preferences.AppThemeMode
 import com.theveloper.pixelplay.data.preferences.CollagePattern
+import com.theveloper.pixelplay.data.preferences.LibraryNavigationMode
 import com.theveloper.pixelplay.data.preferences.NavBarStyle
 import com.theveloper.pixelplay.presentation.navigation.Screen
 import com.theveloper.pixelplay.presentation.navigation.navigateSafely
@@ -50,6 +53,17 @@ internal fun AppearanceSettingsContent(
 ) {
     val useSmoothCorners by settingsViewModel.useSmoothCorners.collectAsStateWithLifecycle()
     val miniPlayerSongTransition by settingsViewModel.miniPlayerSongTransition.collectAsStateWithLifecycle()
+    val miniPlayerSwipeChangesSong by settingsViewModel.miniPlayerSwipeChangesSong.collectAsStateWithLifecycle()
+    val upNextNotification by settingsViewModel.upNextNotification.collectAsStateWithLifecycle()
+    val upNextContext = androidx.compose.ui.platform.LocalContext.current
+    val upNextDeniedText = stringResource(R.string.settings_up_next_notification_denied)
+    // Android 13+: turning it on asks for notifications first; refused = it stays off.
+    val notificationPermission = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) settingsViewModel.setUpNextNotification(true)
+        else android.widget.Toast.makeText(upNextContext, upNextDeniedText, android.widget.Toast.LENGTH_SHORT).show()
+    }
 
     SettingsSubsection(title = stringResource(R.string.settings_global_theme_section)) {
         SettingsSegmentedSelectorItem(
@@ -65,7 +79,8 @@ internal fun AppearanceSettingsContent(
             },
             onOptionSelected = { mode: String -> settingsViewModel.setAppThemeMode(mode) },
             leadingIcon = { Icon(Icons.Outlined.LightMode, null, tint = MaterialTheme.colorScheme.secondary) },
-            settingKey = "app_theme"
+            settingKey = "app_theme",
+            preview = { mode -> ThemeModePreview(mode) }
         )
         SwitchSettingItem(
             title = stringResource(R.string.settings_smooth_corners_title),
@@ -73,7 +88,8 @@ internal fun AppearanceSettingsContent(
             checked = useSmoothCorners,
             onCheckedChange = settingsViewModel::setUseSmoothCorners,
             leadingIcon = { Icon(painterResource(R.drawable.rounded_rounded_corner_24), null, tint = MaterialTheme.colorScheme.secondary) },
-            settingKey = "smooth_corners"
+            settingKey = "smooth_corners",
+            preview = { on -> SmoothCornersPreview(on) }
         )
         SwitchSettingItem(
             title = stringResource(R.string.settings_disable_blur_all_over_title),
@@ -81,15 +97,43 @@ internal fun AppearanceSettingsContent(
             checked = uiState.disableBlurAllOver,
             onCheckedChange = { settingsViewModel.setDisableBlurAllOver(it) },
             leadingIcon = { Icon(Icons.Rounded.BlurOff, null, tint = MaterialTheme.colorScheme.secondary) },
-            settingKey = "disable_blur"
+            settingKey = "disable_blur",
+            preview = { disabled -> BlurPreview(disabled) }
         )
+    }
+
+    // Motion and scrolling: how things move, kept apart from how they look.
+    SettingsSubsection(title = stringResource(R.string.settings_motion_scrolling_section)) {
         SwitchSettingItem(
             title = stringResource(R.string.settings_mini_player_song_transition_title),
             subtitle = stringResource(R.string.settings_mini_player_song_transition_subtitle),
             checked = miniPlayerSongTransition,
             onCheckedChange = settingsViewModel::setMiniPlayerSongTransition,
             leadingIcon = { Icon(Icons.Rounded.Animation, null, tint = MaterialTheme.colorScheme.secondary) },
-            settingKey = "mini_player_song_transition"
+            settingKey = "mini_player_song_transition",
+            preview = { on -> MiniPlayerTransitionPreview(on) }
+        )
+        SwitchSettingItem(
+            title = stringResource(R.string.settings_mini_player_swipe_title),
+            subtitle = stringResource(R.string.settings_mini_player_swipe_subtitle),
+            checked = miniPlayerSwipeChangesSong,
+            onCheckedChange = settingsViewModel::setMiniPlayerSwipeChangesSong,
+            leadingIcon = { Icon(Icons.Rounded.SwipeLeft, null, tint = MaterialTheme.colorScheme.secondary) },
+            settingKey = "mini_player_swipe"
+        )
+        SwitchSettingItem(
+            title = stringResource(R.string.settings_up_next_notification_title),
+            subtitle = stringResource(R.string.settings_up_next_notification_subtitle),
+            checked = upNextNotification,
+            onCheckedChange = { on ->
+                val needsPermission = on && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
+                    androidx.core.content.ContextCompat.checkSelfPermission(upNextContext, android.Manifest.permission.POST_NOTIFICATIONS) !=
+                    android.content.pm.PackageManager.PERMISSION_GRANTED
+                if (needsPermission) notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                else settingsViewModel.setUpNextNotification(on)
+            },
+            leadingIcon = { Icon(painterResource(R.drawable.rounded_queue_music_24), null, tint = MaterialTheme.colorScheme.secondary) },
+            settingKey = "up_next_notification"
         )
         SwitchSettingItem(
             title = stringResource(R.string.settings_show_scrollbar_title),
@@ -130,6 +174,26 @@ internal fun AppearanceSettingsContent(
             onClick = { navController.navigateSafely(Screen.NavBarCrRad.route) },
             settingKey = "navbar_corner_radius"
         )
+        ThemeSelectorItem(
+            label = stringResource(R.string.settings_library_navigation_title),
+            description = stringResource(R.string.settings_library_navigation_subtitle),
+            options = mapOf(
+                LibraryNavigationMode.TAB_ROW to stringResource(R.string.settings_library_nav_tab_row),
+                LibraryNavigationMode.COMPACT_PILL to stringResource(R.string.settings_library_nav_compact_pill)
+            ),
+            selectedKey = uiState.libraryNavigationMode,
+            onSelectionChanged = { settingsViewModel.setLibraryNavigationMode(it) },
+            leadingIcon = { Icon(painterResource(R.drawable.rounded_library_music_24), null, tint = MaterialTheme.colorScheme.secondary) },
+            settingKey = "library_navigation"
+        )
+        SwitchSettingItem(
+            title = stringResource(R.string.settings_practice_mode_title),
+            subtitle = stringResource(R.string.settings_practice_mode_subtitle),
+            checked = uiState.showPracticeMode,
+            onCheckedChange = { settingsViewModel.setShowPracticeMode(it) },
+            leadingIcon = { Icon(Icons.Rounded.School, null, tint = MaterialTheme.colorScheme.secondary) },
+            settingKey = "practice_mode"
+        )
     }
 
     FullScreenSettingsSection()
@@ -152,7 +216,8 @@ internal fun FullScreenSettingsSection() {
             checked = systemBarsPrefs.hideStatusBar,
             onCheckedChange = { hide -> scope.launch { context.setHideStatusBar(hide) } },
             leadingIcon = { Icon(Icons.Rounded.Fullscreen, null, tint = MaterialTheme.colorScheme.secondary) },
-            settingKey = "hide_status_bar"
+            settingKey = "hide_status_bar",
+            preview = { hidden -> StatusBarPreview(hidden) }
         )
         SwitchSettingItem(
             title = stringResource(R.string.settings_hide_gesture_bar_title),
@@ -160,7 +225,8 @@ internal fun FullScreenSettingsSection() {
             checked = systemBarsPrefs.hideNavigationBar,
             onCheckedChange = { hide -> scope.launch { context.setHideNavigationBar(hide) } },
             leadingIcon = { Icon(Icons.Rounded.Fullscreen, null, tint = MaterialTheme.colorScheme.secondary) },
-            settingKey = "hide_navigation_bar"
+            settingKey = "hide_navigation_bar",
+            preview = { hidden -> GestureBarPreview(hidden) }
         )
     }
 }
@@ -168,7 +234,7 @@ internal fun FullScreenSettingsSection() {
 /** The camera-cutout island. App-wide, so it lives with the rest of the app's look. */
 @Composable
 internal fun CameraIslandSettingsSection(
-    viewModel: com.theveloper.pixelplay.presentation.viewmodel.VisualWidgetsViewModel = androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel(),
+    viewModel: com.theveloper.pixelplay.presentation.viewmodel.CameraIslandViewModel = androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel(),
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     SettingsSubsection(title = stringResource(R.string.settings_camera_island_section), addBottomSpace = false) {

@@ -20,6 +20,12 @@ data class QueueEntryMetadata(
     val sessionId: String? = null,
     val recordingId: String? = null,
     val filterPick: Boolean = false,
+    /** Set on every song of a playlist queued as a whole (Queue / Soon / Next in its options). */
+    val groupId: String? = null,
+    /** That playlist's name: the queue shows it on the turnover card and as the source title. */
+    val groupName: String? = null,
+    /** That playlist's id, so its cover shows the playing badge once it's reached. */
+    val groupPlaylistId: String? = null,
 ) {
     fun writeTo(extras: Bundle) {
         extras.putString(ID, entryId)
@@ -30,6 +36,9 @@ data class QueueEntryMetadata(
         extras.putString(MixQueueMetadata.DECISION, decisionId)
         extras.putString(MixQueueMetadata.SESSION, sessionId)
         extras.putString(MixQueueMetadata.RECORDING, recordingId)
+        extras.putString(GROUP_ID, groupId)
+        extras.putString(GROUP_NAME, groupName)
+        extras.putString(GROUP_PLAYLIST_ID, groupPlaylistId)
     }
 
     fun attach(item: MediaItem): MediaItem {
@@ -42,6 +51,9 @@ data class QueueEntryMetadata(
         const val ID = "pixelplay.queue.entryId"
         private const val TIER = "pixelplay.queue.tier"
         const val PINNED = "pixelplay.queue.pinned"
+        const val GROUP_ID = "pixelplay.queue.groupId"
+        const val GROUP_NAME = "pixelplay.queue.groupName"
+        const val GROUP_PLAYLIST_ID = "pixelplay.queue.groupPlaylistId"
         fun read(item: MediaItem): QueueEntryMetadata {
             val extras = item.mediaMetadata.extras
             return QueueEntryMetadata(
@@ -53,6 +65,9 @@ data class QueueEntryMetadata(
                 sessionId = extras?.getString(MixQueueMetadata.SESSION),
                 recordingId = extras?.getString(MixQueueMetadata.RECORDING),
                 filterPick = MixQueueMetadata.filterPick(item),
+                groupId = extras?.getString(GROUP_ID),
+                groupName = extras?.getString(GROUP_NAME),
+                groupPlaylistId = extras?.getString(GROUP_PLAYLIST_ID),
             )
         }
     }

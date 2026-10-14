@@ -157,6 +157,36 @@ class MediaControllerSyncStateHolder @Inject constructor(
         }
     }
 
+    /** Contiguous runs of songs that share a queued-playlist group, as turnover-card anchors. */
+    private fun queueGroupStarts(
+        resolved: List<Pair<com.theveloper.pixelplay.data.model.Song, MediaItem>>
+    ): kotlinx.collections.immutable.ImmutableList<QueueGroupStart> {
+        val starts = ArrayList<QueueGroupStart>()
+        var index = 0
+        while (index < resolved.size) {
+            val meta = com.theveloper.pixelplay.data.model.QueueEntryMetadata.read(resolved[index].second)
+            val groupId = meta.groupId
+            if (groupId == null || meta.groupName.isNullOrBlank()) {
+                index++
+                continue
+            }
+            var end = index + 1
+            while (end < resolved.size &&
+                com.theveloper.pixelplay.data.model.QueueEntryMetadata.read(resolved[end].second).groupId == groupId
+            ) end++
+            starts += QueueGroupStart(
+                queueIndex = index,
+                groupId = groupId,
+                name = meta.groupName.orEmpty(),
+                playlistId = meta.groupPlaylistId,
+                songCount = end - index,
+                coverUri = resolved[index].first.albumArtUriString
+            )
+            index = end
+        }
+        return kotlinx.collections.immutable.persistentListOf<QueueGroupStart>().addAll(starts)
+    }
+
     private fun updateCurrentPlaybackQueueFromPlayer(playerCtrl: MediaController?) {
         val currentMediaController = playerCtrl ?: cb.getController() ?: return
         val requestId = ++lastQueueUpdateRequestId
@@ -190,7 +220,7 @@ class MediaControllerSyncStateHolder @Inject constructor(
                 )
                 if (lastQueueSignature != emptySignature) {
                     lastQueueSignature = emptySignature
-                    cb.updateUiState { it.copy(currentPlaybackQueue = persistentListOf()) }
+                    cb.updateUiState { it.copy(currentPlaybackQueue = persistentListOf(), queueGroupStarts = persistentListOf()) }
                 }
                 return@launch
             }
@@ -222,17 +252,18 @@ class MediaControllerSyncStateHolder @Inject constructor(
             val allSongsById = libraryStateHolder.allSongsById.value
 
             val previousQueue = cb.getUiState().currentPlaybackQueue
-            val queue = withContext(Dispatchers.Default) {
+            val (queue, groupStarts) = withContext(Dispatchers.Default) {
                 val queueById = previousQueue.associateBy { it.id }
-                mediaItems.mapNotNull { mediaItem ->
-                    resolveSongFromMediaItem(mediaItem, allSongsById, queueById)
-                }.toPlaybackQueue()
+                val resolved = mediaItems.mapNotNull { mediaItem ->
+                    resolveSongFromMediaItem(mediaItem, allSongsById, queueById)?.let { it to mediaItem }
+                }
+                resolved.map { it.first }.toPlaybackQueue() to queueGroupStarts(resolved)
             }
 
             if (requestId != lastQueueUpdateRequestId) return@launch
 
             lastQueueSignature = signature
-            cb.updateUiState { it.copy(currentPlaybackQueue = queue) }
+            cb.updateUiState { it.copy(currentPlaybackQueue = queue, queueGroupStarts = groupStarts) }
             if (queue.isNotEmpty()) {
                 cb.showSheet()
             }
@@ -596,6 +627,7 @@ class MediaControllerSyncStateHolder @Inject constructor(
                     cb.showSheet()
                     if (isPlaying) {
                         playbackDispatchStateHolder.clearPreparingSongIfMatching(playerCtrl.currentMediaItem?.mediaId)
+                        playbackDispatchStateHolder.markSongStarted(playerCtrl.currentMediaItem?.mediaId)
                     }
                     playbackStateHolder.startProgressUpdates()
                 } else {
@@ -603,6 +635,11 @@ class MediaControllerSyncStateHolder @Inject constructor(
                     val pausedPosition = playerCtrl.currentPosition.coerceAtLeast(0L)
                     syncPlaybackPositionFromPlayer(playerCtrl.currentMediaItem?.mediaId, pausedPosition)
                 }
+            }
+
+            /** A song that was just tapped and errors before it starts shows its failed state. */
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                playbackDispatchStateHolder.markSongStartFailed()
             }
 
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
@@ -646,6 +683,7 @@ class MediaControllerSyncStateHolder @Inject constructor(
 
                 if (playbackState == Player.STATE_READY) {
                     playbackDispatchStateHolder.clearPreparingSongIfMatching(playerCtrl.currentMediaItem?.mediaId)
+                    playbackDispatchStateHolder.markSongStarted(playerCtrl.currentMediaItem?.mediaId)
                     val readyPosition = playerCtrl.currentPosition.coerceAtLeast(0L)
                     val songDurationHint = playbackStateHolder.stablePlayerState.value.currentSong?.duration ?: 0L
                     val resolvedDuration = playbackStateHolder.resolveDurationForPlaybackState(
@@ -687,6 +725,16 @@ class MediaControllerSyncStateHolder @Inject constructor(
         registerMediaControllerListener(playerCtrl, object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 if (isRemoteSessionControllingPlayback()) return
+                // A playlist queued as a whole has been reached: the queue's source title (and
+                // the playing badge) switch to that playlist.
+                mediaItem?.let { item ->
+                    val meta = com.theveloper.pixelplay.data.model.QueueEntryMetadata.read(item)
+                    val groupName = meta.groupName
+                    if (!groupName.isNullOrBlank() && cb.getUiState().currentQueueSourceName != groupName) {
+                        cb.updateUiState { it.copy(currentQueueSourceName = groupName) }
+                        com.theveloper.pixelplay.data.playback.NowPlayingPlaylist.onQueueStarted(meta.groupPlaylistId, groupName)
+                    }
+                }
                 playbackStateHolder.onPlaybackOccurrenceTransition(mediaItem?.mediaId)
                 preparePlaybackAudioMetadataForMedia(mediaItem?.mediaId)
                 transitionSchedulerJob?.cancel()

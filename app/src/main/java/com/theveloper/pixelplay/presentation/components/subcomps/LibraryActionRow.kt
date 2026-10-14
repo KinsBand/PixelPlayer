@@ -179,8 +179,9 @@ fun LibraryActionRow(
                         }
                     } else {
                         // Icon-only Shuffle Button (Liked, Artists, Albums, Songs)
+                        val spin = rememberShuffleSpin()
                         FilledTonalIconButton(
-                            onClick = onMainActionClick,
+                            onClick = { spin.play(); onMainActionClick() },
                             shape = CircleShape,
                             colors = IconButtonDefaults.filledTonalIconButtonColors(
                                 containerColor = MaterialTheme.colorScheme.tertiaryContainer,
@@ -194,6 +195,7 @@ fun LibraryActionRow(
                                 modifier = Modifier
                                     .size(20.dp)
                                     .rotate(iconRotation)
+                                    .shuffleSpin(spin)
                             )
                         }
                     }

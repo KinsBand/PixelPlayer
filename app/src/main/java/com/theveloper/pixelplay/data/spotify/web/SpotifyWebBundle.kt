@@ -24,6 +24,10 @@ class SpotifyWebBundle @Inject constructor(baseHttp: OkHttpClient) {
         const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
         private const val CACHE_MS = 15 * 60_000L
         private const val MAX_SCRIPTS = 12
+        /** Where web-player chunks live when the main script's own folder isn't known. */
+        private const val CHUNK_BASE = "https://open.spotifycdn.com/cdn/build/web-player/"
+        /** Chunk downloads allowed per hash lookup (they're small JS files, read one at a time). */
+        private const val MAX_CHUNKS_PER_LOOKUP = 60
 
         private const val JS_STRING = """(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')"""
         private val SECRET_FIRST = Regex("""\{\s*["']?secret["']?\s*:\s*($JS_STRING)\s*,\s*["']?version["']?\s*:\s*(\d+)\s*\}""")
@@ -62,11 +66,51 @@ class SpotifyWebBundle @Inject constructor(baseHttp: OkHttpClient) {
         internal fun findQueryHash(source: String, operation: String): String? =
             Regex("""["']${Regex.escape(operation)}["']\s*,\s*["'](?:query|mutation)["']\s*,\s*["']([0-9a-f]{64})["']""")
                 .find(source)?.groupValues?.get(1)
+
+        /** Every `"name","query"|"mutation","<hash>"` in a script (compiled once). */
+        private val ANY_OPERATION = Regex("""["'](\w+)["']\s*,\s*["'](?:query|mutation)["']\s*,\s*["']([0-9a-f]{64})["']""")
+
+        /** Webpack's chunk maps in the main bundle: `{123:"xpui-routes-artist",…}` and `{123:"1a2b3c4d",…}`. */
+        private val CHUNK_MAP = Regex("""\{(\d+:"[^"]{1,80}"(?:,\d+:"[^"]{1,80}")+)\}""")
+        private val CHUNK_ENTRY = Regex("""(\d+):"([^"]+)"""")
+        private val HEXISH = Regex("""[0-9a-f]{6,32}""")
+
+        /** All operation → hash pairs in [source]. */
+        internal fun indexOperations(source: String): Map<String, String> =
+            ANY_OPERATION.findAll(source).associate { it.groupValues[1] to it.groupValues[2] }
+
+        /**
+         * The lazily loaded web-player chunks (`name.hash.js`) named in the main bundle. Spotify keeps
+         * most GraphQL operations (artist page, people/artist search…) in these, not in the main
+         * script. A name map and a hash map are paired when they share most chunk ids.
+         */
+        internal fun chunkFiles(mainSource: String): List<String> {
+            val maps = CHUNK_MAP.findAll(mainSource).map { m ->
+                CHUNK_ENTRY.findAll(m.groupValues[1]).associate { it.groupValues[1].toInt() to it.groupValues[2] }
+            }.toList()
+            val hashMaps = maps.filter { map -> map.values.all { HEXISH.matches(it) } }
+            val nameMaps = maps.filter { map -> map.values.any { !HEXISH.matches(it) } && map.values.any { it.contains('-') } }
+            val files = LinkedHashSet<String>()
+            for (names in nameMaps) {
+                // Usually one JS hash map fits; a CSS one may too (its files 404 and are skipped).
+                hashMaps.filter { h -> h.keys.count { it in names } >= names.size / 2 }
+                    .sortedByDescending { h -> h.keys.count { it in names } }
+                    .forEach { hashes -> names.forEach { (id, name) -> hashes[id]?.let { files += "$name.$it.js" } } }
+            }
+            return files.toList()
+        }
     }
 
     private val mutex = Mutex()
     @Volatile private var cached: List<String> = emptyList()
     @Volatile private var cachedAt = 0L
+    /** Where the main scripts came from (chunk files live next to the web-player one). */
+    @Volatile private var cachedUrls: List<String> = emptyList()
+    /** Operation → hash found so far (main scripts + chunks read), cleared with the scripts. */
+    private val operations = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val chunkMutex = Mutex()
+    /** Chunk files already read since the scripts were cached (each is read at most once). */
+    private val chunksRead = java.util.Collections.synchronizedSet(HashSet<String>())
 
     /** Web-player scripts (main bundle first). Cached for a few minutes; [force] refetches. */
     suspend fun scripts(force: Boolean = false): List<String> = withContext(Dispatchers.IO) {
@@ -80,10 +124,15 @@ class SpotifyWebBundle @Inject constructor(baseHttp: OkHttpClient) {
                 .sortedByDescending { it.contains("web-player") }
                 .take(MAX_SCRIPTS)
                 .toList()
-            val bodies = urls.mapNotNull { url -> runCatching { get(url, accept = "*/*") }.getOrNull() }
+            val fetched = urls.mapNotNull { url -> runCatching { url to get(url, accept = "*/*") }.getOrNull() }
+            val bodies = fetched.map { it.second }
             if (bodies.isEmpty()) throw java.io.IOException("Could not read the Spotify web player.")
             cached = bodies
+            cachedUrls = fetched.map { it.first }
             cachedAt = System.currentTimeMillis()
+            operations.clear()
+            chunksRead.clear()
+            bodies.forEach { operations.putAll(indexOperations(it)) }
             bodies
         }
     }
@@ -92,7 +141,41 @@ class SpotifyWebBundle @Inject constructor(baseHttp: OkHttpClient) {
 
     suspend fun queryHash(operation: String): String? {
         scripts().firstNotNullOfOrNull { findQueryHash(it, operation) }?.let { return it }
-        return scripts(force = true).firstNotNullOfOrNull { findQueryHash(it, operation) }
+        operations[operation]?.let { return it }
+        findInChunks(operation)?.let { return it }
+        // Stale cache (Spotify shipped a new build): reload once and look again.
+        scripts(force = true).firstNotNullOfOrNull { findQueryHash(it, operation) }?.let { return it }
+        return findInChunks(operation)
+    }
+
+    /**
+     * Reads the web player's lazily loaded chunks (most likely ones first: names sharing a word
+     * with [operation], e.g. "artist" / "search") until [operation]'s hash turns up, indexing every
+     * operation seen so later lookups are free. One body in memory at a time; at most
+     * [MAX_CHUNKS_PER_LOOKUP] downloads per lookup.
+     */
+    private suspend fun findInChunks(operation: String): String? = withContext(Dispatchers.IO) {
+        chunkMutex.withLock {
+            operations[operation]?.let { return@withLock it }
+            val bodies = cached
+            val mainIndex = cachedUrls.indexOfFirst { it.contains("/web-player/web-player") }.takeIf { it >= 0 } ?: 0
+            val main = bodies.getOrNull(mainIndex) ?: return@withLock null
+            val base = cachedUrls.getOrNull(mainIndex)?.substringBeforeLast('/')?.plus("/") ?: CHUNK_BASE
+            val words = operation.split(Regex("(?=[A-Z])")).map { it.lowercase() }.filter { it.length > 3 }
+            val files = chunkFiles(main)
+                .filter { it !in chunksRead }
+                .sortedByDescending { file -> words.count { file.lowercase().contains(it) } }
+            var downloads = 0
+            for (file in files) {
+                if (downloads >= MAX_CHUNKS_PER_LOOKUP) break
+                chunksRead += file
+                downloads++
+                val body = runCatching { get(base + file, accept = "*/*") }.getOrNull() ?: continue
+                operations.putAll(indexOperations(body))
+                operations[operation]?.let { return@withLock it }
+            }
+            null
+        }
     }
 
     private fun get(url: String, accept: String): String {

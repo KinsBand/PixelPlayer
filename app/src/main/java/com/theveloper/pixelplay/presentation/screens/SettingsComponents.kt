@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import com.theveloper.pixelplay.presentation.components.rememberAnimatedSheetDismiss
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -32,6 +33,7 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
@@ -58,6 +60,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.semantics.Role
@@ -257,7 +260,15 @@ fun SwitchSettingItem(
         onCheckedChange: (Boolean) -> Unit,
         leadingIcon: @Composable (() -> Unit)? = null,
         enabled: Boolean = true,
-        settingKey: String? = null
+        settingKey: String? = null,
+        /**
+         * Non-null when this switch is the parent of a settings branch. Shows a chevron that
+         * opens and closes the branch (see [rememberSettingsBranchExpanded] / [SettingsBranch]).
+         */
+        branchExpanded: Boolean? = null,
+        onBranchToggle: (() -> Unit)? = null,
+        /** Optional picture of what the setting does, drawn under the text for the current value. */
+        preview: (@Composable (checked: Boolean) -> Unit)? = null
 ) {
     val view = LocalView.current
     val appHapticsConfig = LocalAppHapticsConfig.current
@@ -291,6 +302,7 @@ fun SwitchSettingItem(
                             onCheckedChange(newValue)
                         }
             ) {
+              Column {
                 Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp).fillMaxWidth(),
@@ -327,6 +339,23 @@ fun SwitchSettingItem(
                         }
                     }
 
+                    if (branchExpanded != null && onBranchToggle != null) {
+                        val chevronRotation by androidx.compose.animation.core.animateFloatAsState(
+                            targetValue = if (branchExpanded) 180f else 0f,
+                            label = "settingsBranchChevron"
+                        )
+                        IconButton(
+                            onClick = onBranchToggle,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.ExpandMore,
+                                contentDescription = if (branchExpanded) "Collapse $title" else "Expand $title",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.graphicsLayer { rotationZ = chevronRotation }
+                            )
+                        }
+                    }
                     Switch(
                         checked = checked,
                         onCheckedChange = null, // Row handles whole click smoothly
@@ -354,6 +383,13 @@ fun SwitchSettingItem(
                         )
                     )
                 }
+                if (preview != null) {
+                    com.theveloper.pixelplay.presentation.screens.settings.SettingPreviewFrame(
+                        value = checked,
+                        indentForIcon = leadingIcon != null
+                    ) { preview(it) }
+                }
+              }
             }
             if (LocalSettingsContainerColor.current == androidx.compose.ui.graphics.Color.Transparent) {
                 androidx.compose.material3.HorizontalDivider(
@@ -368,6 +404,36 @@ fun SwitchSettingItem(
         HighlightableSettingItem(key = settingKey) { itemContent() }
     } else {
         itemContent()
+    }
+}
+
+/**
+ * Open/closed state for a settings branch (the child settings that hang off a parent switch).
+ * Branches start **minimised**, like the family trees in the lyrics sheet's Advanced options.
+ * A settings-search jump to one of [childKeys] opens the branch so the row can be highlighted.
+ */
+@Composable
+fun rememberSettingsBranchExpanded(vararg childKeys: String): androidx.compose.runtime.MutableState<Boolean> {
+    val state = androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    val highlight = LocalHighlightSettingKey.current
+    LaunchedEffect(highlight) {
+        if (highlight != null && highlight in childKeys) state.value = true
+    }
+    return state
+}
+
+/** Animated container for a settings branch: grows open and shrinks closed. */
+@Composable
+fun SettingsBranch(
+    visible: Boolean,
+    content: @Composable () -> Unit
+) {
+    androidx.compose.animation.AnimatedVisibility(
+        visible = visible,
+        enter = androidx.compose.animation.expandVertically() + fadeIn(),
+        exit = androidx.compose.animation.shrinkVertically() + fadeOut()
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) { content() }
     }
 }
 
@@ -463,8 +529,11 @@ fun ThemeSelectorItem(
     }
 
     if (showSheet) {
+        val optionSheetState = androidx.compose.material3.rememberModalBottomSheetState()
+        val closeOptionSheet = rememberAnimatedSheetDismiss(optionSheetState) { showSheet = false }
         androidx.compose.material3.ModalBottomSheet(
             onDismissRequest = { showSheet = false },
+            sheetState = optionSheetState,
             containerColor = MaterialTheme.colorScheme.surface,
             contentColor = MaterialTheme.colorScheme.onSurface
         ) {
@@ -492,7 +561,7 @@ fun ThemeSelectorItem(
                         Surface(
                             onClick = {
                                 onSelectionChanged(key)
-                                showSheet = false
+                                closeOptionSheet()
                             },
                             shape = RoundedCornerShape(20.dp),
                             color = itemBg,
@@ -511,14 +580,7 @@ fun ThemeSelectorItem(
                                     color = itemFg,
                                     modifier = Modifier.weight(1f)
                                 )
-                                
-                                if (isSelected) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Check,
-                                        contentDescription = stringResource(R.string.common_selected),
-                                        tint = itemFg
-                                    )
-                                }
+
                             }
                         }
                     }
@@ -538,7 +600,9 @@ fun <T> SettingsSegmentedSelectorItem(
     optionLabel: @Composable (T) -> String,
     onOptionSelected: (T) -> Unit,
     leadingIcon: @Composable (() -> Unit)? = null,
-    settingKey: String? = null
+    settingKey: String? = null,
+    /** Optional picture of what the setting does, drawn above the choices for the current value. */
+    preview: (@Composable (T) -> Unit)? = null
 ) {
     val containerColor = if (LocalSettingsContainerColor.current != androidx.compose.ui.graphics.Color.Unspecified) {
         LocalSettingsContainerColor.current
@@ -585,6 +649,14 @@ fun <T> SettingsSegmentedSelectorItem(
                         }
                     }
 
+                    if (preview != null) {
+                        com.theveloper.pixelplay.presentation.screens.settings.SettingPreviewFrame(
+                            value = selectedOption,
+                            indentForIcon = false,
+                            inset = false
+                        ) { preview(it) }
+                    }
+
                     Spacer(modifier = Modifier.height(12.dp))
 
                     SingleChoiceSegmentedButtonRow(
@@ -593,6 +665,7 @@ fun <T> SettingsSegmentedSelectorItem(
                         options.forEachIndexed { index, option ->
                             val isSelected = option == selectedOption
                             SegmentedButton(
+                                icon = {},
                                 selected = isSelected,
                                 onClick = {
                                     if (!isSelected) {

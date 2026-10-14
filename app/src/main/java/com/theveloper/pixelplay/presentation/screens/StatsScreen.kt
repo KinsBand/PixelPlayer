@@ -2,6 +2,32 @@
 
 package com.theveloper.pixelplay.presentation.screens
 
+import com.theveloper.pixelplay.presentation.navigation.popBackStackSafely
+import com.theveloper.pixelplay.presentation.navigation.navigateSafely
+import com.theveloper.pixelplay.presentation.screens.stats.DiscoveriesCard
+import com.theveloper.pixelplay.presentation.screens.stats.ListenerTypeCard
+import com.theveloper.pixelplay.presentation.screens.stats.ListeningCalendarCard
+import com.theveloper.pixelplay.presentation.screens.stats.ListeningClockCard
+import com.theveloper.pixelplay.presentation.screens.stats.MilestonesCard
+import com.theveloper.pixelplay.presentation.screens.stats.MonthlyTopArtistsCard
+import com.theveloper.pixelplay.presentation.screens.stats.OnRepeatCard
+import com.theveloper.pixelplay.presentation.screens.stats.RankChangeLabel
+import com.theveloper.pixelplay.presentation.screens.stats.StatsComparisonSection
+import com.theveloper.pixelplay.presentation.screens.stats.StatsCustomRangeDialog
+import com.theveloper.pixelplay.presentation.screens.stats.StatsRecapBanner
+import com.theveloper.pixelplay.presentation.screens.stats.listenerProfile
+import com.theveloper.pixelplay.presentation.screens.stats.share.ShareCardTemplate
+import com.theveloper.pixelplay.presentation.screens.stats.share.StatsRecapStory
+import com.theveloper.pixelplay.presentation.screens.stats.share.StatsShareSheet
+import com.theveloper.pixelplay.presentation.screens.stats.share.rememberStatsShareData
+import com.theveloper.pixelplay.presentation.viewmodel.ColorSchemePair
+import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
+import com.theveloper.pixelplay.data.stats.StatsInsights
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material3.FilledTonalIconButton
+import java.time.format.DateTimeFormatter as StatsDateFormatter
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -140,10 +166,25 @@ private const val PULL_TO_REFRESH_MIN_DURATION_MS = 3500L
 @Composable
 fun StatsScreen(
     navController: NavController,
-    statsViewModel: StatsViewModel = hiltViewModel()
+    statsViewModel: StatsViewModel = hiltViewModel(),
+    playerViewModel: PlayerViewModel? = null
 ) {
     val uiState by statsViewModel.uiState.collectAsStateWithLifecycle()
     val summary = uiState.summary
+    // Share sheet (non-null template = open), recap story and custom date picker.
+    var shareTemplate by remember { mutableStateOf<ShareCardTemplate?>(null) }
+    var showRecap by rememberSaveable { mutableStateOf(false) }
+    var showCustomRange by rememberSaveable { mutableStateOf(false) }
+    val shareData = summary?.let { rememberStatsShareData(it) }
+    val firstShareTemplate = remember(shareData) {
+        shareData?.let { data -> ShareCardTemplate.entries.firstOrNull { data.hasDataFor(it) } }
+    }
+    var albumColors by remember { mutableStateOf<ColorSchemePair?>(null) }
+    LaunchedEffect(shareData?.leadArtUri) {
+        albumColors = shareData?.leadArtUri?.let { statsViewModel.shareColorScheme(it) }
+    }
+    val queueNameNewFinds = stringResource(R.string.stats_x_queue_new_finds)
+    val listenerProfileAvailable = remember(summary) { summary?.listenerProfile() != null }
     val lazyListState = rememberLazyListState()
     val density = LocalDensity.current
     val coroutineScope = rememberCoroutineScope()
@@ -287,6 +328,24 @@ fun StatsScreen(
                             modifier = Modifier.padding(horizontal = 20.dp)
                         )
                     }
+                    if (summary != null && (summary.totalDurationMs > 0L || summary.totalPlayCount > 0)) {
+                        item(key = "comparison_section") {
+                            StatsComparisonSection(
+                                summary = summary,
+                                modifier = Modifier.padding(horizontal = 20.dp)
+                            )
+                        }
+                    }
+                    if (shareData != null && firstShareTemplate != null) {
+                        item(key = "recap_banner") {
+                            StatsRecapBanner(
+                                title = stringResource(R.string.stats_x_recap_title, shareData.periodLabel),
+                                onPlay = { showRecap = true },
+                                onShare = { shareTemplate = firstShareTemplate },
+                                modifier = Modifier.padding(horizontal = 20.dp)
+                            )
+                        }
+                    }
                     item {
                         ListeningTimelineSection(
                             summary = summary,
@@ -313,6 +372,11 @@ fun StatsScreen(
                     item {
                         TopArtistsCard(
                             summary = summary,
+                            onArtistClick = { name ->
+                                coroutineScope.launch {
+                                    navController.navigateSafely(statsViewModel.artistRoute(name))
+                                }
+                            },
                             modifier = Modifier.padding(horizontal = 20.dp)
                         )
                     }
@@ -333,6 +397,73 @@ fun StatsScreen(
                             summary = summary,
                             modifier = Modifier.padding(horizontal = 20.dp)
                         )
+                    }
+                    if (summary != null && summary.totalDurationMs > 0L) {
+                        item(key = "insights_header") {
+                            Text(
+                                text = stringResource(R.string.stats_x_insights_title),
+                                style = rememberStatsSectionTitleStyle(),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(horizontal = 24.dp)
+                            )
+                        }
+                        if (summary.hourlyDurationsMs.size == 24) {
+                            item(key = "insights_clock") {
+                                ListeningClockCard(summary, Modifier.padding(horizontal = 20.dp))
+                            }
+                        }
+                        if (summary.dailyTotals.isNotEmpty() && (summary.range != StatsTimeRange.DAY || summary.isCustomRange)) {
+                            item(key = "insights_calendar") {
+                                ListeningCalendarCard(summary, Modifier.padding(horizontal = 20.dp))
+                            }
+                        }
+                        val discoveries = summary.discoveries
+                        if (discoveries != null && (discoveries.newSongs > 0 || discoveries.newArtists > 0)) {
+                            item(key = "insights_discoveries") {
+                                DiscoveriesCard(
+                                    summary = summary,
+                                    onPlayNewFinds = playerViewModel?.let { player ->
+                                        {
+                                            coroutineScope.launch {
+                                                val songs = statsViewModel.songsForIds(discoveries.newSongIds)
+                                                if (songs.isNotEmpty()) {
+                                                    player.playSongs(songs, songs.first(), queueNameNewFinds)
+                                                }
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier.padding(horizontal = 20.dp)
+                                )
+                            }
+                        }
+                        if (summary.onRepeat != null) {
+                            item(key = "insights_on_repeat") {
+                                OnRepeatCard(
+                                    summary = summary,
+                                    onPlay = playerViewModel?.let { player ->
+                                        { songId: String ->
+                                            coroutineScope.launch {
+                                                statsViewModel.songsForIds(listOf(songId)).firstOrNull()?.let { player.playSong(it) }
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier.padding(horizontal = 20.dp)
+                                )
+                            }
+                        }
+                        if (summary.monthlyTopArtists.size >= 2) {
+                            item(key = "insights_monthly") {
+                                MonthlyTopArtistsCard(summary, Modifier.padding(horizontal = 20.dp))
+                            }
+                        }
+                        if (listenerProfileAvailable) {
+                            item(key = "insights_listener_type") {
+                                ListenerTypeCard(summary, Modifier.padding(horizontal = 20.dp))
+                            }
+                        }
+                        item(key = "insights_milestones") {
+                            MilestonesCard(summary, Modifier.padding(horizontal = 20.dp))
+                        }
                     }
                 }
             }
@@ -355,9 +486,19 @@ fun StatsScreen(
                         title = stringResource(R.string.stats_title),
                         collapseFraction = collapseFraction,
                         headerHeight = currentTopBarHeightDp,
-                        onBackClick = { navController.popBackStack() },
+                        onBackClick = { navController.popBackStackSafely() },
                         containerColor = Color.Transparent,
                         actions = {
+                            FilledTonalIconButton(
+                                modifier = Modifier.padding(end = 8.dp),
+                                onClick = { shareTemplate = firstShareTemplate },
+                                enabled = firstShareTemplate != null
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Share,
+                                    contentDescription = stringResource(R.string.stats_x_cd_share)
+                                )
+                            }
                             FilledIconButton(
                                 modifier = Modifier
                                     .padding(end = 12.dp),
@@ -376,20 +517,88 @@ fun StatsScreen(
                         }
                     )
 
+                    val customRange = uiState.customRange
+                    val customLabel = if (customRange != null) {
+                        val format = remember { StatsDateFormatter.ofPattern("MMM d") }
+                        stringResource(R.string.stats_share_period_custom, format.format(customRange.first), format.format(customRange.second))
+                    } else {
+                        stringResource(R.string.stats_x_range_custom)
+                    }
                     RangeTabsHeader(
                         ranges = uiState.availableRanges,
                         selected = uiState.selectedRange,
                         onRangeSelected = statsViewModel::onRangeSelected,
                         indicatorSpacing = tabIndicatorExtraSpacing,
                         showIndicator = showRangeTabIndicator,
+                        customSelected = customRange != null,
+                        customLabel = customLabel,
+                        onCustomClick = { showCustomRange = true }
                     )
                 }
             }
         }
     }
+
+    StatsScreenOverlays(
+        shareData = shareData,
+        shareTemplate = shareTemplate,
+        onShareTemplateChange = { shareTemplate = it },
+        showRecap = showRecap,
+        onShowRecapChange = { showRecap = it },
+        showCustomRange = showCustomRange,
+        onShowCustomRangeChange = { showCustomRange = it },
+        albumColors = albumColors,
+        statsViewModel = statsViewModel,
+        customRange = uiState.customRange
+    )
 }
 
 // StatsTopBar removed, replaced by CollapsibleCommonTopBar
+
+/** Share sheet, recap story and custom-range picker for [StatsScreen]. */
+@Composable
+private fun StatsScreenOverlays(
+    shareData: com.theveloper.pixelplay.presentation.screens.stats.share.StatsShareData?,
+    shareTemplate: ShareCardTemplate?,
+    onShareTemplateChange: (ShareCardTemplate?) -> Unit,
+    showRecap: Boolean,
+    onShowRecapChange: (Boolean) -> Unit,
+    showCustomRange: Boolean,
+    onShowCustomRangeChange: (Boolean) -> Unit,
+    albumColors: ColorSchemePair?,
+    statsViewModel: StatsViewModel,
+    customRange: Pair<java.time.LocalDate, java.time.LocalDate>?
+) {
+    if (shareData != null && shareTemplate != null) {
+        StatsShareSheet(
+            data = shareData,
+            initialTemplate = shareTemplate,
+            albumColors = albumColors,
+            onDismiss = { onShareTemplateChange(null) }
+        )
+    }
+    if (shareData != null && showRecap) {
+        StatsRecapStory(
+            data = shareData,
+            albumColors = albumColors,
+            onShare = { template ->
+                onShowRecapChange(false)
+                onShareTemplateChange(template)
+            },
+            onDismiss = { onShowRecapChange(false) }
+        )
+    }
+    if (showCustomRange) {
+        StatsCustomRangeDialog(
+            initial = customRange,
+            onConfirm = { start, end ->
+                onShowCustomRangeChange(false)
+                statsViewModel.onCustomRangeSelected(start, end)
+            },
+            onDismiss = { onShowCustomRangeChange(false) }
+        )
+    }
+}
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -641,9 +850,14 @@ private fun RangeTabsHeader(
     onRangeSelected: (StatsTimeRange) -> Unit,
     indicatorSpacing: Dp,
     showIndicator: Boolean = false,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    customSelected: Boolean = false,
+    customLabel: String? = null,
+    onCustomClick: (() -> Unit)? = null
 ) {
-    val selectedIndex = remember(ranges, selected) { ranges.indexOf(selected).coerceAtLeast(0) }
+    val selectedIndex = remember(ranges, selected, customSelected) {
+        if (customSelected) ranges.size else ranges.indexOf(selected).coerceAtLeast(0)
+    }
     Surface(
         modifier = modifier
             .fillMaxWidth()
@@ -685,6 +899,24 @@ private fun RangeTabsHeader(
                         text = stringResource(range.displayNameRes()),
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = if (index == selectedIndex) FontWeight.Bold else FontWeight.Medium
+                    )
+                }
+            }
+            if (customLabel != null && onCustomClick != null) {
+                TabAnimation(
+                    index = ranges.size,
+                    selectedIndex = selectedIndex,
+                    onClick = onCustomClick,
+                    selectedColor = MaterialTheme.colorScheme.primary,
+                    onSelectedColor = MaterialTheme.colorScheme.onPrimary,
+                    unselectedColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                    onUnselectedColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    title = customLabel
+                ) {
+                    Text(
+                        text = customLabel,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = if (customSelected) FontWeight.Bold else FontWeight.Medium
                     )
                 }
             }
@@ -928,7 +1160,9 @@ private enum class CategoryDimension(
 private data class CategoryMetricEntry(
     val label: String,
     val durationMs: Long,
-    val supporting: String
+    val supporting: String,
+    /** Movement against the previous period; null when there's nothing to compare. */
+    val change: StatsInsights.RankChange? = null
 )
 
 private enum class TimelineChartLayout {
@@ -961,7 +1195,7 @@ private data class TrackShareSlice(
 
 @OptIn(ExperimentalTextApi::class)
 @Composable
-private fun rememberStatsSectionTitleStyle(): TextStyle {
+internal fun rememberStatsSectionTitleStyle(): TextStyle {
     return remember {
         androidx.compose.ui.text.TextStyle(
             fontFamily = FontFamily(
@@ -1160,8 +1394,27 @@ private fun ListeningTimelineSection(
                         metric = selectedMetric,
                         range = range,
                         blankLabel = emDash,
-                        use24Hour = use24Hour
+                        use24Hour = use24Hour,
+                        previousEntries = summary?.previous?.timeline?.takeIf { it.size == timeline.size }
                     )
+                    if (summary?.previous != null && selectedMetric != TimelineMetric.AverageSession) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 20.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(12.dp)
+                                    .border(1.5.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                            )
+                            Text(
+                                text = stringResource(R.string.stats_x_previous_outline),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
             }
 
@@ -1261,7 +1514,7 @@ private fun CategoryMetricsSection(
                 )
             }
 
-            CategoryDimension.Artist -> summary?.topArtists.orEmpty().map {
+            CategoryDimension.Artist -> summary?.topArtists.orEmpty().mapIndexed { index, it ->
                 CategoryMetricEntry(
                     label = it.artist,
                     durationMs = it.totalDurationMs,
@@ -1269,7 +1522,13 @@ private fun CategoryMetricsSection(
                         R.string.stats_plays_tracks,
                         it.playCount,
                         it.uniqueSongs
-                    )
+                    ),
+                    change = summary?.previous?.let { previous ->
+                        StatsInsights.rankChange(
+                            index + 1,
+                            previous.artistRanks[PlaybackStatsRepository.artistRankKey(it.artist)]
+                        )
+                    }
                 )
             }
 
@@ -1285,7 +1544,7 @@ private fun CategoryMetricsSection(
                 )
             }
 
-            CategoryDimension.Song -> summary?.topSongs.orEmpty().map {
+            CategoryDimension.Song -> summary?.topSongs.orEmpty().mapIndexed { index, it ->
                 val supportingParts = buildList {
                     add(stringResource(R.string.stats_n_plays, it.playCount))
                     if (it.artist.isNotBlank()) {
@@ -1295,7 +1554,10 @@ private fun CategoryMetricsSection(
                 CategoryMetricEntry(
                     label = it.title,
                     durationMs = it.totalDurationMs,
-                    supporting = supportingParts.joinToString(separator = " • ")
+                    supporting = supportingParts.joinToString(separator = " • "),
+                    change = summary?.previous?.let { previous ->
+                        StatsInsights.rankChange(index + 1, previous.songRanks[it.songId])
+                    }
                 )
             }
         }.filter { it.durationMs > 0L }
@@ -1389,12 +1651,15 @@ private fun CategoryHorizontalBarChart(
                                 )
                             }
                         }
-                        Text(
-                            text = formatListeningDurationCompact(entry.durationMs),
-                            style = metricStyle,
-                            fontWeight = if (isTop) FontWeight.SemiBold else FontWeight.Medium,
-                            color = palette.contentColor
-                        )
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = formatListeningDurationCompact(entry.durationMs),
+                                style = metricStyle,
+                                fontWeight = if (isTop) FontWeight.SemiBold else FontWeight.Medium,
+                                color = palette.contentColor
+                            )
+                            entry.change?.let { RankChangeLabel(it) }
+                        }
                     }
 
                     LinearProgressIndicator(
@@ -1482,10 +1747,13 @@ private fun TimelineBarChart(
     range: StatsTimeRange,
     blankLabel: String,
     use24Hour: Boolean = false,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    previousEntries: List<PlaybackStatsRepository.TimelineEntry>? = null
 ) {
     if (entries.isEmpty()) return
     val spec = timelineChartSpecFor(range = range, entryCount = entries.size)
+    // Average session per bucket isn't comparable as a ghost bar, so only time and plays get one.
+    val ghosts = previousEntries?.takeIf { metric != TimelineMetric.AverageSession && it.size == entries.size }
 
     when (spec.layout) {
         TimelineChartLayout.Vertical -> VerticalTimelineBarChart(
@@ -1495,7 +1763,8 @@ private fun TimelineBarChart(
             spec = spec,
             blankLabel = blankLabel,
             use24Hour = use24Hour,
-            modifier = modifier
+            modifier = modifier,
+            previousEntries = ghosts
         )
 
         TimelineChartLayout.Horizontal -> HorizontalTimelineBarChart(
@@ -1505,7 +1774,8 @@ private fun TimelineBarChart(
             spec = spec,
             blankLabel = blankLabel,
             use24Hour = use24Hour,
-            modifier = modifier
+            modifier = modifier,
+            previousEntries = ghosts
         )
     }
 }
@@ -1518,9 +1788,11 @@ private fun VerticalTimelineBarChart(
     spec: TimelineChartSpec,
     blankLabel: String,
     use24Hour: Boolean = false,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    previousEntries: List<PlaybackStatsRepository.TimelineEntry>? = null
 ) {
-    val maxMetricValue = entries.maxOfOrNull { metric.extractValue(it) }?.coerceAtLeast(0.0) ?: 0.0
+    val maxMetricValue = (entries + previousEntries.orEmpty()).maxOfOrNull { metric.extractValue(it) }?.coerceAtLeast(0.0) ?: 0.0
+    val ghostColor = MaterialTheme.colorScheme.outline
     val hasNonZeroValues = maxMetricValue > 0.0
     val axisLabelStyle = rememberStatsAxisLabelStyle(range)
     val metricValueStyle = rememberStatsMetricValueStyle(compact = true)
@@ -1560,9 +1832,12 @@ private fun VerticalTimelineBarChart(
                     itemsIndexed(
                         items = entries,
                         key = { index, entry -> "${entry.label}-$index" }
-                    ) { _, entry ->
+                    ) { entryIndex, entry ->
                         val value = metric.extractValue(entry).coerceAtLeast(0.0)
                         val progress = if (maxMetricValue > 0.0) (value / maxMetricValue).toFloat().coerceIn(0f, 1f) else 0f
+                        val ghostProgress = previousEntries?.getOrNull(entryIndex)?.let { previous ->
+                            if (maxMetricValue > 0.0) (metric.extractValue(previous) / maxMetricValue).toFloat().coerceIn(0f, 1f) else 0f
+                        } ?: 0f
                         val isPeak = hasNonZeroValues && (maxMetricValue - value) <= maxMetricValue * 0.01
                         val label = formatTimelineLabelForRange(entry.label, range, blankLabel, use24Hour)
 
@@ -1593,6 +1868,15 @@ private fun VerticalTimelineBarChart(
                                         .clip(CircleShape)
                                         .background(if (isPeak) highlightColor else regularColor)
                                 )
+                                if (ghostProgress > 0f) {
+                                    // Same bucket last period, drawn as an outline.
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .fillMaxHeight(ghostProgress)
+                                            .border(1.5.dp, ghostColor, CircleShape)
+                                    )
+                                }
                             }
                             Text(
                                 text = label,
@@ -1618,9 +1902,11 @@ private fun HorizontalTimelineBarChart(
     spec: TimelineChartSpec,
     blankLabel: String,
     use24Hour: Boolean = false,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    previousEntries: List<PlaybackStatsRepository.TimelineEntry>? = null
 ) {
-    val maxMetricValue = entries.maxOfOrNull { metric.extractValue(it) }?.coerceAtLeast(0.0) ?: 0.0
+    val maxMetricValue = (entries + previousEntries.orEmpty()).maxOfOrNull { metric.extractValue(it) }?.coerceAtLeast(0.0) ?: 0.0
+    val ghostColor = MaterialTheme.colorScheme.outline
     val hasNonZeroValues = maxMetricValue > 0.0
     val axisLabelStyle = rememberStatsAxisLabelStyle(range)
     val metricValueStyle = rememberStatsMetricValueStyle(compact = true)
@@ -1637,9 +1923,12 @@ private fun HorizontalTimelineBarChart(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        entries.forEach { entry ->
+        entries.forEachIndexed { entryIndex, entry ->
             val value = metric.extractValue(entry).coerceAtLeast(0.0)
             val progress = if (maxMetricValue > 0.0) (value / maxMetricValue).toFloat().coerceIn(0f, 1f) else 0f
+            val ghostProgress = previousEntries?.getOrNull(entryIndex)?.let { previous ->
+                if (maxMetricValue > 0.0) (metric.extractValue(previous) / maxMetricValue).toFloat().coerceIn(0f, 1f) else 0f
+            } ?: 0f
             val isPeak = hasNonZeroValues && (maxMetricValue - value) <= maxMetricValue * 0.01
             val label = formatTimelineLabelForRange(entry.label, range, blankLabel, use24Hour)
 
@@ -1676,6 +1965,14 @@ private fun HorizontalTimelineBarChart(
                                 .clip(CircleShape)
                                 .background(if (isPeak) highlightColor else regularColor)
                         )
+                        if (ghostProgress > 0f) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .fillMaxWidth(ghostProgress)
+                                    .border(1.5.dp, ghostColor, CircleShape)
+                            )
+                        }
                     }
                     Text(
                         text = metric.formatEntryValue(entry),
@@ -1886,7 +2183,8 @@ private fun categoryPaletteFor(dimension: CategoryDimension): CategoryChartPalet
 @Composable
 private fun TopArtistsCard(
     summary: PlaybackStatsRepository.PlaybackStatsSummary?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onArtistClick: ((String) -> Unit)? = null
 ) {
     val containerColor = MaterialTheme.colorScheme.secondaryContainer
     val contentColor = MaterialTheme.colorScheme.onSecondaryContainer
@@ -1916,7 +2214,16 @@ private fun TopArtistsCard(
                 val maxDuration = artists.maxOf { it.totalDurationMs }.coerceAtLeast(1L)
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     artists.forEachIndexed { index, artistSummary ->
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(
+                            modifier = if (onArtistClick != null) {
+                                Modifier
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .clickable { onArtistClick(artistSummary.artist) }
+                            } else {
+                                Modifier
+                            },
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -1924,7 +2231,8 @@ private fun TopArtistsCard(
                                 ArtistAvatar(
                                     name = artistSummary.artist,
                                     containerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.18f),
-                                    contentColor = MaterialTheme.colorScheme.secondary
+                                    contentColor = MaterialTheme.colorScheme.secondary,
+                                    imageUri = artistSummary.albumArtUri
                                 )
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
@@ -1974,8 +2282,18 @@ private fun TopArtistsCard(
 private fun ArtistAvatar(
     name: String,
     containerColor: Color,
-    contentColor: Color
+    contentColor: Color,
+    imageUri: String? = null
 ) {
+    if (imageUri != null) {
+        SmartImage(
+            model = imageUri,
+            contentDescription = null,
+            shape = CircleShape,
+            modifier = Modifier.size(48.dp)
+        )
+        return
+    }
     val placeholder = stringResource(R.string.stats_avatar_placeholder)
     val initials = remember(name, placeholder) {
         name.split(" ")

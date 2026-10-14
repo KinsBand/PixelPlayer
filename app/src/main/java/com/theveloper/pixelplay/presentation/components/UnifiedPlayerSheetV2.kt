@@ -1,7 +1,7 @@
 package com.theveloper.pixelplay.presentation.components
 
+import com.theveloper.pixelplay.presentation.components.player.miniPlayerSongSwipeGesture
 import android.widget.Toast
-import com.theveloper.pixelplay.presentation.components.ExpressiveOfflineDialog
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -31,8 +31,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -130,7 +132,6 @@ fun UnifiedPlayerSheetV2(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val latestContext by rememberUpdatedState(context)
-    var showNoInternetDialog by remember { mutableStateOf(false) }
 
     // MediaStore write-permission launcher (for metadata editing without MANAGE_EXTERNAL_STORAGE)
     val writePermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -154,11 +155,6 @@ fun UnifiedPlayerSheetV2(
                 }
             }
             launch {
-                playerViewModel.showNoInternetDialog.collect {
-                    showNoInternetDialog = true
-                }
-            }
-            launch {
                 playerViewModel.writePermissionRequest.collect { intentSender ->
                     writePermissionLauncher.launch(
                         androidx.activity.result.IntentSenderRequest.Builder(intentSender).build()
@@ -175,15 +171,7 @@ fun UnifiedPlayerSheetV2(
         }
     }
 
-    if (showNoInternetDialog) {
-        ExpressiveOfflineDialog(
-            onDismiss = { showNoInternetDialog = false },
-            onRetry = {
-                 playerViewModel.refreshLocalConnectionInfo()
-                 showNoInternetDialog = false
-            }
-        )
-    }
+    // No "needs internet" pop-up: offline cards are veiled instead (OfflineVeil.kt).
 
     val infrequentPlayerStateReference = playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
     val infrequentPlayerState = infrequentPlayerStateReference.value
@@ -397,7 +385,8 @@ fun UnifiedPlayerSheetV2(
         isNavBarHidden = isNavBarHidden,
         isPlaying = infrequentPlayerState.isPlaying,
         hasCurrentSong = infrequentPlayerState.currentSong != null,
-        swipeDismissProgress = swipeDismissProgress
+        swipeDismissProgress = swipeDismissProgress,
+        navBarVisibilityProvider = { com.theveloper.pixelplay.presentation.navigation.NavBarVisibility.visibilityProgress.value }
     )
     val currentBottomPadding = sheetVisualState.currentBottomPadding
     val baseBottomPadding = sheetVisualState.baseBottomPadding
@@ -469,7 +458,68 @@ fun UnifiedPlayerSheetV2(
         sheetCollapsedTargetY = sheetCollapsedTargetY
     )
 
+    // "Show me the queue" requests from outside the player (e.g. Song Radio from a song menu):
+    // wait for the player to finish expanding, then slide the queue up.
+    val isPlayerFullyExpandedForQueue by androidx.compose.runtime.rememberUpdatedState(isPlayerFullyExpanded)
+    LaunchedEffect(Unit) {
+        playerViewModel.queueOpenRequests.collect {
+            kotlinx.coroutines.withTimeoutOrNull(4_000) {
+                androidx.compose.runtime.snapshotFlow { isPlayerFullyExpandedForQueue }.first { it }
+            }
+            kotlinx.coroutines.delay(150)
+            sheetActionHandlers.openQueueSheet()
+        }
+    }
+
     val hapticFeedback = LocalHapticFeedback.current
+    // Sideways swipe on the mini player: change song (default) or the old swipe-to-dismiss.
+
+    val miniSwipeChangesSong by playerViewModel.miniPlayerSwipeChangesSong.collectAsStateWithLifecycle()
+
+    val miniSongSwipeOffset = remember { Animatable(0f) }
+
+    val miniSongSwipeHandler = com.theveloper.pixelplay.presentation.components.player.rememberMiniPlayerSongSwipeHandler(
+
+        scope = scope,
+
+        hapticFeedback = hapticFeedback,
+
+        offset = miniSongSwipeOffset,
+
+        widthPx = screenWidthPx,
+
+        onNext = { playerViewModel.nextSong() },
+
+        onPrevious = { playerViewModel.previousSongNow() }
+
+    )
+
+    val miniSongDurationState = rememberUpdatedState(infrequentPlayerState.currentSong?.duration ?: 0L)
+
+    val miniPlayerChrome = remember(miniSongSwipeOffset, screenWidthPx, playerContentActualBottomRadiusProvider, positionToDisplayProvider) {
+
+        com.theveloper.pixelplay.presentation.components.player.MiniPlayerChrome(
+
+            swipeOffset = miniSongSwipeOffset,
+
+            widthPx = screenWidthPx,
+
+            bottomRadius = playerContentActualBottomRadiusProvider,
+
+            progress = {
+
+                val duration = miniSongDurationState.value
+
+                if (duration > 0L) positionToDisplayProvider().toFloat() / duration.toFloat() else 0f
+
+            }
+
+        )
+
+    }
+
+
+
     val miniDismissGestureHandler = rememberMiniPlayerDismissGestureHandler(
         scope = scope,
         density = density,
@@ -652,7 +702,8 @@ fun UnifiedPlayerSheetV2(
         isDragging = sheetBackAndDragState.isDragging,
         onAnimateSheet = { targetExpanded, animationSpec, initialVelocity ->
             if (animationSpec == null) {
-                animatePlayerSheet(targetExpanded = targetExpanded)
+                // Keep the finger's speed so the sheet carries on from the release.
+                animatePlayerSheet(targetExpanded = targetExpanded, initialVelocity = initialVelocity)
             } else {
                 animatePlayerSheet(
                     targetExpanded = targetExpanded,
@@ -668,6 +719,22 @@ fun UnifiedPlayerSheetV2(
     )
 
     if (!actuallyShowSheetContent) return
+
+    // Queue / Next / Soon: a bubble grows out of the top of the mini player (drawn before the
+    // sheet, so its neck tucks under the mini player's top edge and the two read as one).
+    com.theveloper.pixelplay.presentation.components.player.QueueActionBubbleHost(
+        anchorTopPx = { visualSheetTranslationYProvider() },
+        canShow = {
+            showPlayerContentArea &&
+                currentSheetContentState == PlayerSheetState.COLLAPSED &&
+                playerContentExpansionFraction.value < 0.02f &&
+                !showQueueSheet
+        },
+        // The open queue shows the change itself; no toast on top of it.
+        quiet = { showQueueSheet },
+        container = miniPlayerScheme.primaryContainer,
+        content = miniPlayerScheme.onPrimaryContainer,
+    )
 
     val playerSheetSemanticsDescription = remember(
         currentSheetContentState,
@@ -782,9 +849,18 @@ fun UnifiedPlayerSheetV2(
                                     placeable.placeRelative(-startPaddingPx, 0)
                                 }
                             }
-                            .miniPlayerDismissHorizontalGesture(
-                                enabled = currentSheetContentState == PlayerSheetState.COLLAPSED,
-                                handler = miniDismissGestureHandler
+                            .then(
+                                if (miniSwipeChangesSong) {
+                                    Modifier.miniPlayerSongSwipeGesture(
+                                        enabled = currentSheetContentState == PlayerSheetState.COLLAPSED,
+                                        handler = miniSongSwipeHandler
+                                    )
+                                } else {
+                                    Modifier.miniPlayerDismissHorizontalGesture(
+                                        enabled = currentSheetContentState == PlayerSheetState.COLLAPSED,
+                                        handler = miniDismissGestureHandler
+                                    )
+                                }
                             )
                             .playerSheetVerticalDragGesture(
                                 enabled = sheetInteractionState.canDragSheet,
@@ -801,6 +877,9 @@ fun UnifiedPlayerSheetV2(
                                 contentDescription = playerSheetSemanticsDescription
                             }
                     ) {
+                        androidx.compose.runtime.CompositionLocalProvider(
+                            com.theveloper.pixelplay.presentation.components.player.LocalMiniPlayerChrome provides miniPlayerChrome
+                        ) {
                         UnifiedPlayerMiniAndFullLayers(
                             currentSong = infrequentPlayerState.currentSong,
                             miniPlayerScheme = miniPlayerScheme,
@@ -837,6 +916,7 @@ fun UnifiedPlayerSheetV2(
                                 showEqualizerSheet = true
                             }
                         )
+                        }
                     }
                 }
 
@@ -860,6 +940,10 @@ fun UnifiedPlayerSheetV2(
                 )
             }
 
+            // Keyed like PlayerSheetPredictiveBackHandler: that handler re-registers on every
+            // navigation, which would put "collapse player" above "close queue" and make Back
+            // skip the queue. Re-registering with the same key keeps the queue on top.
+            key(currentBackStackEntry?.id) {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 PredictiveBackHandler(enabled = isQueueVisible && !internalIsKeyboardVisible) { progressFlow ->
                     try {
@@ -872,20 +956,26 @@ fun UnifiedPlayerSheetV2(
                                 sheetActionHandlers.animateQueueSheet(false)
                             }
                             launch {
-                                queuePredictiveBackProgress.animateTo(
-                                    targetValue = 0f,
-                                    animationSpec = tween(ANIMATION_DURATION_MS)
-                                )
-                                queuePredictiveBackSwipeEdge = null
+                                try {
+                                    queuePredictiveBackProgress.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = tween(ANIMATION_DURATION_MS)
+                                    )
+                                } finally {
+                                    queuePredictiveBackSwipeEdge = null
+                                }
                             }
                         }
                     } catch (_: kotlin.coroutines.cancellation.CancellationException) {
                         scope.launch {
-                            queuePredictiveBackProgress.animateTo(
-                                targetValue = 0f,
-                                animationSpec = tween(ANIMATION_DURATION_MS)
-                            )
-                            queuePredictiveBackSwipeEdge = null
+                            try {
+                                queuePredictiveBackProgress.animateTo(
+                                    targetValue = 0f,
+                                    animationSpec = tween(ANIMATION_DURATION_MS)
+                                )
+                            } finally {
+                                queuePredictiveBackSwipeEdge = null
+                            }
                         }
                     }
                 }
@@ -893,6 +983,7 @@ fun UnifiedPlayerSheetV2(
                 BackHandler(enabled = isQueueVisible && !internalIsKeyboardVisible) {
                     sheetActionHandlers.animateQueueSheet(false)
                 }
+            }
             }
 
             val queuePredictiveBackSwipeEdgeState = rememberUpdatedState(queuePredictiveBackSwipeEdge)
@@ -924,6 +1015,7 @@ fun UnifiedPlayerSheetV2(
                 onNavigateToAlbum = sheetActionHandlers.onNavigateToAlbum,
                 onNavigateToArtist = sheetActionHandlers.onNavigateToArtist,
                 onNavigateToGenre = sheetActionHandlers.onNavigateToGenre,
+                onOpenQueueSource = sheetActionHandlers.onOpenQueueSource,
                 queuePredictiveBackProgress = queuePredictiveBackProgress,
                 queuePredictiveBackSwipeEdge = queuePredictiveBackSwipeEdgeState
             )

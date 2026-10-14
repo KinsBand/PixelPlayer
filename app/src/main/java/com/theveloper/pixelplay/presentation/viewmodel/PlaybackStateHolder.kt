@@ -493,6 +493,17 @@ class PlaybackStateHolder @Inject constructor(
         }
     }
 
+    /** The previous queue item even when the current song has played a while (mini player swipe). */
+    fun previousSongNow() {
+        val castSession = castStateHolder.castSession.value
+        if (castSession != null && castSession.remoteMediaClient != null) {
+            castStateHolder.castPlayer?.previous()
+        } else {
+            val controller = activeLocalPlayer()
+            if (controller.hasPreviousMediaItem()) controller.seekToPreviousMediaItem() else controller.seekTo(0)
+        }
+    }
+
     fun previousSong() {
         val castSession = castStateHolder.castSession.value
         if (castSession != null && castSession.remoteMediaClient != null) {

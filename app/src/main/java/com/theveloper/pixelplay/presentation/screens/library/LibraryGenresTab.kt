@@ -37,6 +37,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import com.theveloper.pixelplay.presentation.components.ExpressiveFilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -57,7 +58,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.AsyncImage
+import com.theveloper.pixelplay.presentation.components.SmartImage
 import coil.request.ImageRequest
 import com.theveloper.pixelplay.data.library.LibraryInsightsRepository
 import com.theveloper.pixelplay.presentation.components.MiniPlayerHeight
@@ -125,10 +126,10 @@ fun LibraryGenresTab(
         item(key = "sort", span = { GridItemSpan(maxLineSpan) }) {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(GenreSort.entries, key = { "sort_${it.name}" }) { option ->
-                    FilterChip(
+                    ExpressiveFilterChip(
                         selected = ui.sort == option,
                         onClick = { viewModel.setGenreSort(option) },
-                        label = { Text(option.label) }
+                        label = option.label
                     )
                 }
             }
@@ -295,10 +296,12 @@ private fun ArtistAvatar(name: String, image: String?, modifier: Modifier, borde
         if (image.isNullOrBlank()) {
             Text(name.take(1).uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
-            AsyncImage(
-                model = remember(image) { ImageRequest.Builder(context).data(image).size(96).build() },
+            SmartImage(
+                model = image,
                 contentDescription = name,
                 contentScale = ContentScale.Crop,
+                shape = CircleShape,
+                targetSize = coil.size.Size(96, 96),
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -308,14 +311,14 @@ private fun ArtistAvatar(name: String, image: String?, modifier: Modifier, borde
 @Composable
 private fun CoverCollage(covers: List<String>, modifier: Modifier) {
     if (covers.isEmpty()) return
-    val context = LocalContext.current
     Box(modifier.clip(RoundedCornerShape(12.dp))) {
         val cells = covers.take(4)
         if (cells.size < 4) {
-            AsyncImage(
-                model = remember(cells[0]) { ImageRequest.Builder(context).data(cells[0]).size(160).build() },
+            SmartImage(
+                model = cells[0],
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
+                targetSize = coil.size.Size(160, 160),
                 modifier = Modifier.fillMaxSize()
             )
         } else {
@@ -323,10 +326,11 @@ private fun CoverCollage(covers: List<String>, modifier: Modifier) {
                 listOf(cells.subList(0, 2), cells.subList(2, 4)).forEach { rowCells ->
                     Row(Modifier.weight(1f).fillMaxWidth()) {
                         rowCells.forEach { url ->
-                            AsyncImage(
-                                model = remember(url) { ImageRequest.Builder(context).data(url).size(96).build() },
+                            SmartImage(
+                                model = url,
                                 contentDescription = null,
                                 contentScale = ContentScale.Crop,
+                                targetSize = coil.size.Size(96, 96),
                                 modifier = Modifier.weight(1f).fillMaxHeight()
                             )
                         }

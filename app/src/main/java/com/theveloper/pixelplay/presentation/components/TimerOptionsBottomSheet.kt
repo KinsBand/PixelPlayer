@@ -112,6 +112,7 @@ fun TimerOptionsBottomSheet(
         }
     }
 
+    val dismissSheetAnimated = rememberAnimatedSheetDismiss(sheetState, onDismiss)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState
@@ -377,7 +378,7 @@ fun TimerOptionsBottomSheet(
                 Button(
                     onClick = {
                         onCancelTimer()
-                        onDismiss()
+                        dismissSheetAnimated()
                         onCancelCountedPlay()
                     },
                     shape = RoundedCornerShape(
@@ -433,7 +434,7 @@ fun TimerOptionsBottomSheet(
                             onSetPredefinedTimer(totalMinutes) // Your existing callback
                         }
                         showCustomTimePicker = false // Dismiss the M3 dialog
-                        onDismiss() // Dismiss the bottom sheet after setting time, as per original logic
+                        dismissSheetAnimated() // Dismiss the bottom sheet after setting time, as per original logic
                     }
                 ) {
                     Text(stringResource(R.string.common_ok))

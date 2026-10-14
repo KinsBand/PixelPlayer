@@ -18,6 +18,9 @@ class YouTubeMusicAuthManager @Inject constructor(
 ) {
     val isLoggedInFlow = vault.revision.map { cookieHeader.isNotBlank() }.distinctUntilChanged()
     val cookieHeader get() = vault.get("yt.cookie")
+    /** The connected Google account's profile picture URL, cached by [YouTubeMusicRepository.accountPhotoUrl]. */
+    val photoUrl get() = vault.get("yt.photo")
+    fun setPhotoUrl(url: String) = vault.put("yt.photo" to url)
     val accountIndex get() = vault.get("yt.account").ifBlank { "0" }
     val sapisid get() = cookieHeader.split(';').map { it.trim().split('=', limit = 2) }
         .firstOrNull { it.size == 2 && it[0] == "SAPISID" }?.get(1)?.takeIf { it.isNotBlank() }

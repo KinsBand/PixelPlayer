@@ -83,6 +83,22 @@ class ContinuousMixRuntime @Inject constructor(
     @Volatile private var pendingSwap: Swap? = null
     /** Just started or switched: plan a small first batch so songs land within a second or so. */
     private var fastStart = false
+
+    // ── Gentle swaps ─────────────────────────────────────────────────────────────────
+    /**
+     * A tune / pick / steer is waiting to be applied as a gentle swap ([applyNudge]): when it was
+     * asked for (elapsed ms), so quick changes in a row cause one swap, and what to call it.
+     */
+    @Volatile private var nudgeAt: Long? = null
+    @Volatile private var nudgeReason: String? = null
+    /** More songs clashed than one swap may change: swap again when the next song starts. */
+    private var nudgeWave = false
+    /** Fit of each upcoming mix song when it was last scored (by media id), to see how far it fell. */
+    private val lastFit = java.util.concurrent.ConcurrentHashMap<String, Double>()
+    /** Songs the mix queued, by media id: streamed songs can't always be read back from the library. */
+    private val knownSongs = java.util.concurrent.ConcurrentHashMap<String, Song>()
+    /** The song whose start was last reported to the session vibe. */
+    private var vibeSongId: String? = null
     /** Passes in a row that added nothing (backs off the retry instead of giving up). */
     private var emptyPasses = 0
 
@@ -103,9 +119,11 @@ class ContinuousMixRuntime @Inject constructor(
                 withTimeoutOrNull(if ((topUp || resumeAfterRefill) && android.os.SystemClock.elapsedRealtime() >= retryAfter) 150L else 1_000L) { kick.receive() }
                 if (remote() || _flavor.value == null) continue
                 try {
+                    noteSongChange()
                     followUserPicks()
                     pruneOffVibe()
                     applySkipRefresh()
+                    applyNudge()
                     refill()
                     rerankTail()
                 }
@@ -138,6 +156,7 @@ class ContinuousMixRuntime @Inject constructor(
         queuedDuringMix.clear()
         pendingOffVibe.clear()
         resetSkipState()
+        resetNudgeState()
         sessionStartedAt = System.currentTimeMillis()
         topUp = true
         fastStart = true
@@ -191,6 +210,7 @@ class ContinuousMixRuntime @Inject constructor(
         lastCurrentId = null
         pendingOffVibe.clear()
         resetSkipState()
+        resetNudgeState()
         topUp = false
         _working.value = false
         adaptive.deactivate()
@@ -243,9 +263,10 @@ class ContinuousMixRuntime @Inject constructor(
         val playedPick = (jumpedToPick || userSongStarted) && now - lastPickRefreshAt > PICK_REFRESH_COOLDOWN_MS
         if (newlyQueued || playedPick) {
             lastPickRefreshAt = now
-            _status.value = "${_flavor.value?.title ?: "Mix"} · blending in your picks"
-            // Keep the next couple of mix songs so the change is a gradual drift, never a restart.
-            refreshFuture(keepAutomatic = PICK_KEEP_AUTOMATIC)
+            val title = (if (newlyQueued) newPicks.lastOrNull() else currentId)?.let { knownSongs[it]?.title }
+            // A pick tilts the session vibe (AdaptiveMix.markPicked); the queue then changes by a
+            // gentle swap: only upcoming mix songs that now clash move, never more than a quarter.
+            nudgeFuture(if (title != null) "blending in $title" else "blending in your picks")
         }
     }
 
@@ -271,6 +292,7 @@ class ContinuousMixRuntime @Inject constructor(
      * through [followUserPicks] as before.
      */
     fun noteQueuedByUser(song: Song) {
+        knownSongs[song.id] = song
         adaptive.markPicked(song)
         if (_flavor.value != null) kick.trySend(Unit)
     }
@@ -304,30 +326,34 @@ class ContinuousMixRuntime @Inject constructor(
         // rewarded ≥ +0.4 (listened past half way, finished, replayed) ends a skip streak.
         val earlySkip = MixRewards.isEarlySkip(attempt)
         val listened = (MixRewards.reward(attempt) ?: 0.0) >= 0.4
+        // Was it one of the mix's picks (or a mix button's)? Look at the queue occurrence.
+        val item = (0 until player.mediaItemCount).asSequence().map(player::getMediaItemAt)
+            .lastOrNull { it.mediaId == attempt.songId }
         if (!earlySkip) {
             if (listened) {
                 skipStreak = 0
                 recordOutcome(false)
                 rerankPending = true
-                if (sessionSkippedIds.remove(attempt.songId)) {
-                    withContext(Dispatchers.IO) { music.getSongsByIds(listOf(attempt.songId)).first() }
-                        .firstOrNull()?.let(adaptive::clearSkipped)
+                val song = songsFor(listOf(attempt.songId))[attempt.songId]
+                if (song != null) {
+                    // The vibe follows what you actually listen to; a song you queued that played
+                    // through pulls it a little further.
+                    adaptive.noteListened(song, MixRewards.reward(attempt) ?: 0.4)
+                    if (item != null && MixQueueMetadata.userPick(item) && attempt.songId in queuedDuringMix) adaptive.notePickPlayed(song)
+                    if (sessionSkippedIds.remove(attempt.songId)) adaptive.clearSkipped(song)
                 }
             }
             return
         }
-        // Was it one of the mix's picks (or a mix button's)? Look at the queue occurrence.
-        val item = (0 until player.mediaItemCount).asSequence().map(player::getMediaItemAt)
-            .lastOrNull { it.mediaId == attempt.songId }
         if (item != null && MixQueueMetadata.userPick(item)) return
-        val song = withContext(Dispatchers.IO) { music.getSongsByIds(listOf(attempt.songId)).first() }
-            .firstOrNull() ?: return
+        val song = songsFor(listOf(attempt.songId))[attempt.songId] ?: return
         if (_flavor.value == null) return
         sessionSkippedIds.add(song.id)
         while (sessionSkippedIds.size > 64) sessionSkippedIds.remove(sessionSkippedIds.first())
         skipStreak++
         recordOutcome(true)
-        adaptive.markSkipped(song)
+        // A friend's song skipped: half the signal, and it says nothing about the friend.
+        adaptive.markSkipped(song, friendSong = com.theveloper.pixelplay.data.social.FriendQueueAttribution.forSong(song.id) != null)
         skipRefreshPending = true
         kick.trySend(Unit)
     }
@@ -378,7 +404,7 @@ class ContinuousMixRuntime @Inject constructor(
         while (blockStart - 1 >= start && MixQueueMetadata.automatic(player.getMediaItemAt(blockStart - 1))) blockStart--
         if (end - blockStart + 1 < ROLLING_MIN) return
         val ids = (blockStart..end).map { player.getMediaItemAt(it).mediaId }
-        val songs = withContext(Dispatchers.IO) { music.getSongsByIds(ids.distinct()).first() }.associateBy { it.id }
+        val songs = songsFor(ids.distinct())
         val ordered = ids.mapNotNull(songs::get)
         if (ordered.size < ROLLING_MIN) return
         val order = adaptive.rerank(ordered, contextSeeds)
@@ -403,8 +429,7 @@ class ContinuousMixRuntime @Inject constructor(
         val candidates = (firstReplaceable.coerceAtLeast(0) until player.mediaItemCount)
             .map(player::getMediaItemAt).filter(MixQueueMetadata::automatic)
         if (candidates.isEmpty()) return
-        val songs = withContext(Dispatchers.IO) { music.getSongsByIds(candidates.map { it.mediaId }.distinct()).first() }
-            .associateBy { it.id }
+        val songs = songsFor(candidates.map { it.mediaId }.distinct())
         val drop = candidates.filter { item ->
             songs[item.mediaId]?.let { adaptive.offVibePenalty(it, removed) >= OFF_VIBE_PRUNE || adaptive.feelsLike(it, removed) } == true
         }.map { it.mediaId }.toSet()
@@ -417,6 +442,108 @@ class ContinuousMixRuntime @Inject constructor(
         generation++
         topUp = true
         _working.value = true
+    }
+
+    /** Songs by media id: the ones the mix queued first (streams included), then the library. */
+    private suspend fun songsFor(ids: List<String>): Map<String, Song> {
+        if (ids.isEmpty()) return emptyMap()
+        val result = HashMap<String, Song>(ids.size * 2)
+        val missing = ArrayList<String>()
+        for (id in ids) knownSongs[id]?.let { result[id] = it } ?: missing.add(id)
+        if (missing.isNotEmpty()) {
+            withContext(Dispatchers.IO) { music.getSongsByIds(missing.distinct()).first() }.forEach { result[it.id] = it }
+        }
+        return result
+    }
+
+    private fun resetNudgeState() {
+        nudgeAt = null
+        nudgeReason = null
+        nudgeWave = false
+        lastFit.clear()
+        vibeSongId = null
+    }
+
+    /** A new song started: the session vibe moves on, and a waiting second wave of swaps runs. */
+    private fun noteSongChange() {
+        val currentId = playerProvider?.invoke()?.currentMediaItem?.mediaId ?: return
+        if (currentId == vibeSongId) return
+        val first = vibeSongId == null
+        vibeSongId = currentId
+        if (first) return
+        adaptive.noteSongStarted()
+        if (nudgeWave) {
+            nudgeWave = false
+            nudgeFuture(null)
+        }
+    }
+
+    /**
+     * Applies a tune, a pick or a steer to the queue *gently*: after [NUDGE_DEBOUNCE_MS] with no
+     * further change, only upcoming mix songs that now clash are swapped (at most a quarter of
+     * them, at least one), the rest are re-ordered around what changed, and the next song never
+     * moves. Songs you queued and friend songs already in place are never touched. Returns false
+     * when no mix is running.
+     */
+    fun nudgeFuture(reason: String?): Boolean {
+        if (_flavor.value == null || playerProvider == null) return false
+        nudgeAt = android.os.SystemClock.elapsedRealtime()
+        if (reason != null) nudgeReason = reason
+        kick.trySend(Unit)
+        return true
+    }
+
+    private suspend fun applyNudge() {
+        val requested = nudgeAt ?: return
+        val now = android.os.SystemClock.elapsedRealtime()
+        // Not yet: the loop comes back within a second.
+        if (now - requested < NUDGE_DEBOUNCE_MS) return
+        // A full re-plan is already on its way (a skip pivot, a mode switch): it covers this too.
+        if (pendingSwap != null) { nudgeAt = null; return }
+        nudgeAt = null
+        val reason = nudgeReason
+        nudgeReason = null
+        val flavor = _flavor.value ?: return
+        val player = playerProvider?.invoke() ?: return
+        val start = player.currentMediaItemIndex + 2
+        val items = (start until player.mediaItemCount).map(player::getMediaItemAt)
+            .filter { MixQueueMetadata.automatic(it) && com.theveloper.pixelplay.data.social.FriendQueueAttribution.forSong(it.mediaId) == null }
+        val requestGeneration = generation
+        val ids = items.map { it.mediaId }.distinct()
+        val songs = songsFor(ids)
+        val scored = ids.mapNotNull(songs::get)
+        val scores = if (scored.isEmpty()) emptyMap()
+            else withContext(Dispatchers.Default) { adaptive.vibeFitNow(scored, contextSeeds) }
+        if (generation != requestGeneration || playerProvider?.invoke() !== player || _flavor.value != flavor) return
+        // Excluded since they were queued (disliked, "no <artist>") always go; otherwise only the
+        // songs that now clash, at most a quarter at once (see MixNudgePolicy).
+        val choice = MixNudgePolicy.select(scored.map { it.id }, scores, HashMap(lastFit))
+        val drop = choice.drop
+        nudgeWave = choice.moreWaiting
+        scores.forEach { (id, fit) -> lastFit[id] = fit }
+        if (drop.isNotEmpty()) {
+            // Swapped-out songs stay "seen", so the refill doesn't plan them straight back in.
+            for (index in player.mediaItemCount - 1 downTo start.coerceAtLeast(0)) {
+                if (index >= player.mediaItemCount) continue
+                val item = player.getMediaItemAt(index)
+                if (MixQueueMetadata.automatic(item) && item.mediaId in drop) player.removeMediaItem(index)
+            }
+            generation++
+            topUp = true
+            _working.value = true
+        }
+        // The songs that stay are re-ordered around the change once the new ones are in.
+        rerankPending = true
+        val swapped = drop.size
+        _status.value = adaptive.statusTitle(flavor) + listOfNotNull(
+            reason?.let { " · $it" },
+            when {
+                swapped == 1 -> " · 1 song swapped"
+                swapped > 1 -> " · $swapped songs swapped"
+                else -> null
+            }
+        ).joinToString("")
+        kick.trySend(Unit)
     }
 
     /**
@@ -495,9 +622,9 @@ class ContinuousMixRuntime @Inject constructor(
 
     private companion object {
         const val TRANSITION_GUARD_MS = 15_000L
+        /** A gentle swap waits this long after the last change (slider drags, quick picks). */
+        const val NUDGE_DEBOUNCE_MS = 1_500L
         const val PICK_REFRESH_COOLDOWN_MS = 30_000L
-        /** Upcoming mix songs kept when the user queues something, so the mix drifts toward it. */
-        const val PICK_KEEP_AUTOMATIC = 2
         /** [AdaptiveMix.offVibePenalty] at which an upcoming mix song is swapped out (≈ same artist). */
         const val OFF_VIBE_PRUNE = 3.0
         const val SKIP_REFRESH_COOLDOWN_MS = 8_000L
@@ -562,7 +689,7 @@ class ContinuousMixRuntime @Inject constructor(
         fun current() = generation == requestGeneration && adaptive.revision == feedbackRevision &&
             _flavor.value == flavor && playerProvider?.invoke() === player
         val mediaIds = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }
-        val queue = withContext(Dispatchers.IO) { music.getSongsByIds(mediaIds.distinct()).first() }.associateBy { it.id }
+        val queue = songsFor(mediaIds.distinct())
         val replacingIds = replacing.map { mediaIds[it] }.toSet()
         val keptIds = mediaIds.filterIndexed { position, _ -> position !in replacing }
         // Songs about to be replaced may be picked again by the new plan.
@@ -599,6 +726,7 @@ class ContinuousMixRuntime @Inject constructor(
         }
 
         var added = 0
+        val addedSongs = ArrayList<Song>()
         var aborted = false
         var full = false
         var swapApplied = false
@@ -643,6 +771,8 @@ class ContinuousMixRuntime @Inject constructor(
                         player.play()
                     }
                     seen.addAll(adaptive.recordingKeys(song))
+                    knownSongs[song.id] = song
+                    addedSongs += song
                     added++
                 }
                 resolving.forEach { it.cancel() }
@@ -661,6 +791,13 @@ class ContinuousMixRuntime @Inject constructor(
             }
         }
         if (aborted) return
+        // Remember how well the new songs fit now, so a later tune can tell which ones fell away.
+        if (addedSongs.isNotEmpty()) {
+            try {
+                withContext(Dispatchers.Default) { adaptive.vibeFitNow(addedSongs, contextSeeds) }.forEach { (id, fit) -> lastFit[id] = fit }
+            } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { }
+        }
+        while (knownSongs.size > 400) knownSongs.keys.firstOrNull()?.let(knownSongs::remove)
         while (seen.size > 1024) seen.remove(seen.first())
         enforceCap(player)
         if (pendingSwap === swap) pendingSwap = null

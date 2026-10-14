@@ -10,6 +10,10 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.offset
+import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -66,6 +70,11 @@ fun RowScope.CustomNavigationBarItem(
     selectedTextColor: Color = MaterialTheme.colorScheme.onSurface,
     unselectedTextColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
     indicatorColor: Color = MaterialTheme.colorScheme.secondaryContainer,
+    /** Small status dot on the icon's top-end corner (e.g. a friend is online). */
+    showDot: Boolean = false,
+    dotColor: Color = OnlineDotGreen,
+    /** Outline around the dot, matching the bar surface so it doesn't blend into the icon. */
+    dotOutlineColor: Color = NavigationBarDefaults.containerColor,
     interactionSource: MutableInteractionSource = remember { MutableInteractionSource() }
 ) {
     // Colores animados - Solo se recomponen cuando 'selected' cambia
@@ -179,6 +188,32 @@ fun RowScope.CustomNavigationBarItem(
                     }
                 }
             }
+
+            // Presence dot: sits on the icon's top-end corner, outside the clipped icon box.
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showDot,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .offset(x = 11.dp, y = (-10).dp),
+                enter = fadeIn(animationSpec = tween(150)) +
+                        scaleIn(
+                            initialScale = 0f,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                stiffness = Spring.StiffnessMediumLow
+                            )
+                        ),
+                exit = fadeOut(animationSpec = tween(120)) +
+                        scaleOut(targetScale = 0f, animationSpec = tween(150, easing = EaseInQuart))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(11.dp) // 8.dp dot + 1.5.dp outline on each side
+                        .border(1.5.dp, dotOutlineColor, CircleShape)
+                        .padding(1.5.dp)
+                        .background(dotColor, CircleShape)
+                )
+            }
         }
 
         // Etiqueta con animación
@@ -204,6 +239,9 @@ fun RowScope.CustomNavigationBarItem(
         }
     }
 }
+
+/** Vibrant "online" green used for presence dots. */
+val OnlineDotGreen = Color(0xFF4CAF50)
 
 // Easing curves para animaciones más suaves (Material 3 Expressive)
 private val EaseOutQuart = CubicBezierEasing(0.25f, 1f, 0.5f, 1f)

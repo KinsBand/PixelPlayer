@@ -19,7 +19,9 @@ import com.theveloper.pixelplay.ui.theme.MotionTokens
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
 /**
@@ -39,8 +41,14 @@ internal class MiniPlayerDismissGestureHandler(
     private var accumulatedDragX: Float = 0f
     private var hasTriggeredCommitHaptic: Boolean = false
     private var offsetJob: Job? = null
+    // Set once a swipe passed the dismiss threshold. The fly-out + dismiss must always finish:
+    // before, touching the mini player again during the 200 ms fly-out cancelled it, so the
+    // playlist was never dismissed, the bar stayed half off-screen and the nav bar stayed in
+    // its "dismissing" shape.
+    private var isCommitted: Boolean = false
 
     fun onDragStart() {
+        if (isCommitted) return
         accumulatedDragX = 0f
         hasTriggeredCommitHaptic = false
         offsetJob?.cancel()
@@ -50,6 +58,7 @@ internal class MiniPlayerDismissGestureHandler(
     }
 
     fun onHorizontalDrag(dragAmount: Float) {
+        if (isCommitted) return
         accumulatedDragX += dragAmount
         val xAbs = abs(accumulatedDragX)
         val commitThresholdPx = 100f * density.density
@@ -72,21 +81,29 @@ internal class MiniPlayerDismissGestureHandler(
     }
 
     fun onDragEnd() {
+        if (isCommitted) return
         offsetJob?.cancel()
         val dismissThreshold = screenWidthPx * 0.4f
         if (abs(accumulatedDragX) > dismissThreshold) {
+            isCommitted = true
             onDismissStarted()
             val targetDismissOffset = if (accumulatedDragX < 0) -screenWidthPx else screenWidthPx
             offsetJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
-                offsetAnimatable.animateTo(
-                    targetValue = targetDismissOffset,
-                    animationSpec = tween(
-                        durationMillis = 200,
-                        easing = MotionTokens.EmphasizedAccelerateEasing
+                try {
+                    offsetAnimatable.animateTo(
+                        targetValue = targetDismissOffset,
+                        animationSpec = tween(
+                            durationMillis = 200,
+                            easing = MotionTokens.EmphasizedAccelerateEasing
+                        )
                     )
-                )
-                onDismissPlaylistAndShowUndo()
-                offsetAnimatable.snapTo(0f)
+                } finally {
+                    withContext(NonCancellable) {
+                        onDismissPlaylistAndShowUndo()
+                        offsetAnimatable.snapTo(0f)
+                    }
+                    isCommitted = false
+                }
             }
         } else {
             offsetJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
@@ -98,6 +115,22 @@ internal class MiniPlayerDismissGestureHandler(
                     )
                 )
             }
+        }
+    }
+
+    /** Pointer cancelled (e.g. the system took the gesture): spring back, never stay offset. */
+    fun onDragCancel() {
+        if (isCommitted) return
+        offsetJob?.cancel()
+        accumulatedDragX = 0f
+        offsetJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            offsetAnimatable.animateTo(
+                targetValue = 0f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMedium
+                )
+            )
         }
     }
 }
@@ -139,7 +172,8 @@ internal fun Modifier.miniPlayerDismissHorizontalGesture(
                 change.consume()
                 handler.onHorizontalDrag(dragAmount)
             },
-            onDragEnd = { handler.onDragEnd() }
+            onDragEnd = { handler.onDragEnd() },
+            onDragCancel = { handler.onDragCancel() }
         )
     }
 }

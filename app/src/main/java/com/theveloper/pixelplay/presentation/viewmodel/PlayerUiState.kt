@@ -17,6 +17,8 @@ import kotlinx.collections.immutable.persistentListOf
 data class PlayerUiState(
     // val allSongs: ImmutableList<Song> = persistentListOf(), // REMOVED
     val currentPlaybackQueue: ImmutableList<Song> = persistentListOf(),
+    /** Where playlists queued as a whole start in [currentPlaybackQueue] (for the turnover cards). */
+    val queueGroupStarts: ImmutableList<QueueGroupStart> = persistentListOf(),
     val currentQueueSourceName: String = "All Songs",
     // val albums: ImmutableList<Album> = persistentListOf(), // REMOVED
     // val artists: ImmutableList<Artist> = persistentListOf(), // REMOVED
@@ -46,6 +48,8 @@ data class PlayerUiState(
     val isFolderFilterActive: Boolean = false,
     val isFoldersPlaylistView: Boolean = false,
     val preparingSongId: String? = null,
+    /** The song card that was just tapped: starting, or failed to start (see SongStartRequest). */
+    val songStart: SongStartRequest? = null,
     val isLoadingLibraryCategories: Boolean = true,
     val isAlbumsListView: Boolean = false,
     val currentFavoriteSortOption: SortOption = SortOption.LikedSongDateLiked,
@@ -64,4 +68,18 @@ data class PlayerUiState(
     val showQueueItemUndoBar: Boolean = false,
     val lastRemovedQueueSong: Song? = null,
     val lastRemovedQueueIndex: Int = -1
+)
+
+/**
+ * A playlist queued as one block (Queue / Soon / Next in its options): it starts at
+ * [queueIndex] in the playback queue and runs for [songCount] songs.
+ */
+@Immutable
+data class QueueGroupStart(
+    val queueIndex: Int,
+    val groupId: String,
+    val name: String,
+    val playlistId: String?,
+    val songCount: Int,
+    val coverUri: String?,
 )

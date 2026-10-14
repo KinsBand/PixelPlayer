@@ -164,9 +164,9 @@
     <string name="settings_language_turkish">Turc</string>
     <string name="settings_app_theme_title">ThÃ¨me de l\'application</string>
     <string name="settings_app_theme_subtitle">Passer du mode clair au mode sombre, ou suivre l\'apparence du systÃ¨me.</string>
-    <string name="settings_theme_light">ThÃ¨me clair</string>
-    <string name="settings_theme_dark">ThÃ¨me sombre</string>
-    <string name="settings_theme_follow_system">Suivre le systÃ¨me</string>
+    <string name="settings_theme_light">Clair</string>
+    <string name="settings_theme_dark">Sombre</string>
+    <string name="settings_theme_follow_system">Système</string>
     <string name="settings_smooth_corners_title">Utiliser des angles lisses</string>
     <string name="settings_smooth_corners_subtitle">Utilise des formes d\'angles complexes pour une meilleure esthÃ©tique, mais peut affecter les performances sur les appareils bas de gamme</string>
     <string name="settings_disable_blur_all_over_title">DÃ©sactiver les effets de flou</string>

@@ -11,6 +11,9 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
+import androidx.compose.material.icons.rounded.Piano
+import androidx.compose.ui.semantics.liveRegion
 import kotlin.math.PI
 import kotlin.math.sin
 import android.content.Intent
@@ -32,8 +35,22 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.customActions
+import com.theveloper.pixelplay.R
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.ui.semantics.Role
+import androidx.compose.material.icons.rounded.BlurOn
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.UnfoldMore
@@ -81,6 +98,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -249,29 +267,32 @@ fun TabPracticePanel(
                         .padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    // One line: icon · part · player · N muted … ›
                     InstrumentIcon(current, onBackgroundColor)
                     Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            current?.let { partLabel(it).second } ?: "Instruments",
-                            color = onBackgroundColor,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            buildString {
-                                append(current?.let { partLabel(it).first }.orEmpty().ifBlank { "Instruments" })
-                                if (mutedCount > 0) append(" · $mutedCount muted")
-                            },
-                            color = onBackgroundColor.copy(alpha = 0.6f),
-                            fontSize = 12.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Text("Instruments  ›", color = accentColor, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    val part = current?.let { partLabel(it).second } ?: "Instruments"
+                    val details = buildList {
+                        current?.let { partLabel(it).first }?.takeIf { it.isNotBlank() }?.let(::add)
+                        if (mutedCount > 0) add("$mutedCount muted")
+                    }.joinToString(" · ")
+                    Text(
+                        buildAnnotatedString {
+                            withStyle(SpanStyle(color = onBackgroundColor, fontWeight = FontWeight.SemiBold)) { append(part) }
+                            if (details.isNotEmpty()) {
+                                withStyle(SpanStyle(color = onBackgroundColor.copy(alpha = 0.6f))) { append("  ·  $details") }
+                            }
+                        },
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Icon(
+                        Icons.Rounded.ChevronRight,
+                        contentDescription = null,
+                        tint = onBackgroundColor.copy(alpha = 0.7f),
+                        modifier = Modifier.size(22.dp),
+                    )
                 }
             }
         }
@@ -323,7 +344,7 @@ fun TabPracticePanel(
                 }
                 PracticeSheet.SHARE -> ShareSheet(controller, onBackgroundColor) { sheet = null }
                 PracticeSheet.HELP -> NotationHelpSheet(controller, onBackgroundColor, accentColor, onAccentColor)
-                PracticeSheet.DRUMS -> DrumKitSheet(controller, onBackgroundColor, accentColor, onAccentColor)
+                PracticeSheet.DRUMS -> DrumKitSheet(controller, onBackgroundColor, accentColor, onAccentColor, containerColor)
             }
         }
     }
@@ -549,36 +570,121 @@ internal fun partLabel(t: SongsterrJson.MetaTrack): Pair<String, String> {
     return person to part.ifBlank { t.instrument.ifBlank { "Track ${t.index + 1}" } }
 }
 
-@Composable
-internal fun InstrumentIcon(t: SongsterrJson.MetaTrack?, tint: Color) {
-    when {
-        t == null -> Icon(Icons.Rounded.MusicNote, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
-        t.isVocal -> Icon(Icons.Rounded.Mic, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
-        t.isDrums -> Canvas(Modifier.size(24.dp)) {
-            val w = size.width
-            val h = size.height
-            val st = Stroke(width = w * 0.08f)
-            drawOval(tint, topLeft = Offset(w * 0.12f, h * 0.3f), size = androidx.compose.ui.geometry.Size(w * 0.76f, h * 0.24f), style = st)
-            drawLine(tint, Offset(w * 0.12f, h * 0.42f), Offset(w * 0.12f, h * 0.78f), w * 0.08f)
-            drawLine(tint, Offset(w * 0.88f, h * 0.42f), Offset(w * 0.88f, h * 0.78f), w * 0.08f)
-            drawArc(tint, 0f, 180f, false, topLeft = Offset(w * 0.12f, h * 0.62f), size = androidx.compose.ui.geometry.Size(w * 0.76f, h * 0.3f), style = st)
-            drawLine(tint, Offset(w * 0.3f, h * 0.05f), Offset(w * 0.5f, h * 0.36f), w * 0.07f)
-            drawLine(tint, Offset(w * 0.72f, h * 0.05f), Offset(w * 0.55f, h * 0.36f), w * 0.07f)
-        }
-        else -> Canvas(Modifier.size(24.dp)) {
-            // Guitar / bass: body, sound hole, neck.
-            val w = size.width
-            val h = size.height
-            val st = Stroke(width = w * 0.08f)
-            drawCircle(tint, radius = w * 0.2f, center = Offset(w * 0.34f, h * 0.7f), style = st)
-            drawCircle(tint, radius = w * 0.15f, center = Offset(w * 0.47f, h * 0.5f), style = st)
-            drawCircle(tint, radius = w * 0.05f, center = Offset(w * 0.38f, h * 0.64f))
-            drawLine(tint, Offset(w * 0.52f, h * 0.46f), Offset(w * 0.88f, h * 0.1f), w * (if (t.isBass) 0.11f else 0.08f))
-        }
+/** What a part is, for its icon and where it stands on stage. */
+internal enum class InstrumentKind { VOCALS, ACOUSTIC_GUITAR, ELECTRIC_GUITAR, BASS, DRUMS, KEYS, STRINGS, BRASS, WINDS, SYNTH, OTHER }
+
+/** Reads the flags first, then the General MIDI program and the instrument / part names. */
+internal fun instrumentKind(t: SongsterrJson.MetaTrack): InstrumentKind {
+    val text = "${t.instrument} ${t.name}".lowercase()
+    val id = t.instrumentId
+    fun has(vararg words: String) = words.any { it in text }
+    return when {
+        t.isVocal -> InstrumentKind.VOCALS
+        t.isDrums || has("drum", "percussion") -> InstrumentKind.DRUMS
+        t.isBass || id in 32..39 -> InstrumentKind.BASS
+        id in 24..25 || has("acoustic guitar", "nylon", "steel guitar", "(steel)", "classical guitar") -> InstrumentKind.ACOUSTIC_GUITAR
+        t.isGuitar || id in 26..31 || has("guitar") -> InstrumentKind.ELECTRIC_GUITAR
+        id in 0..23 || has("piano", "organ", "keys", "keyboard", "rhodes", "clav", "harpsichord") -> InstrumentKind.KEYS
+        id in 80..103 || has("synth", "pad") -> InstrumentKind.SYNTH
+        id in 40..55 || has("violin", "viola", "cello", "string", "orchestra") -> InstrumentKind.STRINGS
+        id in 56..63 || has("trumpet", "trombone", "tuba", "horn", "brass") -> InstrumentKind.BRASS
+        id in 64..79 || has("sax", "flute", "clarinet", "oboe", "whistle", "harmonica") -> InstrumentKind.WINDS
+        id in 112..119 -> InstrumentKind.DRUMS
+        else -> InstrumentKind.OTHER
     }
 }
 
-private enum class InstrumentsPage { PARTS, LISTINGS, HISTORY }
+/** Front of the stage, the middle, and the back line. */
+internal enum class StageSection(val title: String, val caption: String) {
+    FRONT("Front", "Lead vocals and lead instruments"),
+    MID("Mid", "Keys, rhythm and harmony"),
+    BACK("Back", "Drums and bass"),
+}
+
+/**
+ * Places each part on stage: drums and bass at the back; lead vocals and lead / solo parts at the
+ * front; keys, rhythm guitars, backing vocals and the rest in the middle. When no guitar says
+ * "lead" or "rhythm", the first guitar is taken as the lead. Empty sections are left out.
+ */
+internal fun stageSections(tracks: List<SongsterrJson.MetaTrack>): List<Pair<StageSection, List<SongsterrJson.MetaTrack>>> {
+    fun text(t: SongsterrJson.MetaTrack) = "${t.name} ${t.instrument}".lowercase()
+    fun isLeadText(s: String) = "lead" in s || "solo" in s || "main" in s
+    fun isBackingText(s: String) = "backing" in s || "harmony" in s || "choir" in s || "bgv" in s ||
+        "back vocal" in s || "background" in s || "rhythm" in s || "chords" in s
+    val kinds = tracks.associate { it.index to instrumentKind(it) }
+    val guitars = tracks.filter { kinds[it.index] == InstrumentKind.ACOUSTIC_GUITAR || kinds[it.index] == InstrumentKind.ELECTRIC_GUITAR }
+    val namedLeadGuitar = guitars.any { isLeadText(text(it)) }
+    val impliedLeadGuitar = if (namedLeadGuitar) null else guitars.firstOrNull { !isBackingText(text(it)) }?.index
+    val vocals = tracks.filter { kinds[it.index] == InstrumentKind.VOCALS }
+    val namedLeadVocal = vocals.any { isLeadText(text(it)) }
+    val impliedLeadVocal = if (namedLeadVocal) null else vocals.firstOrNull { !isBackingText(text(it)) }?.index
+
+    fun sectionOf(t: SongsterrJson.MetaTrack): StageSection {
+        val s = text(t)
+        return when (kinds[t.index]) {
+            InstrumentKind.DRUMS, InstrumentKind.BASS -> StageSection.BACK
+            InstrumentKind.VOCALS ->
+                if (isLeadText(s) || t.index == impliedLeadVocal) StageSection.FRONT else StageSection.MID
+            InstrumentKind.ACOUSTIC_GUITAR, InstrumentKind.ELECTRIC_GUITAR ->
+                if ((isLeadText(s) && !isBackingText(s)) || t.index == impliedLeadGuitar) StageSection.FRONT else StageSection.MID
+            else -> if (isLeadText(s) && !isBackingText(s)) StageSection.FRONT else StageSection.MID
+        }
+    }
+    val grouped = tracks.groupBy(::sectionOf)
+    return StageSection.entries.mapNotNull { section -> grouped[section]?.takeIf { it.isNotEmpty() }?.let { section to it } }
+}
+
+@Composable
+internal fun InstrumentIcon(t: SongsterrJson.MetaTrack?, tint: Color, size: androidx.compose.ui.unit.Dp = 24.dp) {
+    val vector = when (t?.let(::instrumentKind)) {
+        null -> Icons.Rounded.MusicNote
+        InstrumentKind.VOCALS -> Icons.Rounded.Mic
+        InstrumentKind.ACOUSTIC_GUITAR -> InstrumentGlyphs.AcousticGuitar
+        InstrumentKind.ELECTRIC_GUITAR -> InstrumentGlyphs.ElectricGuitar
+        InstrumentKind.BASS -> InstrumentGlyphs.ElectricBass
+        InstrumentKind.DRUMS -> InstrumentGlyphs.DrumKit
+        InstrumentKind.KEYS -> Icons.Rounded.Piano
+        InstrumentKind.SYNTH -> Icons.Rounded.GraphicEq
+        InstrumentKind.STRINGS, InstrumentKind.BRASS, InstrumentKind.WINDS, InstrumentKind.OTHER -> Icons.Rounded.MusicNote
+    }
+    Icon(vector, contentDescription = null, tint = tint, modifier = Modifier.size(size))
+}
+
+/** "Front · Lead vocals and lead instruments" above that part of the list. */
+@Composable
+private fun StageSectionHeader(section: StageSection, onBg: Color, accent: Color) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 6.dp, top = 6.dp, bottom = 2.dp)
+            .semantics(mergeDescendants = true) { heading() },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Three dots, filled from the front: where on stage this group stands.
+        Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+            StageSection.entries.forEach { s ->
+                Box(
+                    Modifier
+                        .size(if (s == section) 8.dp else 6.dp)
+                        .clip(CircleShape)
+                        .background(if (s == section) accent else onBg.copy(alpha = 0.18f)),
+                )
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(section.title, color = accent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            section.caption,
+            color = onBg.copy(alpha = 0.55f),
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+private enum class InstrumentsPage { PARTS, LISTINGS, HISTORY, EDIT }
 
 /**
  * The instruments sheet. Top row: back arrow · full-width button naming who made this tab
@@ -615,11 +721,15 @@ private fun InstrumentsSheet(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Edit: make a copy of the version on screen and edit it (closes by swipe / scrim;
+                // the lit pill or History goes back to the parts list).
                 SheetIconButton(
-                    icon = Icons.AutoMirrored.Rounded.ArrowBack,
-                    description = if (page == InstrumentsPage.PARTS) "Close" else "Back to parts",
-                    onBg = onBg, accent = accent, onAccent = onAccent, active = false,
-                ) { if (page == InstrumentsPage.PARTS) close() else page = InstrumentsPage.PARTS }
+                    icon = Icons.Rounded.Edit,
+                    description = "Edit this tab",
+                    onBg = onBg, accent = accent, onAccent = onAccent,
+                    active = page == InstrumentsPage.EDIT,
+                    enabled = controller.currentSongId != null,
+                ) { page = if (page == InstrumentsPage.EDIT) InstrumentsPage.PARTS else InstrumentsPage.EDIT }
 
                 val listingsOpen = page == InstrumentsPage.LISTINGS
                 val fg = if (listingsOpen) onAccent else onBg
@@ -638,18 +748,15 @@ private fun InstrumentsSheet(
                 ) {
                     Icon(Icons.Rounded.Person, contentDescription = null, tint = fg, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            controller.tabAuthor?.let { "Tab by $it" } ?: "Songsterr tab",
-                            color = fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            if (controller.source?.revisionId != null) "Older version · tap for other tabs" else "Tap for other tabs of this song",
-                            color = fg.copy(alpha = 0.65f), fontSize = 11.sp,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        )
-                    }
+                    Text(
+                        buildString {
+                            append(controller.tabAuthor?.let { "Tab by $it" } ?: "Songsterr tab")
+                            if (controller.source?.revisionId != null) append(" · older version")
+                        },
+                        color = fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
                     Icon(Icons.Rounded.UnfoldMore, contentDescription = null, tint = fg.copy(alpha = 0.8f), modifier = Modifier.size(20.dp))
                 }
 
@@ -669,6 +776,13 @@ private fun InstrumentsSheet(
                 InstrumentsPage.PARTS -> InstrumentPicker(controller, onBg, accent, Modifier.fillMaxWidth())
                 InstrumentsPage.LISTINGS -> ListingsPage(controller, onBg, accent) { page = InstrumentsPage.PARTS }
                 InstrumentsPage.HISTORY -> HistoryPage(controller, onBg, accent) { page = InstrumentsPage.PARTS }
+                InstrumentsPage.EDIT -> com.theveloper.pixelplay.presentation.components.tabs.edit.EditStartPage(
+                    controller = controller,
+                    onBg = onBg,
+                    accent = accent,
+                    onAccent = onAccent,
+                    onStart = { close() },
+                )
             }
         }
     }
@@ -724,10 +838,6 @@ private fun ListingsPage(controller: TabPracticeController, onBg: Color, accent:
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text("Other tabs of this song", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = onBg)
-        Text(
-            "If this tab looks wrong, another upload of the song may fit better.",
-            color = onBg.copy(alpha = 0.6f), fontSize = 12.sp,
-        )
         when {
             list == null || controller.alternativesLoading -> SheetMessage("Searching Songsterr…", onBg, loading = true)
             list.isEmpty() -> SheetMessage("No other tabs found for this song.", onBg)
@@ -760,10 +870,6 @@ private fun HistoryPage(controller: TabPracticeController, onBg: Color, accent: 
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text("Versions of this tab", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = onBg)
-        Text(
-            "Every edit saved on Songsterr, newest first. Older ones can have different parts.",
-            color = onBg.copy(alpha = 0.6f), fontSize = 12.sp,
-        )
         when {
             list == null || controller.revisionsLoading -> SheetMessage("Loading versions…", onBg, loading = true)
             list.isEmpty() -> SheetMessage("Couldn't load the versions of this tab.", onBg)
@@ -848,8 +954,11 @@ internal fun InstrumentPicker(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text("Choose an instrument", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = onBg)
-        meta.tracks.filter { !it.isEmpty }.forEach { t ->
+        Text("Instruments", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = onBg)
+        val stage = remember(meta) { stageSections(meta.tracks.filter { !it.isEmpty }) }
+        stage.forEach { (section, sectionTracks) ->
+        StageSectionHeader(section, onBg, accent)
+        sectionTracks.forEach { t ->
             val showing = ready != null && t.index == ready.tab.trackIndex
             val isMuted = t.index in controller.muted
             val (person, part) = partLabel(t)
@@ -864,11 +973,28 @@ internal fun InstrumentPicker(
                     .clip(RoundedCornerShape(20.dp))
                     .background(if (showing) accent.copy(alpha = 0.18f) else onBg.copy(alpha = 0.06f))
                     .clickable(enabled = !t.isVocal) { controller.selectTrack(t.index) }
-                    .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+                    .padding(start = 10.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                InstrumentIcon(t, if (isMuted || t.isVocal) onBg.copy(alpha = 0.45f) else onBg)
-                Spacer(Modifier.width(14.dp))
+                // Icon on a rounded tile so each part reads at a glance.
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(if (showing) accent.copy(alpha = 0.22f) else onBg.copy(alpha = 0.07f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    InstrumentIcon(
+                        t,
+                        when {
+                            isMuted || t.isVocal -> onBg.copy(alpha = 0.45f)
+                            showing -> accent
+                            else -> onBg
+                        },
+                        size = 28.dp,
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
                         person.ifBlank { part },
@@ -928,6 +1054,7 @@ internal fun InstrumentPicker(
                     }
                 }
             }
+        }
         }
         if (controller.muted.isNotEmpty()) {
             Box(
@@ -1069,10 +1196,16 @@ fun TabOptionsSection(
     contentColor: Color,
     accentColor: Color,
     itemBackgroundColor: Color,
-    /** "Lyrics + Tab" mode state; null hides the option. */
-    lyricsWithTab: Boolean? = null,
-    onLyricsWithTabChange: (Boolean) -> Unit = {},
+    /** Text colour on [accentColor] (the timing buttons). */
+    onAccentColor: Color = Color.White,
+    /** Tab appearance (Follow app / Light / Dark). Hidden when [onAppearanceChange] is null. */
+    appearance: TabAppearance = TabAppearance.FollowApp,
+    onAppearanceChange: ((TabAppearance) -> Unit)? = null,
+    /** Shows / hides the tab timing panel above the play row (the menu closes first). */
+    onToggleTimingPanel: () -> Unit = { controller.timingPanelVisible = !controller.timingPanelVisible },
 ) {
+    // Practice tools open from the Tabs button; Lyrics + Tab is toggled on the page itself
+    // (immersive shortcut), so neither lives in this menu any more.
     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
         Text(
             "Instruments",
@@ -1081,89 +1214,182 @@ fun TabOptionsSection(
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(start = 6.dp, bottom = 2.dp),
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            OptionPill(
-                if (controller.panelExpanded) "Hide practice tools" else "Practice tools",
-                contentColor, itemBackgroundColor, Modifier.weight(1f),
-            ) { controller.panelExpanded = !controller.panelExpanded }
-            if (controller.pdfUri != null) {
-                OptionPill("Back to tab", contentColor, itemBackgroundColor, Modifier.weight(1f)) { controller.pdfUri = null }
-            }
+        if (onAppearanceChange != null) {
+            TabAppearanceOption(appearance, onAppearanceChange, contentColor, accentColor, onAccentColor, itemBackgroundColor)
         }
-        if (lyricsWithTab != null) {
-            // Live lyrics above the tab, each taking half of the page.
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 48.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(itemBackgroundColor)
-                    .toggleable(
-                        value = lyricsWithTab,
-                        role = androidx.compose.ui.semantics.Role.Switch,
-                        onValueChange = onLyricsWithTabChange,
-                    )
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Lyrics + Tab", color = contentColor, style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        "Live lyrics above the tab, half the page each",
-                        color = contentColor.copy(alpha = 0.6f),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                Spacer(Modifier.width(12.dp))
-                Switch(
-                    checked = lyricsWithTab,
-                    onCheckedChange = null,
-                    colors = SwitchDefaults.colors(checkedTrackColor = accentColor),
-                )
-            }
+        if (controller.pdfUri != null) {
+            OptionPill("Back to tab", contentColor, itemBackgroundColor, Modifier.fillMaxWidth()) { controller.pdfUri = null }
         }
         InstrumentSoundsOption(controller, contentColor, accentColor, itemBackgroundColor)
-        // The modelled strings are the fallback when recorded sounds are off or not downloaded.
-        if (!controller.usesSampledSounds) Row(
-            Modifier
+        FocusFadeOption(controller, contentColor, accentColor, onAccentColor, itemBackgroundColor)
+        // Tab timing: like "Adjust sync" for lyrics. Opens a panel above the play row
+        // (swipe it down or pick "Hide tab timing" to close it).
+        val timingOpen = controller.timingPanelVisible
+        ListItem(
+            headlineContent = {
+                Text(stringResource(if (timingOpen) R.string.tab_timing_hide else R.string.tab_timing_adjust))
+            },
+            leadingContent = { Icon(Icons.Rounded.Tune, contentDescription = null) },
+            trailingContent = if (controller.syncOffsetMs != 0) {
+                { Text(formatTimingOffset(controller.syncOffsetMs), style = MaterialTheme.typography.labelLarge, color = accentColor) }
+            } else null,
+            modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
+                .clip(MaterialTheme.shapes.large)
                 .background(itemBackgroundColor)
-                .clickable { controller.toggleRealStrings() }
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Real guitar & bass strings", color = contentColor, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "SYNTH plays guitars and basses on modelled strings: bends, vibrato, slides, hammer-ons, harmonics, palm mutes",
-                    color = contentColor.copy(alpha = 0.6f),
-                    fontSize = 12.sp,
+                .clickable(onClick = onToggleTimingPanel),
+            colors = ListItemDefaults.colors(
+                containerColor = Color.Transparent,
+                headlineColor = contentColor,
+                leadingIconColor = contentColor,
+            ),
+        )
+    }
+}
+
+/**
+ * "Focus fade" switch row, built like the lyrics-options switches: the whole row toggles
+ * (Role.Switch), so the Switch itself takes no clicks.
+ */
+@Composable
+private fun FocusFadeOption(
+    controller: TabPracticeController,
+    contentColor: Color,
+    accentColor: Color,
+    onAccentColor: Color,
+    itemBackgroundColor: Color,
+) {
+    val on = controller.focusFade
+    ListItem(
+        headlineContent = { Text("Focus fade") },
+        supportingContent = { Text("Fade and blur bars by how far they are from the one playing") },
+        leadingContent = { Icon(Icons.Rounded.BlurOn, contentDescription = null) },
+        trailingContent = {
+            Switch(
+                checked = on,
+                onCheckedChange = null,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = onAccentColor,
+                    checkedTrackColor = accentColor,
+                    checkedIconColor = accentColor,
+                    uncheckedThumbColor = contentColor,
+                    uncheckedTrackColor = contentColor.copy(alpha = 0.3f),
+                ),
+                thumbContent = if (on) {
+                    { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(SwitchDefaults.IconSize)) }
+                } else null,
+            )
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.large)
+            .background(itemBackgroundColor)
+            .toggleable(value = on, role = Role.Switch, onValueChange = controller::updateFocusFade),
+        colors = ListItemDefaults.colors(
+            containerColor = Color.Transparent,
+            headlineColor = contentColor,
+            supportingColor = contentColor.copy(alpha = 0.7f),
+            leadingIconColor = contentColor,
+        ),
+    )
+}
+
+/** "+120 ms" / "−80 ms" / "In sync". */
+internal fun formatTimingOffset(ms: Int): String = when {
+    ms > 0 -> "+$ms ms"
+    ms < 0 -> "\u2212${-ms} ms"
+    else -> "In sync"
+}
+
+/**
+ * Tab timing panel shown above the play / slider / skip row on the Instruments page. Same
+ * five-button control as the lyrics sync. Drag it down (or use "Hide tab timing" in the
+ * options menu) to close it; the drag is consumed so the controls column doesn't hide too.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun TabTimingPanel(
+    controller: TabPracticeController,
+    backgroundColor: Color,
+    accentColor: Color,
+    onAccentColor: Color,
+    onBackgroundColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val hideThreshold = with(density) { 48.dp.toPx() }
+    val drag = remember { androidx.compose.animation.core.Animatable(0f) }
+    val settleSpec = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                translationY = drag.value
+                alpha = 1f - (drag.value / (size.height.coerceAtLeast(1f) * 1.5f)).coerceIn(0f, 0.6f)
+            }
+            .semantics { paneTitle = "Tab timing" }
+            .pointerInput(Unit) {
+                detectVerticalDragGestures(
+                    onDragEnd = {
+                        if (drag.value > hideThreshold) {
+                            controller.timingPanelVisible = false
+                            scope.launch { drag.snapTo(0f) }
+                        } else {
+                            scope.launch { drag.animateTo(0f, settleSpec) }
+                        }
+                    },
+                    onDragCancel = { scope.launch { drag.animateTo(0f, settleSpec) } },
+                    onVerticalDrag = { change, amount ->
+                        change.consume()
+                        scope.launch { drag.snapTo((drag.value + amount).coerceAtLeast(0f)) }
+                    },
                 )
             }
-            Spacer(Modifier.width(12.dp))
-            Switch(
-                checked = controller.realStrings,
-                onCheckedChange = { controller.toggleRealStrings() },
-                colors = SwitchDefaults.colors(checkedTrackColor = accentColor),
+            .padding(bottom = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        // Grab handle: drag down to hide.
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterHorizontally)
+                .size(width = 32.dp, height = 4.dp)
+                .background(onBackgroundColor.copy(alpha = 0.25f), CircleShape)
+                .semantics {
+                    contentDescription = "Tab timing handle"
+                    customActions = listOf(
+                        androidx.compose.ui.semantics.CustomAccessibilityAction("Hide tab timing") {
+                            controller.timingPanelVisible = false
+                            true
+                        }
+                    )
+                },
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Tab timing",
+                style = MaterialTheme.typography.titleSmall,
+                color = onBackgroundColor,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                formatTimingOffset(controller.syncOffsetMs),
+                style = MaterialTheme.typography.labelLarge,
+                color = accentColor,
+                modifier = Modifier.semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
             )
         }
-        Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(itemBackgroundColor).padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Tab timing", color = contentColor, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "Moves the cursor against the song: ${"%+.2f".format(controller.syncOffsetMs / 1000f)} s",
-                    color = contentColor.copy(alpha = 0.6f),
-                    fontSize = 12.sp,
-                )
-            }
-            TimingButton("−", contentColor) { controller.syncOffsetMs -= 100 }
-            Spacer(Modifier.width(8.dp))
-            TimingButton("+", contentColor) { controller.syncOffsetMs += 100 }
-        }
+        com.theveloper.pixelplay.presentation.components.LyricsSyncControls(
+            offsetMillis = controller.syncOffsetMs,
+            onOffsetChange = { controller.syncOffsetMs = it },
+            backgroundColor = backgroundColor,
+            accentColor = accentColor,
+            onAccentColor = onAccentColor,
+            onBackgroundColor = onBackgroundColor,
+        )
     }
 }
 
@@ -1258,7 +1484,12 @@ private fun TimingButton(label: String, contentColor: Color, onClick: () -> Unit
     ) { Text(label, color = contentColor, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
 }
 
-/** "Real instrument sounds": download the recorded instruments, then switch them on or off. */
+/**
+ * "Instrument sounds": one row. Before the download it offers the download (with progress and
+ * the reason if it failed); once downloaded it shows the sound styles (Real · 8-bit · Synth ·
+ * Strings) and a way to delete the 31 MB again. Until then SYNTH plays the modelled strings.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun InstrumentSoundsOption(
     controller: TabPracticeController,
@@ -1267,48 +1498,139 @@ private fun InstrumentSoundsOption(
     itemBackgroundColor: Color,
 ) {
     val context = LocalContext.current
-    val state by com.theveloper.pixelplay.data.soundfont.SoundFontStore.state.collectAsStateWithLifecycle()
+    val store = com.theveloper.pixelplay.data.soundfont.SoundFontStore
+    val state by store.state.collectAsStateWithLifecycle()
     androidx.compose.runtime.LaunchedEffect(state) {
         if (state == com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Ready &&
-            com.theveloper.pixelplay.data.soundfont.SoundFontStore.load(context) != null
+            store.load(context) != null
         ) controller.onSampledSoundsReady()
     }
     val ready = state == com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Ready
-    Row(
+    val reducedMotion = androidx.compose.ui.platform.LocalContext.current.let { ctx ->
+        android.provider.Settings.Global.getFloat(ctx.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+    }
+    val style = controller.soundStyle
+    val statusText = when (val st = state) {
+        com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Ready -> "Downloaded · ${style.label}"
+        is com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Downloading ->
+            "Downloading… ${(st.progress * 100).toInt()}%"
+        is com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Failed -> "${st.message}. Tap to try again"
+        com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Missing ->
+            "Tap to download real guitars, basses, drums and keys (${com.theveloper.pixelplay.data.soundfont.SoundFontStore.SIZE_BYTES / 1_000_000} MB, once)"
+    }
+    Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(itemBackgroundColor)
-            .clickable {
-                if (ready) controller.toggleSampledSounds()
-                else com.theveloper.pixelplay.data.soundfont.SoundFontStore.download(context)
-            }
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .clip(MaterialTheme.shapes.large)
+            .background(itemBackgroundColor),
     ) {
-        Column(Modifier.weight(1f)) {
-            Text("Real instrument sounds", color = contentColor, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            val sub = when (val st = state) {
-                com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Ready ->
-                    "SYNTH plays recorded guitars, basses, drums and keys, with bends, slides, harmonics and palm mutes"
-                is com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Downloading ->
-                    "Downloading… ${(st.progress * 100).toInt()}%"
-                is com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Failed -> "${st.message}. Tap to try again"
-                com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Missing ->
-                    "Tap to download recorded instruments (${com.theveloper.pixelplay.data.soundfont.SoundFontStore.SIZE_BYTES / 1_000_000} MB, once)"
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 56.dp)
+                .then(
+                    if (ready) Modifier
+                    else Modifier.clickable(
+                        enabled = state !is com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Downloading,
+                        onClickLabel = "Download instrument sounds",
+                    ) { store.download(context) }
+                )
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Instrument sounds", color = contentColor, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    statusText,
+                    color = contentColor.copy(alpha = 0.6f),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
+                )
             }
-            Text(sub, color = contentColor.copy(alpha = 0.6f), fontSize = 12.sp)
+            Spacer(Modifier.width(12.dp))
+            when (val st = state) {
+                com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Ready -> androidx.compose.material3.TextButton(
+                    onClick = {
+                        store.delete(context)
+                        controller.onSampledSoundsRemoved()
+                    },
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) {
+                    Text(
+                        "Delete",
+                        color = contentColor.copy(alpha = 0.8f),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+                is com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Downloading ->
+                    CircularProgressIndicator(
+                        progress = { st.progress },
+                        modifier = Modifier.size(24.dp),
+                        color = accentColor,
+                        strokeWidth = 3.dp,
+                    )
+                else -> Icon(
+                    androidx.compose.material.icons.Icons.Rounded.CloudDownload,
+                    contentDescription = null,
+                    tint = accentColor,
+                )
+            }
         }
-        Spacer(Modifier.width(12.dp))
-        when (state) {
-            com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Ready -> Switch(
-                checked = controller.sampledSounds,
-                onCheckedChange = { controller.toggleSampledSounds() },
-                colors = SwitchDefaults.colors(checkedTrackColor = accentColor),
-            )
-            is com.theveloper.pixelplay.data.soundfont.SoundFontStore.State.Downloading ->
-                CircularProgressIndicator(modifier = Modifier.size(24.dp), color = accentColor, strokeWidth = 3.dp)
-            else -> Icon(androidx.compose.material.icons.Icons.Rounded.CloudDownload, contentDescription = null, tint = accentColor)
+        // The styles appear once the sounds are on the phone.
+        androidx.compose.animation.AnimatedVisibility(
+            visible = ready,
+            enter = if (reducedMotion) androidx.compose.animation.EnterTransition.None else
+                androidx.compose.animation.expandVertically(
+                    androidx.compose.animation.core.tween(
+                        com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium2,
+                        easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate,
+                    )
+                ) + androidx.compose.animation.fadeIn(
+                    androidx.compose.animation.core.tween(
+                        com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium2,
+                        easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate,
+                    )
+                ),
+            exit = if (reducedMotion) androidx.compose.animation.ExitTransition.None else
+                androidx.compose.animation.shrinkVertically(
+                    androidx.compose.animation.core.tween(
+                        com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort4,
+                        easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate,
+                    )
+                ) + androidx.compose.animation.fadeOut(
+                    androidx.compose.animation.core.tween(
+                        com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort4,
+                        easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate,
+                    )
+                ),
+        ) {
+            val styles = com.theveloper.pixelplay.data.soundfont.SoundStyle.entries
+            androidx.compose.material3.SingleChoiceSegmentedButtonRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+            ) {
+                styles.forEachIndexed { index, option ->
+                    SegmentedButton(
+                        icon = {},
+                        selected = option == style,
+                        onClick = { controller.selectSoundStyle(option) },
+                        shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(index = index, count = styles.size),
+                        colors = androidx.compose.material3.SegmentedButtonDefaults.colors(
+                            activeContainerColor = accentColor.copy(alpha = 0.22f),
+                            activeContentColor = contentColor,
+                            activeBorderColor = accentColor,
+                            inactiveContainerColor = Color.Transparent,
+                            inactiveContentColor = contentColor.copy(alpha = 0.75f),
+                            inactiveBorderColor = contentColor.copy(alpha = 0.25f),
+                        ),
+                        modifier = Modifier.heightIn(min = 48.dp),
+                        label = {
+                            Text(option.label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                        },
+                    )
+                }
+            }
         }
     }
 }

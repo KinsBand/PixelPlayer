@@ -23,6 +23,7 @@ import com.theveloper.pixelplay.presentation.components.subcomps.PlayingEqIcon
 import com.theveloper.pixelplay.ui.theme.MotionTokens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -538,7 +539,8 @@ private fun PracticeRow(
                 if (isCurrent) MaterialTheme.colorScheme.secondaryContainer
                 else MaterialTheme.colorScheme.surfaceContainerLow
             )
-            .clickable(enabled = song != null, onClick = onPlay)
+            // No ⋮ button: hold the row for its menu.
+            .combinedClickable(onClick = { if (song != null) onPlay() }, onLongClick = { menuOpen = true }, onLongClickLabel = "Song options")
             .padding(start = 8.dp, top = 8.dp, bottom = 8.dp, end = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -559,7 +561,10 @@ private fun PracticeRow(
                 ) {
                     PlayingEqIcon(
                         Modifier.size(width = 18.dp, height = 16.dp),
-                        color = Color.White,
+                        color = com.theveloper.pixelplay.presentation.components.subcomps.playingIndicatorColor(
+                            com.theveloper.pixelplay.presentation.components.subcomps.PlayingSource.MINE,
+                            onCover = true
+                        ),
                         isPlaying = isPlaying,
                         phaseDurationMillis = 2400
                     )
@@ -618,9 +623,6 @@ private fun PracticeRow(
             }
         }
         Box {
-            IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(40.dp)) {
-                Icon(Icons.Rounded.MoreVert, contentDescription = "More", modifier = Modifier.size(20.dp))
-            }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 if (song != null) {
                     DropdownMenuItem(

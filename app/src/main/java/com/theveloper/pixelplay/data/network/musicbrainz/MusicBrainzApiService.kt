@@ -66,5 +66,21 @@ interface MusicBrainzApiService {
         @Query("inc") inc: String = "artist-rels",
         @Query("fmt") format: String = "json"
     ): MbWork
+
+    /** Artist search (Lucene query, e.g. `artist:"Name"`), for the artist page's links and members. */
+    @GET("ws/2/artist/")
+    suspend fun searchArtists(
+        @Query("query") query: String,
+        @Query("fmt") format: String = "json",
+        @Query("limit") limit: Int = 5
+    ): MbArtistSearchResponse
+
+    /** One artist with its web links (url-rels) and band members (artist-rels). */
+    @GET("ws/2/artist/{mbid}")
+    suspend fun lookupArtist(
+        @Path("mbid") mbid: String,
+        @Query("inc") inc: String = "url-rels+artist-rels",
+        @Query("fmt") format: String = "json"
+    ): MbArtistDetails
 }
 

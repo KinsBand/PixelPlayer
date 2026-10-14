@@ -464,6 +464,8 @@ class SongRemovalStateHolder @Inject constructor(
         }.forEach { row ->
             (row.localFilePath ?: row.localSongId)?.takeIf { it.isNotBlank() }?.let { path ->
                 runCatching { java.io.File(path).takeIf { it.isFile }?.delete() }
+                // ...and the synced .lrc saved next to it.
+                com.theveloper.pixelplay.data.lyrics.training.LyricsSidecar.delete(java.io.File(path))
             }
             // The library indexer sees the download is gone and removes its library row.
             runCatching { cloudSongDao.updateDownloadStatus(row.id, false, null, null) }

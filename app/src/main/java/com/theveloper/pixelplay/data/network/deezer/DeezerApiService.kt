@@ -22,6 +22,13 @@ interface DeezerApiService {
         @Query("limit") limit: Int = 1
     ): DeezerSearchResponse
 
+    /** Album search (title + artist + cover), for the Daily Mix Album filter. */
+    @GET("search/album")
+    suspend fun searchAlbum(
+        @Query("q") query: String,
+        @Query("limit") limit: Int = 8
+    ): DeezerAlbumResponse
+
     @GET("artist/{id}/related")
     suspend fun getRelatedArtists(
         @Path("id") artistId: Long,

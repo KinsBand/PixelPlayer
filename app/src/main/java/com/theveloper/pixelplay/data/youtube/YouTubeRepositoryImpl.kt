@@ -54,6 +54,15 @@ class YouTubeRepositoryImpl @Inject constructor(
                 title.contains("official audio", true) || title.contains("official music", true))
         }.mapNotNull(apiService::mapToSong)
 
+    override suspend fun searchSuggestions(input: String): List<String> = try {
+        withTimeoutOrNull(2_500) { innerTube.searchSuggestions(input) }.orEmpty()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Timber.w(e, "Search suggestions failed")
+        emptyList()
+    }
+
     override suspend fun searchSongs(query: String): List<Song> {
         return searchItems(query, SearchFilterType.SONGS).filterIsInstance<SearchResultItem.SongItem>().map { it.song }
     }
@@ -61,6 +70,15 @@ class YouTubeRepositoryImpl @Inject constructor(
     override suspend fun moreSongs(query: String, reset: Boolean): Pair<List<Song>, Boolean> {
         if (reset) apiService.resetMoreSongs(query)
         return apiService.moreSongs(query).getOrThrow()
+    }
+
+    override suspend fun moreCollections(
+        query: String,
+        filter: com.theveloper.pixelplay.data.model.SearchFilterType,
+        reset: Boolean,
+    ): Pair<List<com.theveloper.pixelplay.data.model.SearchResultItem>, Boolean> {
+        if (reset) apiService.resetMoreCollections(query, filter)
+        return apiService.moreCollections(query, filter).getOrThrow()
     }
 
     override suspend fun resolveStreamUrl(videoId: String): String? {

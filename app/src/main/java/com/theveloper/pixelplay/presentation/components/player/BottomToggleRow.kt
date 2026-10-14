@@ -1,5 +1,7 @@
 package com.theveloper.pixelplay.presentation.components.player
 
+import com.theveloper.pixelplay.presentation.components.subcomps.rememberShuffleSpin
+import com.theveloper.pixelplay.presentation.components.subcomps.shuffleSpin
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -83,6 +85,7 @@ fun BottomToggleRow(
         ) {
             val commonModifier = Modifier.weight(1f)
 
+            val mixSpin = rememberShuffleSpin()
             ToggleSegmentButton(
                 modifier = commonModifier,
                 active = isMixActive,
@@ -91,15 +94,16 @@ fun BottomToggleRow(
                 activeContentColor = if (isSmart) onActiveColorTertiary else onActiveColorMain,
                 inactiveColor = inactiveColor,
                 inactiveContentColor = inactiveContentColor,
-                onClick = onMixCycle,
-                onLongClick = onSmartMixActivate,
+                onClick = { mixSpin.play(); onMixCycle() },
+                onLongClick = onSmartMixActivate?.let { activate -> { mixSpin.play(); activate() } },
                 painter = if (isSmart) rememberVectorPainter(Icons.Rounded.AutoAwesome) else painterResource(R.drawable.rounded_shuffle_24),
                 contentDesc = when {
                     isSmart -> "Smart Mix"
                     activeMixFlavor == com.theveloper.pixelplay.data.MixFlavor.NORMAL -> "Normal Mix"
                     isShuffleEnabled -> "Shuffle"
                     else -> "No Mix"
-                }
+                },
+                iconModifier = Modifier.shuffleSpin(mixSpin)
             )
             val repeatActive = repeatMode != Player.REPEAT_MODE_OFF
             val repeatIcon = when (repeatMode) {

@@ -95,6 +95,12 @@ class OverlayCutoutService : Service() {
     @Inject
     lateinit var playerEngine: DualPlayerEngine
 
+    @Inject
+    lateinit var voiceSearchStateHolder: com.theveloper.pixelplay.presentation.viewmodel.VoiceSearchStateHolder
+
+    /** Queue index of the song on the island, to tell a skip forward from a skip back. */
+    private var lastMediaItemIndex: Int = -1
+
     private val audioReactor by lazy { IslandAudioReactor(applicationContext) }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -423,6 +429,26 @@ class OverlayCutoutService : Service() {
                 }
             }
         }
+        serviceScope.launch {
+            userPreferencesRepository.cutoutTapEnabledFlow.collect { tap ->
+                uiState.update { it.copy(tapToOpen = tap) }
+            }
+        }
+        // The island's heart follows Liked songs for whatever is playing.
+        serviceScope.launch {
+            combine(
+                musicRepository.getFavoriteSongIdsFlow(),
+                uiState.map { it.song?.id }.distinctUntilChanged()
+            ) { ids, songId -> songId != null && songId in ids }
+                .distinctUntilChanged()
+                .collect { liked -> uiState.update { it.copy(isFavorite = liked) } }
+        }
+        // Song recognition started from the island's Listen button (or anywhere in the app).
+        serviceScope.launch {
+            voiceSearchStateHolder.isListening.collect { listening ->
+                uiState.update { it.copy(isListening = listening) }
+            }
+        }
         // Per-song lyrics sync offset, so the island's lines change at exactly the same moment
         // as the lyrics sheet and the album cover (which both add this offset).
         serviceScope.launch {
@@ -448,7 +474,18 @@ class OverlayCutoutService : Service() {
 
         val song = mediaMapper.resolveSongFromMediaItem(mediaItem)
         publishPosition()
+        val newIndex = mediaController?.currentMediaItemIndex ?: -1
+        val previousIndex = lastMediaItemIndex
+        lastMediaItemIndex = newIndex
         uiState.update {
+            // A real track change (not the first load, not the same song restarting) peeks
+            // the title row on a closed island and slides the header text the skip's way.
+            val songChanged = it.song != null && song != null && it.song.id != song.id
+            val direction = when {
+                !songChanged -> it.skipDirection
+                previousIndex >= 0 && newIndex >= 0 && newIndex < previousIndex -> SkipDirection.BACKWARD
+                else -> SkipDirection.FORWARD
+            }
             // Drop the previous song's lyrics straight away so its lines never roll under the
             // new title. The colour scheme is kept until the new one is ready, so the island
             // animates from the old palette to the new one instead of flashing a default.
@@ -456,7 +493,9 @@ class OverlayCutoutService : Service() {
                 song = song,
                 lyrics = if (it.song?.id == song?.id) it.lyrics else null,
                 activeLineIndex = -1,
-                isVisible = true
+                isVisible = true,
+                skipDirection = direction,
+                peekToken = if (songChanged) it.peekToken + 1 else it.peekToken
             )
         }
 
@@ -644,6 +683,20 @@ class OverlayCutoutService : Service() {
                             },
                             onSkipPrevious = {
                                 mediaController?.seekToPrevious()
+                            },
+                            onListen = {
+                                voiceSearchStateHolder.triggerNowPlayingListen()
+                            },
+                            onToggleFavorite = {
+                                // Same path as the notification's heart (MusicService flips it).
+                                uiState.update { it.copy(isFavorite = !it.isFavorite) }
+                                mediaController?.sendCustomCommand(
+                                    androidx.media3.session.SessionCommand(
+                                        com.theveloper.pixelplay.data.service.MusicNotificationProvider.CUSTOM_COMMAND_LIKE,
+                                        android.os.Bundle.EMPTY
+                                    ),
+                                    android.os.Bundle.EMPTY
+                                )
                             }
                         )
                       }

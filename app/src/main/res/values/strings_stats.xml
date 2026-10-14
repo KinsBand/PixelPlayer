@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Stats screen redesign (2026-10-12): comparison, recap, insights -->
+    <string name="stats_x_insights_title">Insights</string>
+    <string name="stats_x_range_custom">Custom</string>
+    <string name="stats_x_custom_apply">Apply</string>
+    <string name="stats_x_custom_cancel">Cancel</string>
+    <string name="stats_x_cd_share">Share stats</string>
+
+    <string name="stats_x_vs_yesterday">vs. yesterday at this time</string>
+    <string name="stats_x_vs_last_week">vs. the same days last week</string>
+    <string name="stats_x_vs_last_month">vs. the same days last month</string>
+    <string name="stats_x_vs_last_year">vs. the same days last year</string>
+    <string name="stats_x_vs_previous_days">vs. the %1$d days before</string>
+    <string name="stats_x_delta_up_percent">▲ %1$d%%</string>
+    <string name="stats_x_delta_down_percent">▼ %1$d%%</string>
+    <string name="stats_x_delta_up_count">▲ %1$d</string>
+    <string name="stats_x_delta_down_count">▼ %1$d</string>
+    <string name="stats_x_delta_same">–</string>
+    <string name="stats_x_delta_listening">Listening %1$s</string>
+    <string name="stats_x_delta_plays">Plays %1$s</string>
+    <string name="stats_x_tile_songs">Songs</string>
+    <string name="stats_x_tile_artists">Artists</string>
+    <string name="stats_x_tile_streak">Day streak</string>
+    <string name="stats_x_tile_streak_best">Best in range: %1$d</string>
+    <string name="stats_x_previous_outline">Outline: the same period before</string>
+
+    <string name="stats_x_rank_new">NEW</string>
+    <string name="stats_x_cd_rank_up">Up %1$d places</string>
+    <string name="stats_x_cd_rank_down">Down %1$d places</string>
+    <string name="stats_x_cd_rank_new">New this period</string>
+    <string name="stats_x_cd_rank_same">Same place as before</string>
+
+    <string name="stats_x_recap_title">%1$s · your recap</string>
+    <string name="stats_x_recap_subtitle">Story cards: top artist, songs, clock and more</string>
+    <string name="stats_x_cd_play_recap">Play recap</string>
+    <string name="stats_x_cd_close_recap">Close recap</string>
+
+    <string name="stats_x_clock_title">Listening clock</string>
+    <string name="stats_x_clock_all">All days</string>
+    <string name="stats_x_clock_weekdays">Weekdays</string>
+    <string name="stats_x_clock_weekend">Weekend</string>
+    <string name="stats_x_clock_peak">peak hour</string>
+    <string name="stats_x_clock_caption">You listen most around %1$s. %2$d%% of it is between 6 PM and 6 AM.</string>
+    <string name="stats_x_cd_clock">Listening by hour of day. Peak at %1$s</string>
+
+    <string name="stats_x_calendar_title">Listening calendar</string>
+    <string name="stats_x_calendar_active">%1$d of %2$d days with music</string>
+    <string name="stats_x_days_value">%1$d days</string>
+    <string name="stats_x_streak_current">current streak</string>
+    <string name="stats_x_streak_longest">longest streak</string>
+
+    <string name="stats_x_new_title">New to you</string>
+    <string name="stats_x_new_songs">new songs</string>
+    <string name="stats_x_new_artists">new artists</string>
+    <string name="stats_x_new_share">of your time</string>
+    <string name="stats_x_percent">%1$d%%</string>
+    <string name="stats_x_first_played">First played %1$s · %2$d plays</string>
+    <string name="stats_x_play_new_finds">Play your new finds</string>
+    <string name="stats_x_queue_new_finds">New finds</string>
+
+    <string name="stats_x_on_repeat">ON REPEAT</string>
+    <string name="stats_x_on_repeat_plays">%1$d plays in the last 3 days</string>
+    <string name="stats_x_cd_play_song">Play %1$s</string>
+
+    <string name="stats_x_monthly_title">Your #1 artist each month</string>
+
+    <string name="stats_x_type_label">YOUR LISTENER TYPE</string>
+    <string name="stats_x_type_format">%1$s %2$s</string>
+    <string name="stats_x_type_night_owl">Night-owl</string>
+    <string name="stats_x_type_early_bird">Early-bird</string>
+    <string name="stats_x_type_daytime">Daytime</string>
+    <string name="stats_x_type_loyalist">loyalist</string>
+    <string name="stats_x_type_explorer">explorer</string>
+    <string name="stats_x_type_repeater">repeater</string>
+    <string name="stats_x_type_mixer">mix-master</string>
+    <string name="stats_x_type_loyalist_desc">You go deep on a few artists you love.</string>
+    <string name="stats_x_type_explorer_desc">You keep finding new artists and songs.</string>
+    <string name="stats_x_type_repeater_desc">When a song clicks, you play it again and again.</string>
+    <string name="stats_x_type_mixer_desc">A bit of everything, nicely balanced.</string>
+    <string name="stats_x_trait_explorer">Explorer</string>
+    <string name="stats_x_trait_loyalist">Loyalist</string>
+    <string name="stats_x_trait_early">Early bird</string>
+    <string name="stats_x_trait_night">Night owl</string>
+    <string name="stats_x_trait_few">Few artists</string>
+    <string name="stats_x_trait_many">Many artists</string>
+    <string name="stats_x_trait_new">Always new</string>
+    <string name="stats_x_trait_repeat">On repeat</string>
+    <string name="stats_x_cd_trait">%1$s to %2$s: %3$d percent</string>
+
+    <string name="stats_x_milestones_title">Milestones</string>
+    <string name="stats_x_milestone_hours">%1$d hours of music</string>
+    <string name="stats_x_milestone_artist_plays">%1$s plays of %2$s</string>
+    <string name="stats_x_milestone_days">%1$d days with music in %2$d</string>
+    <string name="stats_x_milestone_progress">%1$s of %2$s</string>
+
+    <!-- Share sheet and cards -->
+    <string name="stats_share_title">Share your stats</string>
+    <string name="stats_share_chooser_title">Share your stats</string>
+    <string name="stats_share_tpl_top_artist">Top artist</string>
+    <string name="stats_share_tpl_top_songs">Top songs</string>
+    <string name="stats_share_tpl_minutes">Minutes</string>
+    <string name="stats_share_tpl_receipt">Receipt</string>
+    <string name="stats_share_tpl_clock">Clock</string>
+    <string name="stats_share_tpl_albums">Albums</string>
+    <string name="stats_share_tpl_spotlight">Spotlight</string>
+    <string name="stats_share_tpl_summary">Summary</string>
+    <string name="stats_share_color_album">Album art</string>
+    <string name="stats_share_color_dynamic">Dynamic</string>
+    <string name="stats_share_color_mono">Mono</string>
+    <string name="stats_share_color_light">Light</string>
+    <string name="stats_share_format_story">Story 9:16</string>
+    <string name="stats_share_format_square">Square</string>
+    <string name="stats_share_play_counts">Play counts</string>
+    <string name="stats_share_action_share">Share</string>
+    <string name="stats_share_action_save">Save image</string>
+    <string name="stats_share_action_copy">Copy image</string>
+    <string name="stats_share_saved">Saved to Pictures/PixelPlayer</string>
+    <string name="stats_share_copied">Copied</string>
+    <string name="stats_share_failed">Couldn\'t make the image</string>
+    <string name="stats_share_this_card">Share this card</string>
+    <string name="stats_share_period_week">Week of %1$s</string>
+    <string name="stats_share_period_custom">%1$s – %2$s</string>
+    <string name="stats_share_kicker_top_artist">My #1 artist</string>
+    <string name="stats_share_kicker_top_songs">My top songs</string>
+    <string name="stats_share_kicker_clock">My listening clock</string>
+    <string name="stats_share_kicker_albums">My top %1$d albums</string>
+    <string name="stats_share_kicker_spotlight">Artist spotlight</string>
+    <string name="stats_share_n_plays">%1$s plays</string>
+    <string name="stats_share_n_songs">%1$d songs</string>
+    <string name="stats_share_times">%1$d×</string>
+    <string name="stats_share_percent_of_listening">%1$d%% of my listening</string>
+    <string name="stats_share_minutes_of_music">minutes of music</string>
+    <string name="stats_share_per_day">%1$s a day</string>
+    <string name="stats_share_after_dark">6 PM – 6 AM</string>
+    <string name="stats_share_busiest_day">busiest day</string>
+    <string name="stats_share_most_played">My most played</string>
+    <string name="stats_share_in_music">In music</string>
+    <string name="stats_share_top_artists">Top artists</string>
+    <string name="stats_share_top_songs">Top songs</string>
+    <string name="stats_share_minutes">Minutes</string>
+    <string name="stats_share_top_genre">Top genre</string>
+    <string name="stats_share_receipt_header">Listening receipt · %1$s</string>
+    <string name="stats_share_receipt_qty">QTY</string>
+    <string name="stats_share_receipt_item">ITEM</string>
+    <string name="stats_share_receipt_time">TIME</string>
+    <string name="stats_share_receipt_songs">Item count</string>
+    <string name="stats_share_receipt_artists">Artists</string>
+    <string name="stats_share_receipt_total">Total</string>
+    <string name="stats_share_receipt_thanks">Thank you for listening</string>
+</resources>

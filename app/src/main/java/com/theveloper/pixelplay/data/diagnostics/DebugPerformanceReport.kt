@@ -9,7 +9,7 @@ import java.util.Locale
  * Structured, shareable diagnostic snapshot for the high-res audio performance
  * investigation. Designed so a user can export one report and let us classify
  * whether lag comes from scanning, metadata, artwork, playback prepare,
- * transitions, offload, widgets, MediaSession, Android Auto, or UI work.
+ * transitions, offload, MediaSession, Android Auto, or UI work.
  *
  * The model is deliberately a pure data structure (no Android imports) so it can
  * be unit tested on the JVM. [DebugPerformanceReportCollector] populates it.
@@ -107,7 +107,6 @@ data class DebugPerformanceReport(
         kv("ReplayGain", if (playback.replayGainEnabled) "on (${if (playback.replayGainAlbumMode) "album" else "track"})" else "off")
 
         section("CONTROLLERS")
-        kv("Widget active", controllers.widgetActive.toString())
         kv("Android Auto active", controllers.androidAutoActive.toString())
         if (controllers.connectedControllers.isNotEmpty()) {
             appendLine("  Connected controllers:")
@@ -298,7 +297,6 @@ data class PlaybackSection(
 
 @Serializable
 data class ControllerSection(
-    val widgetActive: Boolean,
     val androidAutoActive: Boolean,
     val connectedControllers: List<ConnectedController>
 )

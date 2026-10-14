@@ -1,6 +1,14 @@
 package com.theveloper.pixelplay.presentation.screens.library
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DownloadForOffline
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -23,13 +32,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.presentation.components.SkeletonBlock
 
 /** Small ring that shows how much of an album you have (owned / total). */
 @Composable
@@ -112,6 +124,65 @@ fun MissingTracksHeader(count: Int, modifier: Modifier = Modifier) {
         color = MaterialTheme.colorScheme.primary,
         modifier = modifier.padding(start = 8.dp, top = 16.dp, bottom = 4.dp)
     )
+}
+
+/**
+ * Shown while the official tracklist is looked up (first load or Retry): a gently pulsing
+ * "Finding the music…" label over shimmering rows shaped like [MissingTrackRow].
+ */
+@Composable
+fun FindingMissingTracksPlaceholder(rows: Int = 3, modifier: Modifier = Modifier) {
+    val pulse = rememberInfiniteTransition(label = "finding_music")
+    val alpha by pulse.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "finding_music_alpha"
+    )
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.padding(start = 8.dp, top = 16.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.GraphicEq,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp).graphicsLayer { this.alpha = alpha }
+            )
+            Text(
+                text = "Finding the music…",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.graphicsLayer { this.alpha = alpha }
+            )
+        }
+        repeat(rows) { index ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                SkeletonBlock(Modifier.size(width = 18.dp, height = 12.dp), RoundedCornerShape(6.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SkeletonBlock(
+                        Modifier.fillMaxWidth(if (index % 2 == 0) 0.62f else 0.48f).height(14.dp),
+                        RoundedCornerShape(7.dp)
+                    )
+                    SkeletonBlock(Modifier.width(36.dp).height(10.dp), RoundedCornerShape(5.dp))
+                }
+                SkeletonBlock(Modifier.size(24.dp), CircleShape)
+                SkeletonBlock(Modifier.size(24.dp), CircleShape)
+            }
+        }
+    }
 }
 
 /** A track of the official release you don't have: dimmed, with Like and Download. */

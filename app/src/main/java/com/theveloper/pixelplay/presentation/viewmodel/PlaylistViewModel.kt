@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
@@ -49,6 +50,18 @@ import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
+
+/** How an imported .m3u lands. */
+enum class M3uImportMode { NEW, MERGE, REPLACE }
+
+/** A parsed .m3u waiting for the user to pick where it goes. */
+data class M3uImportPreview(
+    val result: com.theveloper.pixelplay.data.playlist.M3uImportResult,
+    /** The user's own playlists it can be merged into / replace (most recently changed first). */
+    val targets: List<Playlist>,
+    /** A playlist with the same name as the file, if there is one. */
+    val suggestedTargetId: String?
+)
 
 data class PlaylistUiState(
     val playlists: List<Playlist> = emptyList(),
@@ -87,6 +100,19 @@ data class PlaylistDownloadState(
     val allLocal: Boolean get() = downloadable == 0
 }
 
+/** The open playlist's downloads by quality (for the playlist download menu). */
+data class PlaylistQualityBreakdown(
+    val counts: Map<com.theveloper.pixelplay.data.youtube.DownloadQuality, Int>,
+    /** Downloaded, but the quality can't be told from the file. */
+    val unknownIds: Set<String>,
+    val qualityBySongId: Map<String, com.theveloper.pixelplay.data.youtube.DownloadQuality>,
+    /** Online songs not on the device yet. */
+    val missing: Int,
+) {
+    val unknown: Int get() = unknownIds.size
+    val downloaded: Int get() = counts.values.sum() + unknown
+}
+
 sealed class PlaylistSongsOrderMode {
     object Manual : PlaylistSongsOrderMode()
     data class Sorted(val option: SortOption) : PlaylistSongsOrderMode()
@@ -104,7 +130,13 @@ class PlaylistViewModel @Inject constructor(
     private val offlineStore: com.theveloper.pixelplay.data.youtube.OfflinePlaylistStore,
     private val cloudSongDao: com.theveloper.pixelplay.data.database.CloudSongDao,
     @ApplicationContext private val context: Context,
-    private val metadataGatherer: com.theveloper.pixelplay.data.metadata.SongMetadataGatherer
+    private val metadataGatherer: com.theveloper.pixelplay.data.metadata.SongMetadataGatherer,
+    private val downloadQualityStore: com.theveloper.pixelplay.data.youtube.DownloadQualityStore,
+    private val playlistExportSyncStore: com.theveloper.pixelplay.data.preferences.PlaylistExportSyncStore,
+    private val spotifyAuthManager: com.theveloper.pixelplay.data.spotify.SpotifyAuthManager,
+    private val spotifyWebSession: com.theveloper.pixelplay.data.spotify.web.SpotifyWebSession,
+    private val youtubeAuthManager: com.theveloper.pixelplay.data.ytmusic.YouTubeMusicAuthManager,
+    private val appleMusicSession: com.theveloper.pixelplay.data.applemusic.AppleMusicWebSession
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PlaylistUiState())
@@ -115,6 +147,18 @@ class PlaylistViewModel @Inject constructor(
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST
     )
     val playlistCreationEvent: SharedFlow<Boolean> = _playlistCreationEvent.asSharedFlow()
+
+    val playlistSyncTargets = playlistExportSyncStore.syncTargets
+
+    val isSpotifyConnected: StateFlow<Boolean> = combine(spotifyAuthManager.isLoggedInFlow, spotifyWebSession.isLoggedInFlow) { api, web ->
+        api || web
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val isYouTubeMusicConnected: StateFlow<Boolean> = youtubeAuthManager.isLoggedInFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val isAppleMusicConnected: StateFlow<Boolean> = appleMusicSession.isLoggedInFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     companion object {
         const val FOLDER_PLAYLIST_PREFIX = "folder_playlist:"
@@ -130,6 +174,13 @@ class PlaylistViewModel @Inject constructor(
 
         fun isSystemPlaylistId(playlistId: String?): Boolean =
             playlistId?.startsWith(SYSTEM_PLAYLIST_PREFIX) == true
+
+        /** How long a playlist page waits for a friend's playlist that is still being saved. */
+        const val PENDING_REMOTE_SAVE_WAIT_MS = 30_000L
+
+        /** "SPOTIFY:…" / "YOUTUBE_MUSIC:…" / "APPLE_MUSIC:…": a service playlist that may still be saving. */
+        fun isPendingRemotePlaylistId(playlistId: String): Boolean =
+            listOf("SPOTIFY:", "YOUTUBE_MUSIC:", "APPLE_MUSIC:").any { playlistId.startsWith(it) }
         private const val MANUAL_ORDER_MODE = "manual"
         private const val SMART_PLAYLIST_MAX_ITEMS = 100
 
@@ -331,7 +382,15 @@ class PlaylistViewModel @Inject constructor(
                     return@launch
                 }
 
-                val connected = connectedLibraryRepository.snapshot.value.playlists.find { it.id == playlistId }
+                var connected = connectedLibraryRepository.snapshot.value.playlists.find { it.id == playlistId }
+                if (connected == null && (playlistId.startsWith("SPOTIFY:") || playlistId.startsWith("YOUTUBE_MUSIC:") || playlistId.startsWith("APPLE_MUSIC:"))) {
+                    // Wait for background caching to populate it in the snapshot
+                    connected = kotlinx.coroutines.withTimeoutOrNull(15_000L) {
+                        connectedLibraryRepository.snapshot.first { snap ->
+                            snap.playlists.any { it.id == playlistId }
+                        }.playlists.find { it.id == playlistId }
+                    }
+                }
                 if (connected != null) {
                     val pseudoPlaylist = Playlist(
                         id = connected.id,
@@ -412,6 +471,17 @@ class PlaylistViewModel @Inject constructor(
                     // Obtener la playlist de las preferencias del usuario
                     val playlist = playlistPreferencesRepository.userPlaylistsFlow.first()
                         .find { it.id == playlistId }
+                        // A friend's playlist opened before it finished saving ("SPOTIFY:…"): keep the
+                        // skeleton up and wait for the save instead of flashing "not found".
+                        ?: if (isPendingRemotePlaylistId(playlistId)) {
+                            kotlinx.coroutines.withTimeoutOrNull(PENDING_REMOTE_SAVE_WAIT_MS) {
+                                playlistPreferencesRepository.userPlaylistsFlow
+                                    .mapNotNull { list -> list.find { it.id == playlistId } }
+                                    .first()
+                            }
+                        } else {
+                            null
+                        }
 
                     if (playlist != null) {
                         val orderMode = _uiState.value.playlistOrderModes[playlistId]
@@ -420,6 +490,16 @@ class PlaylistViewModel @Inject constructor(
                         // Colectar la lista de canciones del Flow devuelto por el repositorio en un hilo de IO
                         val songsList: List<Song> = withContext(kotlinx.coroutines.Dispatchers.IO) {
                             musicRepository.getSongsByIds(playlist.songIds).first()
+                        }.distinctBy { it.id }
+                        // Ids that point at nothing (a song deleted from the phone, an online song
+                        // that was never saved) made the count wrong: drop them, keeping the order.
+                        if (songsList.isNotEmpty() && songsList.size < playlist.songIds.size) {
+                            val resolved = songsList.mapTo(HashSet()) { it.id }
+                            val cleaned = playlist.songIds.distinct().filter { it in resolved }
+                            if (cleaned.size < playlist.songIds.size) {
+                                runCatching { playlistPreferencesRepository.reorderSongsInPlaylist(playlistId, cleaned) }
+                                    .onFailure { Log.w("PlaylistVM", "Could not tidy $playlistId", it) }
+                            }
                         }
 
                         val orderedSongs = when (orderMode) {
@@ -474,6 +554,26 @@ class PlaylistViewModel @Inject constructor(
         }
     }
 
+    /** A new playlist holding [songs]; online ones are saved first so they show and count. */
+    fun createPlaylistWithSongs(name: String, songs: List<Song>, onMessage: (String) -> Unit = {}) {
+        viewModelScope.launch {
+            val (ready, unsaved) = try {
+                prepareSongsForPlaylist(songs)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                songs to emptyList<Song>()
+            }
+            createPlaylist(name, songIds = ready.map { it.id })
+            onMessage(
+                buildString {
+                    append("Created \u201C$name\u201D with ${ready.size} ${if (ready.size == 1) "song" else "songs"}")
+                    if (unsaved.isNotEmpty()) append(" · ${unsaved.size} online couldn't be saved")
+                }
+            )
+        }
+    }
+
     fun createPlaylist(
         name: String,
         coverImageUri: String? = null,
@@ -491,7 +591,10 @@ class PlaylistViewModel @Inject constructor(
         coverShapeDetail3: Float? = null,
         coverShapeDetail4: Float? = null,
         source: String = "LOCAL", // Mark source
-        smartRuleKey: String? = null
+        smartRuleKey: String? = null,
+        coverFlipHorizontal: Boolean = false,
+        coverFilterId: String? = null,
+        coverRotationDegrees: Int = 0
     ) {
         viewModelScope.launch {
             var savedCoverPath: String? = null
@@ -504,7 +607,10 @@ class PlaylistViewModel @Inject constructor(
                     imageId,
                     cropScale,
                     cropPanX,
-                    cropPanY
+                    cropPanY,
+                    flipHorizontal = coverFlipHorizontal,
+                    filterId = coverFilterId,
+                    rotationDegrees = coverRotationDegrees
                 )
             }
 
@@ -619,7 +725,11 @@ class PlaylistViewModel @Inject constructor(
         uniqueId: String,
         cropScale: Float,
         cropPanX: Float,
-        cropPanY: Float
+        cropPanY: Float,
+        flipHorizontal: Boolean = false,
+        filterId: String? = null,
+        /** Clockwise quarter turns from the Adjust screen, applied last around the centre. */
+        rotationDegrees: Int = 0
     ): String? {
         return withContext(Dispatchers.IO) {
             try {
@@ -686,11 +796,32 @@ class PlaylistViewModel @Inject constructor(
 
                 // Draw
                 // We draw the original bitmap scaled to (scaledWidth, scaledHeight) at (dx, dy)
+                // Shader presets (Android 13+) are baked on the GPU first: grade + effect, same as
+                // the preview. The baked copy can be smaller than the original, so scale from it.
+                val filterPreset = com.theveloper.pixelplay.presentation.components.CoverFilters.byId(filterId)
+                val baked = com.theveloper.pixelplay.presentation.components.CoverFilterRenderer.bake(originalBitmap, filterPreset)
+                val drawSource = baked ?: originalBitmap
                 val matrix = android.graphics.Matrix()
-                matrix.postScale(scaledWidth / bitmapWidth, scaledHeight / bitmapHeight)
+                matrix.postScale(scaledWidth / drawSource.width, scaledHeight / drawSource.height)
                 matrix.postTranslate(dx, dy)
+                if (flipHorizontal) {
+                    // Mirror around the image's own centre, like ImageCropView's negative scaleX
+                    // (the graphics layer flips first, then applies the pan).
+                    matrix.postScale(-1f, 1f, targetSize / 2f + panPxX, targetSize / 2f + panPxY)
+                }
+                if (rotationDegrees % 360 != 0) {
+                    // The Adjust screen rotates the whole square view, so rotate the result.
+                    matrix.postRotate(rotationDegrees.toFloat(), targetSize / 2f, targetSize / 2f)
+                }
 
-                canvas.drawBitmap(originalBitmap, matrix, null)
+                // Colour grade with the same 4x5 matrix the Adjust screen previews.
+                val paint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
+                if (baked == null) filterPreset?.let { preset ->
+                    paint.colorFilter = android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix(preset.matrix))
+                }
+
+                canvas.drawBitmap(drawSource, matrix, paint)
+                baked?.recycle()
 
                 // Save
                 val fileName = "playlist_cover_$uniqueId.jpg"
@@ -827,6 +958,72 @@ class PlaylistViewModel @Inject constructor(
             "${admission.accepted} queued; ${admission.deferred} will be retried on the next playlist sync.", Toast.LENGTH_LONG).show()
     }
 
+    /**
+     * How the open playlist's downloaded songs split across High / Medium / Low (plus ones whose
+     * quality can't be told), for the download menu's "x songs" on each card. Older downloads are
+     * worked out from their file (container + average bitrate) and remembered from then on.
+     */
+    suspend fun downloadQualityBreakdown(): PlaylistQualityBreakdown = withContext(Dispatchers.IO) {
+        val songs = _uiState.value.currentPlaylistSongs.distinctBy { it.id }
+        val rows = songs.map { it.id }.chunked(500).flatMap { cloudSongDao.getByIds(it) }.filter { it.isDownloaded }
+        val byId = HashMap<String, com.theveloper.pixelplay.data.youtube.DownloadQuality>()
+        val unknown = HashSet<String>()
+        for (row in rows) {
+            val known = downloadQualityStore.get(row.id) ?: run {
+                val file = java.io.File(row.localFilePath ?: row.localSongId ?: "")
+                val kbps = if (file.isFile && row.duration > 0) (file.length() * 8 / row.duration).toInt() else null
+                com.theveloper.pixelplay.data.youtube.classifyDownloadQuality(file.extension, kbps)
+                    ?.also { downloadQualityStore.record(row.id, it) }
+            }
+            if (known != null) byId[row.id] = known else unknown += row.id
+        }
+        PlaylistQualityBreakdown(
+            counts = com.theveloper.pixelplay.data.youtube.DownloadQuality.entries.associateWith { q -> byId.values.count { it == q } },
+            unknownIds = unknown,
+            qualityBySongId = byId,
+            missing = songsMissingDownload().size
+        )
+    }
+
+    /**
+     * Downloads the open playlist at [quality]: every song not on the device yet, and, with
+     * [changeDownloaded], re-downloads the ones already on it at a different quality (upgrade or
+     * downgrade; each old file stays until its replacement is saved). Turns on "Keep in sync".
+     */
+    fun downloadPlaylistAt(
+        quality: com.theveloper.pixelplay.data.youtube.DownloadQuality,
+        wifiOnly: Boolean,
+        changeDownloaded: Boolean,
+    ) {
+        val playlist = _uiState.value.currentPlaylistDetails ?: return
+        viewModelScope.launch {
+            offlineStore.setWifiOnly(wifiOnly)
+            offlineStore.setKeepInSync(playlist.id, true)
+            val missing = songsMissingDownload()
+            val toChange = if (!changeDownloaded) emptyList() else {
+                val breakdown = downloadQualityBreakdown()
+                _uiState.value.currentPlaylistSongs.distinctBy { it.id }.filter { song ->
+                    val current = breakdown.qualityBySongId[song.id]
+                    // Downloaded at another quality, or downloaded with no known quality.
+                    (current != null && current != quality) || song.id in breakdown.unknownIds
+                }
+            }
+            if (missing.isEmpty() && toChange.isEmpty()) {
+                Toast.makeText(context, "Every song is already at ${quality.label}", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            if (!offlineStore.canDownloadNow()) {
+                Toast.makeText(context, "Waiting for Wi-Fi. New songs download on the next sync over Wi-Fi.", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            val added = downloadQueue.enqueueAll(missing, playlist.name, quality)
+            val changed = downloadQueue.enqueueAll(toChange, playlist.name, quality, replaceExisting = true)
+            val deferred = added.deferred + changed.deferred
+            if (deferred > 0) Toast.makeText(context,
+                "${added.accepted + changed.accepted} queued; $deferred will be retried on the next playlist sync.", Toast.LENGTH_LONG).show()
+        }
+    }
+
     /** Downloads specific songs (multi-select). Songs already on the device are skipped. */
     fun downloadSongs(songs: List<Song>) {
         viewModelScope.launch {
@@ -868,15 +1065,98 @@ class PlaylistViewModel @Inject constructor(
         viewModelScope.launch { connectedLibraryRepository.restorePlaylist(playlistId) }
     }
 
+    // ── .m3u import: preview → new playlist / add to one / replace one ─────────────────────
+
+    private val _m3uImportPreview = MutableStateFlow<M3uImportPreview?>(null)
+    /** Non-null while the import dialog is open. */
+    val m3uImportPreview: StateFlow<M3uImportPreview?> = _m3uImportPreview.asStateFlow()
+
+    /** Reads the file and opens the import dialog (or explains why there's nothing to import). */
     fun importM3u(uri: Uri) {
         viewModelScope.launch {
             try {
-                val (name, songIds) = m3uManager.parseM3u(uri)
-                if (songIds.isNotEmpty()) {
-                    playlistPreferencesRepository.createPlaylist(name, songIds)
+                val local = m3uManager.importM3u(uri)
+                if (local.totalEntries == 0) {
+                    Toast.makeText(context, "That file has no songs in it", Toast.LENGTH_LONG).show()
+                    return@launch
                 }
+                // Songs that aren't on this phone (not in the library, not downloaded) are looked
+                // up online and added as online songs, so the whole list comes over.
+                val missing = local.totalEntries - local.matchedCount
+                val result = if (missing > 0) {
+                    Toast.makeText(context, "Finding $missing songs online…", Toast.LENGTH_SHORT).show()
+                    m3uManager.findMissingOnline(local)
+                } else local
+                if (result.songIds.isEmpty()) {
+                    Toast.makeText(
+                        context,
+                        "Couldn't find any of the ${result.totalEntries} songs in that playlist",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@launch
+                }
+                // Your own playlists only: smart playlists are rebuilt from their rule.
+                val targets = playlistPreferencesRepository.getPlaylistsOnce()
+                    .filter { it.source != "SMART" && !isFolderPlaylistId(it.id) }
+                    .sortedByDescending { it.lastModified }
+                _m3uImportPreview.value = M3uImportPreview(
+                    result = result,
+                    targets = targets,
+                    suggestedTargetId = targets.firstOrNull { it.name.trim().equals(result.name.trim(), ignoreCase = true) }?.id
+                )
             } catch (e: Exception) {
                 Log.e("PlaylistViewModel", "Error importing M3U", e)
+                Toast.makeText(context, "Couldn't read that playlist file", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    fun dismissM3uImport() {
+        _m3uImportPreview.value = null
+    }
+
+    /**
+     * NEW creates a playlist called [newName]; MERGE adds the songs [targetId] doesn't have yet
+     * (in file order, after its own); REPLACE swaps [targetId]'s songs for the file's.
+     */
+    fun confirmM3uImport(mode: M3uImportMode, targetId: String?, newName: String) {
+        val preview = _m3uImportPreview.value ?: return
+        _m3uImportPreview.value = null
+        val songIds = preview.result.songIds.distinct()
+        viewModelScope.launch {
+            try {
+                val target = preview.targets.firstOrNull { it.id == targetId }
+                val message = when {
+                    mode == M3uImportMode.MERGE && target != null -> {
+                        val existing = target.songIds.toHashSet()
+                        val added = songIds.count { it !in existing }
+                        playlistPreferencesRepository.addSongsToPlaylist(target.id, songIds)
+                        if (added == 0) "\"${target.name}\" already has all of these songs"
+                        else "Added $added songs to \"${target.name}\""
+                    }
+                    mode == M3uImportMode.REPLACE && target != null -> {
+                        playlistPreferencesRepository.reorderSongsInPlaylist(target.id, songIds)
+                        "\"${target.name}\" now has ${songIds.size} songs from the file"
+                    }
+                    else -> {
+                        val name = newName.trim().ifBlank { preview.result.name }
+                        playlistPreferencesRepository.createPlaylist(name, songIds)
+                        val skipped = preview.result.totalEntries - preview.result.matchedCount
+                        val dupes = preview.result.matchedCount - songIds.size
+                        buildString {
+                            append("Imported \"$name\" · ${songIds.size} songs")
+                            if (skipped > 0) append(" · $skipped not found")
+                            if (dupes > 0) append(" · $dupes duplicates skipped")
+                        }
+                    }
+                }
+                if (target != null && _uiState.value.currentPlaylistDetails?.id == target.id) {
+                    loadPlaylistDetails(target.id)
+                }
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                Log.e("PlaylistViewModel", "Error applying M3U import", e)
+                Toast.makeText(context, "Couldn't import that playlist", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -930,7 +1210,10 @@ class PlaylistViewModel @Inject constructor(
         coverShapeDetail1: Float?,
         coverShapeDetail2: Float?,
         coverShapeDetail3: Float?,
-        coverShapeDetail4: Float?
+        coverShapeDetail4: Float?,
+        coverFlipHorizontal: Boolean = false,
+        coverFilterId: String? = null,
+        coverRotationDegrees: Int = 0
     ) {
         if (isFolderPlaylistId(playlistId)) return
         if (isEditableConnected(playlistId)) {
@@ -947,7 +1230,8 @@ class PlaylistViewModel @Inject constructor(
             var savedCoverPath: String? = currentPlaylist.coverImageUri
 
             val isNewImage = coverImageUri != null && coverImageUri != currentPlaylist.coverImageUri
-            val isAdjusted = cropScale != 1f || cropPanX != 0f || cropPanY != 0f
+            val isAdjusted = cropScale != 1f || cropPanX != 0f || cropPanY != 0f ||
+                coverFlipHorizontal || coverFilterId != null || coverRotationDegrees % 360 != 0
 
             if (coverImageUri != null && (isNewImage || isAdjusted)) {
                 // Save new image or re-crop existing one
@@ -957,7 +1241,10 @@ class PlaylistViewModel @Inject constructor(
                     imageId,
                     cropScale,
                     cropPanX,
-                    cropPanY
+                    cropPanY,
+                    flipHorizontal = coverFlipHorizontal,
+                    filterId = coverFilterId,
+                    rotationDegrees = coverRotationDegrees
                 )
                 if (newPath != null) {
                     // Optional: Delete old file if it was a local file managed by us
@@ -1010,11 +1297,173 @@ class PlaylistViewModel @Inject constructor(
             return
         }
         viewModelScope.launch {
-            playlistPreferencesRepository.addSongsToPlaylist(playlistId, songIdsToAdd)
+            try {
+                val before = playlistPreferencesRepository.getPlaylistsOnce().firstOrNull { it.id == playlistId }?.songIds?.toHashSet()
+                playlistPreferencesRepository.addSongsToPlaylist(playlistId, songIdsToAdd)
+                val added = songIdsToAdd.distinct().count { before == null || it !in before }
+                Toast.makeText(
+                    context,
+                    when (added) { 0 -> "Already in the playlist"; 1 -> "Added 1 song"; else -> "Added $added songs" },
+                    Toast.LENGTH_SHORT
+                ).show()
+                val target = playlistExportSyncStore.getSyncTarget(playlistId)
+                if (target != null && target.autoSync) {
+                    runCatching {
+                        val addedSongs = withContext(Dispatchers.IO) { musicRepository.getSongsByIds(songIdsToAdd).first() }
+                        connectedLibraryRepository.syncRemoteChanges(target.service, target.remotePlaylistId, addedSongs)
+                        playlistExportSyncStore.markSynced(playlistId)
+                    }.onFailure { Log.e("PlaylistVM", "Auto-sync additions failed", it) }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("PlaylistVM", "Could not add songs to $playlistId", e)
+                Toast.makeText(context, "Couldn't add songs: ${e.message ?: "try again"}", Toast.LENGTH_SHORT).show()
+            }
             if (_uiState.value.currentPlaylistDetails?.id == playlistId) {
                 loadPlaylistDetails(playlistId)
             }
         }
+    }
+
+    /** Online / catalog songs need a cloud_songs row, or the playlist can't show (or count) them. */
+    private fun Song.needsCloudRow(): Boolean =
+        id.toLongOrNull() == null || youtubeId != null || contentUriString.startsWith("youtube://")
+
+    /**
+     * Saves a row for every online song first, so the playlist can show it later. Returns the
+     * songs that can be added (ones whose row couldn't be saved are left out, not half-added).
+     */
+    private suspend fun prepareSongsForPlaylist(songs: List<Song>): Pair<List<Song>, List<Song>> = withContext(Dispatchers.IO) {
+        val ok = ArrayList<Song>()
+        val failed = ArrayList<Song>()
+        songs.distinctBy { it.id }.forEach { song ->
+            if (!song.needsCloudRow()) { ok += song; return@forEach }
+            try {
+                musicRepository.saveCloudSong(song)
+                ok += song
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("PlaylistVM", "Could not save ${song.id} for a playlist", e)
+                failed += song
+            }
+        }
+        ok to failed
+    }
+
+    /**
+     * The add-to-playlist sheet's Save. With one song, [playlistIds] is the full set the song
+     * should be in (unticked ones lose it); with several, they're added to every playlist.
+     * Reports one clear message through [onMessage]: what was added, removed or failed.
+     */
+    fun saveSongsToPlaylists(
+        songs: List<Song>,
+        playlistIds: List<String>,
+        currentPlaylistId: String?,
+        onMessage: (String) -> Unit,
+    ) {
+        if (songs.isEmpty()) return
+        viewModelScope.launch {
+            val (ready, unsaved) = try {
+                prepareSongsForPlaylist(songs)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                onMessage("Couldn't add: ${e.message ?: "try again"}")
+                return@launch
+            }
+            val names = (playlistPreferencesRepository.getPlaylistsOnce().associate { it.id to it.name } +
+                connectedLibraryRepository.snapshot.value.playlists.associate { it.id to it.title })
+            val added = ArrayList<String>()
+            val removed = ArrayList<String>()
+            val failed = ArrayList<String>()
+            var alreadyThere = 0
+            val single = songs.size == 1
+            try {
+                if (single) {
+                    val song = ready.firstOrNull()
+                    // Editable YouTube Music playlists.
+                    connectedLibraryRepository.snapshot.value.playlists.filter { it.isEditable && it.friendId == null }.forEach { cp ->
+                        val shouldContain = cp.id in playlistIds
+                        val hasSong = cp.songs.any { it.id == songs.first().id }
+                        try {
+                            when {
+                                shouldContain && !hasSong && song != null -> { connectedLibraryRepository.addSongs(cp.id, listOf(song)); added += cp.title }
+                                !shouldContain && hasSong -> { connectedLibraryRepository.removeSong(cp.id, songs.first().id); removed += cp.title }
+                            }
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            Log.e("PlaylistVM", "Could not update ${cp.id}", e)
+                            failed += cp.title
+                        }
+                    }
+                    // Your own playlists (skipped if the song's row couldn't be saved: nothing is
+                    // added or removed then, and the message says why).
+                    val removedIds = if (song == null) emptyList() else {
+                        playlistPreferencesRepository.getPlaylistsOnce().forEach { pl ->
+                            val hasSong = song.id in pl.songIds
+                            when {
+                                pl.id in playlistIds && !hasSong -> added += pl.name
+                                pl.id in playlistIds && hasSong -> alreadyThere++
+                                pl.id !in playlistIds && hasSong -> removed += pl.name
+                            }
+                        }
+                        playlistPreferencesRepository.addOrRemoveSongFromPlaylists(song.id, playlistIds)
+                    }
+                    if (currentPlaylistId != null && removedIds.contains(currentPlaylistId)) {
+                        _uiState.update { st ->
+                            st.copy(currentPlaylistSongs = st.currentPlaylistSongs.filterNot { it.id == songs.first().id })
+                        }
+                    }
+                } else {
+                    val ids = ready.map { it.id }
+                    playlistIds.forEach { playlistId ->
+                        try {
+                            if (isEditableConnected(playlistId)) {
+                                connectedLibraryRepository.addSongs(playlistId, ready)
+                            } else {
+                                playlistPreferencesRepository.addSongsToPlaylist(playlistId, ids)
+                            }
+                            added += names[playlistId] ?: "playlist"
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            Log.e("PlaylistVM", "Could not add songs to $playlistId", e)
+                            failed += names[playlistId] ?: "a playlist"
+                        }
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("PlaylistVM", "Saving to playlists failed", e)
+                onMessage("Couldn't save: ${e.message ?: "try again"}")
+                return@launch
+            }
+            if (currentPlaylistId != null) loadPlaylistDetails(currentPlaylistId)
+            onMessage(playlistSaveMessage(songs.size, ready.size, unsaved.size, added, removed, failed, alreadyThere))
+        }
+    }
+
+    private fun playlistSaveMessage(
+        requested: Int, ready: Int, unsaved: Int,
+        added: List<String>, removed: List<String>, failed: List<String>, alreadyThere: Int,
+    ): String {
+        fun list(names: List<String>) = when (names.size) {
+            1 -> "\u201C${names.first()}\u201D"
+            else -> "${names.size} playlists"
+        }
+        val songsLabel = if (requested == 1) "Song" else "$ready songs"
+        return buildList {
+            if (added.isNotEmpty()) add("$songsLabel added to ${list(added)}")
+            if (removed.isNotEmpty()) add("removed from ${list(removed)}")
+            if (added.isEmpty() && removed.isEmpty() && failed.isEmpty() && alreadyThere > 0) add("Already in the playlist")
+            if (failed.isNotEmpty()) add("couldn't update ${list(failed)}")
+            if (unsaved > 0) add(if (unsaved == 1) "1 online song couldn't be saved" else "$unsaved online songs couldn't be saved")
+            if (isEmpty()) add("Nothing changed")
+        }.joinToString(" · ").replaceFirstChar { it.uppercase() }
     }
 
     /**
@@ -1099,6 +1548,63 @@ class PlaylistViewModel @Inject constructor(
         }
     }
 
+    fun exportPlaylistToService(
+        playlistId: String,
+        name: String,
+        songs: List<Song>,
+        service: String,
+        autoSync: Boolean,
+        /** Live step text for the export sheet ("Matching 40 of 120…"). */
+        onProgress: (String) -> Unit = {},
+        onResult: (Result<String>) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                val result = connectedLibraryRepository.exportPlaylistToService(name, songs, service) { step ->
+                    viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) { onProgress(step) }
+                }
+                if (autoSync) {
+                    playlistExportSyncStore.setSyncTarget(
+                        playlistId,
+                        com.theveloper.pixelplay.data.preferences.RemoteSyncTarget(
+                            service = service,
+                            remotePlaylistId = result.remotePlaylistId,
+                            autoSync = true
+                        )
+                    )
+                }
+                onResult(Result.success(result.message))
+            } catch (e: Exception) {
+                Log.e("PlaylistVM", "Failed to export playlist to $service", e)
+                onResult(Result.failure(e))
+            }
+        }
+    }
+
+    fun syncPlaylistNow(playlistId: String, onMessage: (String) -> Unit) {
+        val target = playlistExportSyncStore.getSyncTarget(playlistId) ?: return
+        viewModelScope.launch {
+            try {
+                val songs = _uiState.value.currentPlaylistSongs
+                connectedLibraryRepository.syncRemoteChanges(target.service, target.remotePlaylistId, songs)
+                playlistExportSyncStore.markSynced(playlistId)
+                val serviceName = if (target.service == "SPOTIFY") "Spotify" else "YouTube Music"
+                onMessage("Synced with $serviceName")
+            } catch (e: Exception) {
+                Log.e("PlaylistVM", "Failed to sync playlist $playlistId", e)
+                onMessage("Sync failed: ${e.message ?: "try again"}")
+            }
+        }
+    }
+
+    fun unlinkSyncTarget(playlistId: String) {
+        playlistExportSyncStore.removeSyncTarget(playlistId)
+    }
+
+    fun setAutoSync(playlistId: String, enabled: Boolean) {
+        playlistExportSyncStore.setAutoSync(playlistId, enabled)
+    }
+
     fun addSongsToPlaylists(songIds: List<String>, playlistIds: List<String>) {
         viewModelScope.launch {
             playlistIds.forEach { playlistId ->
@@ -1109,6 +1615,14 @@ class PlaylistViewModel @Inject constructor(
                     }.onFailure { Log.e("PlaylistVM", "Could not add songs to $playlistId", it) }
                 } else {
                     playlistPreferencesRepository.addSongsToPlaylist(playlistId, songIds)
+                    val target = playlistExportSyncStore.getSyncTarget(playlistId)
+                    if (target != null && target.autoSync) {
+                        runCatching {
+                            val addedSongs = withContext(Dispatchers.IO) { musicRepository.getSongsByIds(songIds).first() }
+                            connectedLibraryRepository.syncRemoteChanges(target.service, target.remotePlaylistId, addedSongs)
+                            playlistExportSyncStore.markSynced(playlistId)
+                        }.onFailure { Log.e("PlaylistVM", "Auto-sync additions failed", it) }
+                    }
                 }
             }
         }
@@ -1131,6 +1645,45 @@ class PlaylistViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(currentPlaylistSongs = it.currentPlaylistSongs.filterNot { s -> s.id == songIdToRemove })
                 }
+            }
+            val target = playlistExportSyncStore.getSyncTarget(playlistId)
+            if (target != null && target.autoSync) {
+                runCatching {
+                    connectedLibraryRepository.syncRemoteChanges(target.service, target.remotePlaylistId, emptyList(), listOf(songIdToRemove))
+                    playlistExportSyncStore.markSynced(playlistId)
+                }.onFailure { Log.e("PlaylistVM", "Auto-sync removal failed", it) }
+            }
+        }
+    }
+
+    /**
+     * Saves a playlist's whole song order at once (Edit mode: single drags, multi-song drags and
+     * the Move up/down accessibility actions all end here). Same backends as
+     * [reorderSongsInPlaylist]; switches the playlist to manual order.
+     */
+    fun setPlaylistOrder(playlistId: String, orderedSongs: List<Song>) {
+        if (isFolderPlaylistId(playlistId)) return
+        viewModelScope.launch {
+            val newSongOrderIds = orderedSongs.map { it.id }
+            if (isEditableConnected(playlistId)) {
+                try {
+                    connectedLibraryRepository.reorder(playlistId, newSongOrderIds)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.e("PlaylistVM", "Could not reorder $playlistId", e)
+                }
+            } else {
+                playlistPreferencesRepository.reorderSongsInPlaylist(playlistId, newSongOrderIds)
+            }
+            playlistPreferencesRepository.setPlaylistSongOrderMode(playlistId, MANUAL_ORDER_MODE)
+            _uiState.update {
+                val updatedModes = it.playlistOrderModes + (playlistId to PlaylistSongsOrderMode.Manual)
+                it.copy(
+                    currentPlaylistSongs = orderedSongs,
+                    playlistSongsOrderMode = PlaylistSongsOrderMode.Manual,
+                    playlistOrderModes = updatedModes
+                )
             }
         }
     }

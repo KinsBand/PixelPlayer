@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.presentation.components
 
+import com.theveloper.pixelplay.presentation.components.player.miniPlayerTimeline
 import androidx.annotation.OptIn
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
@@ -108,6 +109,13 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                                 placeable.placeRelative(startPaddingPx, 0)
                             }
                         }
+                        // The song timeline along the bottom edge, in the cover's colours, following
+                        // the player's bottom curve (fades with the row when the player expands).
+                        .miniPlayerTimeline(
+                            chrome = com.theveloper.pixelplay.presentation.components.player.LocalMiniPlayerChrome.current,
+                            color = readyScheme.primary,
+                            trackColor = readyScheme.onPrimaryContainer.copy(alpha = 0.16f)
+                        )
                         .zIndex(miniPlayerZIndex)
                 ) {
                     val isMiniPlayerVisible by remember {
@@ -120,8 +128,8 @@ internal fun BoxScope.UnifiedPlayerMiniAndFullLayers(
                         isCastConnecting = isCastConnecting,
                         isPreparingPlayback = isPreparingPlayback,
                         onPlayPause = { playerViewModel.playPause() },
-                        onPrevious = { playerViewModel.previousSong() },
-                        onNext = { playerViewModel.nextSong() },
+                        isFavorite = isFavorite,
+                        onFavoriteToggle = { playerViewModel.toggleFavorite() },
                         canScroll = isMiniPlayerVisible && infrequentPlayerState.isPlaying,
                         modifier = Modifier.fillMaxSize(),
                         songWave = miniSongWave

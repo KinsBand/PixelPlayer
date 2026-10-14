@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import com.theveloper.pixelplay.presentation.navigation.popBackStackSafely
 import android.text.format.DateFormat as AndroidDateFormat
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -10,6 +11,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -155,7 +157,7 @@ fun RecentlyHeardScreen(
                 searchOpen = false
                 query = ""
             },
-            onBack = { navController.popBackStack() }
+            onBack = { navController.popBackStackSafely() }
         )
 
         if (groups.isEmpty()) {
@@ -216,6 +218,7 @@ fun RecentlyHeardScreen(
     val infoSong = selectedSongForInfo
     if (showSongInfo && infoSong != null) {
         SongInfoBottomSheet(
+            onStartSongRadio = { seedSong -> playerViewModel.startSongRadio(seedSong) },
             song = infoSong,
             isFavorite = favoriteSongIds.contains(infoSong.id),
             onToggleFavorite = { playerViewModel.toggleFavoriteSpecificSong(infoSong) },
@@ -226,10 +229,13 @@ fun RecentlyHeardScreen(
             onPlaySong = { playerViewModel.playSong(infoSong) },
             onAddToQueue = { playerViewModel.addSongToQueue(infoSong) },
             onAddNextToQueue = { playerViewModel.addSongNextToQueue(infoSong) },
+            // Hold Next → Soon (the "after which song" slider).
+            soonPlayer = playerViewModel,
+            onAddSoon = { k -> playerViewModel.addSongAfterUpcoming(infoSong, k) },
             onAddToPlayList = { showPlaylistSheet = true },
             onDeleteFromDevice = playerViewModel::deleteFromDevice,
             onNavigateToAlbum = {
-                navController.navigateSafely(Screen.AlbumDetail.createRoute(infoSong.albumId))
+                Screen.AlbumDetail.createRouteForSong(infoSong)?.let { navController.navigateSafely(it) }
                 showSongInfo = false
             },
             onNavigateToArtist = {
@@ -407,7 +413,8 @@ private fun RecentlyHeardRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
+            // No ⋮ button: hold the row for its options.
+            .combinedClickable(onClick = onClick, onLongClick = onMoreOptions, onLongClickLabel = "Song options")
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -475,9 +482,6 @@ private fun RecentlyHeardRow(
                 contentDescription = if (isFavorite) "Unlike" else "Like",
                 tint = if (isFavorite) colors.primary else colors.onSurfaceVariant
             )
-        }
-        IconButton(onClick = onMoreOptions) {
-            Icon(Icons.Rounded.MoreVert, contentDescription = "More options", tint = colors.onSurfaceVariant)
         }
     }
 }

@@ -14,8 +14,29 @@ class AiPlaylistGenerator @Inject constructor(
     private val aiHandler: AiHandler,
     private val digestGenerator: UserProfileDigestGenerator,
     private val preferencesRepo: AiPreferencesRepository,
-    private val json: Json
+    private val json: Json,
+    private val nanoMixIntent: com.theveloper.pixelplay.data.ai.nano.NanoMixIntentReader,
 ) {
+
+    /**
+     * Reads the request (on-device parser, refined by Gemini Nano when it's ready) and ranks the
+     * library for it. Every song returned is a real library song, and nothing leaves the phone.
+     * Null when the request gave too little to go on; the caller then uses the older path.
+     */
+    private suspend fun generateFromIntent(
+        userPrompt: String,
+        pool: List<Song>,
+        minLength: Int,
+        maxLength: Int,
+    ): List<Song>? {
+        val local = com.theveloper.pixelplay.data.MixPromptParser.parse(userPrompt)
+        val refined = nanoMixIntent.read(userPrompt, timeoutMs = 4_000L)
+        val intent = refined?.let { local.mergedWith(it) } ?: local
+        if (!intent.hasVibe && intent.artists.isEmpty() && intent.songs.isEmpty() && intent.freeWords.isEmpty()) return null
+        val liked = pool.filter { it.isFavorite }.mapTo(HashSet()) { it.id }
+        val ranked = com.theveloper.pixelplay.data.PromptIntentRanker.rank(intent, pool, maxLength, liked)
+        return ranked.takeIf { it.size >= minLength.coerceAtLeast(1) }
+    }
 
     suspend fun generate(
         userPrompt: String,
@@ -26,6 +47,11 @@ class AiPlaylistGenerator @Inject constructor(
         type: AiSystemPromptType = AiSystemPromptType.PLAYLIST
     ): Result<List<Song>> {
         return try {
+            // Understand the request on the phone and rank the library for it.
+            if (type == AiSystemPromptType.PLAYLIST || type == AiSystemPromptType.DAILY_MIX) {
+                val pool = if (!candidateSongs.isNullOrEmpty() && type == AiSystemPromptType.DAILY_MIX) candidateSongs else allSongs
+                generateFromIntent(userPrompt, pool, minLength, maxLength)?.let { return Result.success(it) }
+            }
 
             // Get offline scored candidates to pass to LLM (much smaller context window than the whole library)
             val samplingPool = when {

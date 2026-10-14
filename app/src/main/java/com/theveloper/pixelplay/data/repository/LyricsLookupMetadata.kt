@@ -21,13 +21,15 @@ internal object LyricsLookupMetadata {
         """(?i)\s+(?:\||//)\s+.*$|\s+-\s+(?:official\s+)?(?:music\s+video|lyric\s+video|lyrics|audio|visuali[sz]er)\s*$|\s+(?:official\s+)?(?:music\s+video|lyric\s+video|audio)\s*$"""
     )
     private val titleSplit = Regex("""\s+[-–—]\s+""")
+    /** "TaylorSwift" -> "Taylor Swift". Compiled once: [cleanArtist] runs per song in search. */
+    private val camelBoundary = Regex("(?<=[a-z])(?=[A-Z])")
 
     fun cleanArtist(raw: String): String {
         val trimmed = raw.trim()
         val cleaned = trimmed.replace(channelSuffix, "").trim().trim(',', '-', ' ')
         // "TaylorSwiftVEVO" -> "TaylorSwift" -> "Taylor Swift"
         return if (cleaned != trimmed && ' ' !in cleaned && cleaned.any { it.isLowerCase() }) {
-            cleaned.replace(Regex("(?<=[a-z])(?=[A-Z])"), " ")
+            cleaned.replace(camelBoundary, " ")
         } else cleaned
     }
 

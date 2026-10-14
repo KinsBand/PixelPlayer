@@ -203,8 +203,22 @@ class DownloadCoordinator @Inject constructor(
     /** What was asked for, so a paused download resumes with the same song and quality. */
     private val songRequests = java.util.concurrent.ConcurrentHashMap<String, Pair<Song, DownloadQuality?>>()
 
-    /** Starts (or joins) a download for [song]. Safe to call repeatedly. */
+    /** The starred quality (Settings or the player's download menu), or null. */
+    val preferredQuality: StateFlow<DownloadQuality?> = userPreferencesRepository.preferredDownloadQualityFlow
+        .map { name -> DownloadQuality.entries.firstOrNull { it.name == name } }
+        .stateIn(scope, SharingStarted.Eagerly, null)
+
+    fun setPreferredQuality(quality: DownloadQuality?) {
+        scope.launch { userPreferencesRepository.setPreferredDownloadQuality(quality?.name) }
+    }
+
+    /**
+     * Starts (or joins) a download for [song]. Safe to call repeatedly. With no [quality] the
+     * starred one is used, else the default rule (AAC preferred).
+     */
     fun download(song: Song, quality: DownloadQuality? = null) {
+        @Suppress("NAME_SHADOWING")
+        val quality = quality ?: preferredQuality.value
         if (!isOnlineSong(song)) {
             announce("This song is already on your device")
             return

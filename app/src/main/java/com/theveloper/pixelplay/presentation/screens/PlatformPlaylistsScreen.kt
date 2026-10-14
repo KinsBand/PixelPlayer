@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
@@ -61,7 +62,8 @@ import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 /** Which streaming service a platform playlists screen shows. */
 enum class PlaylistPlatform(val source: String, val label: String, val iconRes: Int, val brand: Color) {
     SPOTIFY("SPOTIFY", "Spotify", R.drawable.ic_source_spotify, Color(0xFF1DB954)),
-    YOUTUBE_MUSIC("YOUTUBE_MUSIC", "YT Music", R.drawable.ic_source_youtube_music, Color(0xFFFF0000));
+    YOUTUBE_MUSIC("YOUTUBE_MUSIC", "YT Music", R.drawable.ic_source_youtube_music, Color(0xFFFF0000)),
+    APPLE_MUSIC("APPLE_MUSIC", "Apple Music", R.drawable.ic_source_apple_music, Color(0xFFFA243C));
 
     companion object {
         fun from(value: String?): PlaylistPlatform =
@@ -202,12 +204,23 @@ private fun PlatformPlaylistRow(playlist: Playlist, onClick: () -> Unit) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Text(
-                if (playlist.songIds.size == 1) "1 song" else "${playlist.songIds.size} songs",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.MusicNote,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(13.dp)
+                )
+                Text(
+                    text = "${playlist.songIds.size}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
+            }
         }
         Icon(
             Icons.AutoMirrored.Rounded.KeyboardArrowRight,

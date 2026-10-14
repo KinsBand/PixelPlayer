@@ -24,7 +24,29 @@ object LyricsAutoOffsets {
 
     fun get(songId: String): Entry? = _offsets.value[songId]
 
+    /**
+     * Songs whose lyrics are currently shown with on-device word alignment. Their timing is
+     * already in audio time, so an automatic offset must not be added on top: [put] ignores them.
+     */
+    private val suppressed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    /** Removes [songId]'s automatic offset and keeps it from coming back (see [suppressed]). */
+    fun suppress(songId: String) {
+        suppressed += songId
+        remove(songId)
+    }
+
+    /** Lets automatic offsets apply to [songId] again (they come back on its next measurement). */
+    fun unsuppress(songId: String) {
+        suppressed -= songId
+    }
+
+    fun unsuppressAll() {
+        suppressed.clear()
+    }
+
     fun put(songId: String, entry: Entry) {
+        if (songId in suppressed) return
         _offsets.update { current ->
             if (current[songId] == entry) return@update current
             // Keep the map small on very long sessions; the disk cache keeps everything.

@@ -488,7 +488,10 @@ class MediaStoreSongRepository @Inject constructor(
                 )
             }.flatMapLatest { it }
         }.map { pagingData ->
-            pagingData.map { entity -> entity.toSong() }
+            // Each row parses ~9 JSON columns. Paging runs these transforms where the
+            // PagingData is cached (the ViewModel scope, i.e. the main thread), so convert on
+            // a background thread: this was dropping frames whenever a list page loaded.
+            pagingData.map { entity -> withContext(Dispatchers.Default) { entity.toSong() } }
         }
     }
 
@@ -521,7 +524,8 @@ class MediaStoreSongRepository @Inject constructor(
                 )
             }.flatMapLatest { it }
         }.map { pagingData ->
-            pagingData.map { entity -> entity.toSong().copy(isFavorite = true) }
+            // Off the main thread, as in getPaginatedSongs.
+            pagingData.map { entity -> withContext(Dispatchers.Default) { entity.toSong().copy(isFavorite = true) } }
         }
     }
 

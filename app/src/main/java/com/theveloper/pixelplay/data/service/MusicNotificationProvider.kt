@@ -9,6 +9,14 @@ object MusicNotificationProvider {
     const val EXTRA_SHUFFLE_ENABLED = "com.theveloper.pixelplay.extra.SHUFFLE_ENABLED"
     const val CUSTOM_COMMAND_CYCLE_REPEAT_MODE = "com.theveloper.pixelplay.CYCLE_REPEAT"
     const val CUSTOM_COMMAND_LIKE = "com.theveloper.pixelplay.LIKE"
+    /**
+     * Per-state like actions. System media controls key custom actions by their action string
+     * and can keep a stale icon when only the icon changes, so the liked and unliked buttons use
+     * different actions (same pattern as Shuffle on/off).
+     */
+    const val CUSTOM_COMMAND_LIKE_ON = "com.theveloper.pixelplay.LIKE_ON"
+    const val CUSTOM_COMMAND_LIKE_OFF = "com.theveloper.pixelplay.LIKE_OFF"
+    const val CUSTOM_COMMAND_SKIP_NEXT = "com.theveloper.pixelplay.SKIP_NEXT"
     const val CUSTOM_COMMAND_SET_FAVORITE_STATE = "com.theveloper.pixelplay.SET_FAVORITE_STATE"
     const val EXTRA_FAVORITE_ENABLED = "com.theveloper.pixelplay.extra.FAVORITE_ENABLED"
     const val CUSTOM_COMMAND_COUNTED_PLAY = "com.theveloper.pixelplay.COUNTED_PLAY"

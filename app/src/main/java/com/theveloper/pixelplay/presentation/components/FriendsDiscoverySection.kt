@@ -155,6 +155,8 @@ private fun DiscoverySongCard(item: DiscoverySong, isCurrent: Boolean, onClick: 
         modifier
             .width(SongCardWidth)
             .clip(MaterialTheme.shapes.large)
+            .songStartFeedback(item.song.id, MaterialTheme.shapes.large)
+            .offlineVeil(item.song, MaterialTheme.shapes.large)
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
             .clickable(onClick = onClick)
             .semantics(mergeDescendants = true) {

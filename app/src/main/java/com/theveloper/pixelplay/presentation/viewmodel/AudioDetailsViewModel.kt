@@ -111,6 +111,10 @@ class AudioDetailsViewModel @Inject constructor(
             onlineJob?.cancel()
             onlineSongId = null
             _onlineVersions.value = OnlineVersionsState.Idle
+            // Cover artists picked for another song don't carry over.
+            coverJob?.cancel()
+            _coverArtists.value = emptyList()
+            _coverVersions.value = OnlineVersionsState.Idle
         }
         scanJob?.cancel()
         _scanState.value = AudioScanState.Idle
@@ -150,6 +154,78 @@ class AudioDetailsViewModel @Inject constructor(
                 Log.w(TAG, "Online version search failed for ${song.id}: ${e.message}")
                 OnlineVersionsState.Failed
             }
+        }
+    }
+
+    private val _coverArtists = MutableStateFlow<List<String>>(emptyList())
+    /** Artists picked next to "Online versions" to search covers by (in the order picked). */
+    val coverArtists: StateFlow<List<String>> = _coverArtists.asStateFlow()
+    private val _coverVersions = MutableStateFlow<OnlineVersionsState>(OnlineVersionsState.Idle)
+    /** Covers of the song by [coverArtists]; Idle while none are picked. */
+    val coverVersions: StateFlow<OnlineVersionsState> = _coverVersions.asStateFlow()
+    private var coverJob: Job? = null
+
+    /**
+     * Searches covers of [song] by each of [artists] ("<title> <artist>", "<title> <artist> cover"),
+     * keeping only results credited to one of them, grouped in the order they were picked.
+     * An empty list clears the cover search and the list goes back to every online version.
+     */
+    fun setCoverArtists(song: Song, artists: List<String>) {
+        val clean = artists.map { it.trim() }.filter { it.isNotEmpty() }
+            .distinctBy { it.lowercase(Locale.ROOT) }
+        _coverArtists.value = clean
+        coverJob?.cancel()
+        if (clean.isEmpty()) {
+            _coverVersions.value = OnlineVersionsState.Idle
+            return
+        }
+        _coverVersions.value = OnlineVersionsState.Loading
+        coverJob = viewModelScope.launch {
+            _coverVersions.value = try {
+                OnlineVersionsState.Loaded(findCoverVersions(song, clean))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Cover search failed for ${song.id}: ${e.message}")
+                OnlineVersionsState.Failed
+            }
+        }
+    }
+
+    private suspend fun findCoverVersions(song: Song, artists: List<String>): List<SongVersion> {
+        val base = SongVersionMatcher.baseTitle(song.title)
+        if (base.isBlank()) return emptyList()
+        val queries = artists.flatMap { artist -> listOf("$base $artist", "$base $artist cover") }
+            .map { it.replace(Regex("""\s+"""), " ").trim() }.distinct()
+        val results = coroutineScope {
+            queries.map { query ->
+                async {
+                    try {
+                        withTimeoutOrNull(ONLINE_QUERY_TIMEOUT_MS) { youTubeRepository.searchSongs(query) }.orEmpty()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Cover query '$query' failed: ${e.message}")
+                        null
+                    }
+                }
+            }.awaitAll()
+        }
+        if (results.all { it == null }) error("All cover queries failed")
+        val wanted = artists.map { it.lowercase(Locale.ROOT) }
+        fun artistRank(candidate: Song): Int {
+            val credited = candidate.artist.lowercase(Locale.ROOT)
+            return wanted.indexOfFirst { credited.contains(it) }
+        }
+        val localIds = (_versions.value as? SongVersionsState.Loaded)
+            ?.versions?.mapNotNull { it.song.youtubeId ?: it.song.id }?.toSet().orEmpty()
+        return withContext(Dispatchers.Default) {
+            SongVersionMatcher.orderOnlineVersions(
+                current = song,
+                // Only songs credited to a picked artist (search also returns the original etc.).
+                candidates = results.filterNotNull().flatten().filter { artistRank(it) >= 0 },
+                excludeIds = localIds + setOfNotNull(song.id, song.youtubeId)
+            ).sortedBy { artistRank(it.song) }
         }
     }
 

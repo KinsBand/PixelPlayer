@@ -473,6 +473,7 @@ fun CastBottomSheet(
         onDispose { onExpansionChanged(0f) }
     }
 
+    val dismissSheetAnimated = rememberAnimatedSheetDismiss(sheetState, onDismiss)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -520,7 +521,7 @@ fun CastBottomSheet(
                         },
                         onDisconnect = {
                             playerViewModel.disconnect()
-                            onDismiss()
+                            dismissSheetAnimated()
                         },
                         onVolumeChange = { value ->
                             if (uiState.activeDevice.isRemote) {
@@ -2756,6 +2757,7 @@ private fun BluetoothDeviceSettingsSheet(
         }
     }
 
+    val dismissSheetAnimated = rememberAnimatedSheetDismiss(sheetState, onDismiss)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -2832,7 +2834,7 @@ private fun BluetoothDeviceSettingsSheet(
                             else "Removed from PixelPlayer. This phone doesn't let apps unpair, so it stays paired in Android",
                             android.widget.Toast.LENGTH_LONG
                         ).show()
-                        onDismiss()
+                        dismissSheetAnimated()
                     },
                     modifier = Modifier.weight(1f).height(52.dp),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.error),

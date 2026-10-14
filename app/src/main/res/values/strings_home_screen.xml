@@ -274,4 +274,12 @@
     <string name="song_count_singular">%1$d Song</string>
     <string name="song_count_plural">%1$d Songs</string>
     <string name="stats_week_label">Week %1$d</string>
+    <!-- Home shuffle buttons (Quick picks, Fresh Finds): hold opens Soon -->
+    <string name="home_shuffle_label">Shuffle</string>
+    <string name="home_shuffle_soon_hold">Shuffle soon</string>
+    <string name="home_shuffle_soon_title">Shuffle %1$s soon</string>
+    <string name="home_shuffle_soon_then_now">Playing now, then the shuffle</string>
+    <string name="home_shuffle_soon_then_after">Then the shuffle, after</string>
+    <string name="home_quick_picks_name">Quick picks</string>
+    <string name="home_fresh_finds_name">Fresh Finds</string>
 </resources>

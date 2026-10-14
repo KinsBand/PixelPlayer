@@ -1,8 +1,12 @@
 [versions]
+# Radio map: MapLibre Native (BSD) + OpenFreeMap tiles — open source, no API key.
+maplibre = "13.6.0"
 accompanistDrawablepainter = "0.37.3"
 agp = "9.3.0"
 app = "1.7.0"
 googleGenai = "1.58.0"
+# On-device Gemini Nano (Android AICore) through ML Kit GenAI Prompt API
+mlkitGenaiPrompt = "1.0.0-beta4"
 googlePlayServicesCast = "22.3.1"
 animation = "1.11.3"
 appcompat = "1.7.1"
@@ -17,7 +21,6 @@ coreSplashscreen = "1.2.0"
 desugarJdkLibs = "2.1.5"
 duktapeAndroid = "1.4.0"
 foundation = "1.11.3"
-glance = "1.3.0-alpha01"
 graphicsShapes = "1.1.0"
 gson = "2.14.0"
 snakeyamlEngine = "2.10"
@@ -107,6 +110,8 @@ pagingCommon = "3.3.6"
 shizuku = "13.1.5"
 
 [libraries]
+# OpenGL ES build (the plain "android-sdk" artifact defaults to Vulkan since 13.0).
+maplibre-android = { module = "org.maplibre.gl:android-sdk-opengl", version.ref = "maplibre" }
 shizuku-api = { module = "dev.rikka.shizuku:api", version.ref = "shizuku" }
 shizuku-provider = { module = "dev.rikka.shizuku:provider", version.ref = "shizuku" }
 accompanist-drawablepainter = { module = "com.google.accompanist:accompanist-drawablepainter", version.ref = "accompanistDrawablepainter" }
@@ -123,6 +128,7 @@ androidx-app-projected = { module = "androidx.car.app:app-projected", version.re
 androidx-media = { module = "androidx.media:media", version.ref = "media" }
 androidx-ui-text-google-fonts = { module = "androidx.compose.ui:ui-text-google-fonts", version.ref = "composeUi" }
 google-genai = { group = "com.google.genai", name = "google-genai", version.ref = "googleGenai" }
+mlkit-genai-prompt = { group = "com.google.mlkit", name = "genai-prompt", version.ref = "mlkitGenaiPrompt" }
 google-play-services-cast-framework = { group = "com.google.android.gms", name = "play-services-cast-framework", version.ref = "googlePlayServicesCast" }
 androidx-animation = { module = "androidx.compose.animation:animation", version.ref = "animation" }
 desugar-jdk-libs = { module = "com.android.tools:desugar_jdk_libs", version.ref = "desugarJdkLibs" }
@@ -131,9 +137,6 @@ androidx-constraintlayout-compose = { module = "androidx.constraintlayout:constr
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-core-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "coreSplashscreen" }
 androidx-foundation = { module = "androidx.compose.foundation:foundation", version.ref = "foundation" }
-androidx-glance = { module = "androidx.glance:glance", version.ref = "glance" }
-androidx-glance-appwidget = { module = "androidx.glance:glance-appwidget", version.ref = "glance" }
-androidx-glance-material3 = { module = "androidx.glance:glance-material3", version.ref = "glance" }
 androidx-graphics-shapes = { module = "androidx.graphics:graphics-shapes", version.ref = "graphicsShapes" }
 androidx-hilt-lifecycle-viewmodel-compose = { module = "androidx.hilt:hilt-lifecycle-viewmodel-compose", version.ref = "hiltNavigationCompose" }
 androidx-hilt-navigation-compose = { module = "androidx.hilt:hilt-navigation-compose", version.ref = "hiltNavigationCompose" }

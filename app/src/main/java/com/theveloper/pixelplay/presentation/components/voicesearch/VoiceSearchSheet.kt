@@ -1,5 +1,7 @@
 package com.theveloper.pixelplay.presentation.components.voicesearch
 
+import android.content.Intent
+import android.provider.Settings
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
@@ -41,6 +43,7 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -53,6 +56,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -65,26 +69,36 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.HeardSongItem
 import com.theveloper.pixelplay.data.model.Lyrics
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.model.SyncedLine
 import com.theveloper.pixelplay.data.recognition.VoiceSearchMode
+import com.theveloper.pixelplay.data.recognition.livesync.LiveLyricsState
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.graphics.graphicsLayer
 import com.theveloper.pixelplay.data.recognition.shizuku.ShizukuStatus
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import com.theveloper.pixelplay.presentation.components.SmartImage
 
 /**
- * The voice sheet, kept minimal: two buttons and, once something is recognised, its match.
- *
- * - **Hum & sing** opens Google's "Search a song".
- * - **Listen** uses Android's Now Playing (its notification is captured into Recently heard).
+ * The voice sheet, kept minimal: one "Identify a song" button (Google's "Search a song", which
+ * takes humming, singing or music playing nearby) and, once something is recognised, its match.
  *
  * Spoken words never show here: dictation types straight into the search bar above the sheet.
  */
@@ -93,6 +107,8 @@ fun VoiceSearchSheet(
     activeAction: VoiceSearchMode?,
     recognizedSong: Song?,
     syncedLyrics: Lyrics?,
+    /** Lyrics following the music playing nearby (see AmbientLyricsSync). */
+    liveLyrics: LiveLyricsState = LiveLyricsState.Idle,
     onHumOrSing: () -> Unit,
     onListen: () -> Unit,
     onToggleFavorite: () -> Unit,
@@ -100,10 +116,57 @@ fun VoiceSearchSheet(
     onQueueSong: (Song) -> Unit,
     onSeekToLyric: (Int) -> Unit,
     onSearchAgain: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** True when the song search reader should be explained first (once, without Shizuku). */
+    shouldExplainResultReader: () -> Boolean = { false },
+    onResultReaderExplained: () -> Unit = {}
 ) {
     val colors = MaterialTheme.colorScheme
     val haptics = LocalHapticFeedback.current
+    val context = LocalContext.current
+    // The button tapped while the one-time explainer is showing ("Not now" still runs it).
+    var explainBefore by remember { mutableStateOf<VoiceSearchMode?>(null) }
+    val runAction: (VoiceSearchMode) -> Unit = { mode ->
+        if (mode == VoiceSearchMode.HUM_AND_SING) onHumOrSing() else onListen()
+    }
+    val requestAction: (VoiceSearchMode) -> Unit = { mode ->
+        if (shouldExplainResultReader()) {
+            onResultReaderExplained()
+            explainBefore = mode
+        } else {
+            runAction(mode)
+        }
+    }
+
+    explainBefore?.let { pendingMode ->
+        AlertDialog(
+            onDismissRequest = { explainBefore = null },
+            icon = { Icon(Icons.Rounded.Hearing, contentDescription = null) },
+            title = { Text(stringResource(R.string.song_search_reader_dialog_title)) },
+            text = { Text(stringResource(R.string.song_search_reader_dialog_body)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    explainBefore = null
+                    runCatching {
+                        context.startActivity(
+                            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }
+                }) {
+                    Text(stringResource(R.string.song_search_reader_dialog_turn_on))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    explainBefore = null
+                    runAction(pendingMode)
+                }) {
+                    Text(stringResource(R.string.song_search_reader_dialog_not_now))
+                }
+            }
+        )
+    }
 
     Surface(
         modifier = modifier
@@ -136,6 +199,7 @@ fun VoiceSearchSheet(
                 RecognizedSongCard(
                     song = recognizedSong,
                     lyrics = syncedLyrics,
+                    liveLyrics = liveLyrics,
                     onToggleFavorite = {
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         onToggleFavorite()
@@ -146,33 +210,26 @@ fun VoiceSearchSheet(
                     onSearchAgain = onSearchAgain
                 )
             } else {
-                Row(
+                // One button: Google's "Search a song" handles humming, singing and music
+                // playing nearby all in one, so there's no separate Hum / Listen choice.
+                VoiceActionButton(
+                    label = if (activeAction != null) "Opening Google\u2026" else "Identify a song",
+                    icon = Icons.Rounded.Mic,
+                    active = activeAction != null,
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        requestAction(VoiceSearchMode.HUM_AND_SING)
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    VoiceActionButton(
-                        label = if (activeAction == VoiceSearchMode.HUM_AND_SING) "Opening Google\u2026" else "Hum & sing",
-                        icon = Icons.Rounded.Mic,
-                        active = activeAction == VoiceSearchMode.HUM_AND_SING,
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onHumOrSing()
-                        },
-                        modifier = Modifier.weight(1f)
-                    )
-                    VoiceActionButton(
-                        label = if (activeAction == VoiceSearchMode.LISTEN_AND_NOW_PLAYING) "Listening\u2026" else "Listen",
-                        icon = Icons.Rounded.GraphicEq,
-                        active = activeAction == VoiceSearchMode.LISTEN_AND_NOW_PLAYING,
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onListen()
-                        },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+                        .padding(bottom = 4.dp)
+                )
+                Text(
+                    "Hum, sing or play it nearby",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
             }
         }
     }
@@ -254,6 +311,7 @@ private fun VoiceActionButton(
 private fun RecognizedSongCard(
     song: Song,
     lyrics: Lyrics?,
+    liveLyrics: LiveLyricsState,
     onToggleFavorite: () -> Unit,
     onPlay: () -> Unit,
     onQueue: () -> Unit,
@@ -356,6 +414,7 @@ private fun RecognizedSongCard(
         // Synced Lyrics Below Music Row
         SyncedLyricsSection(
             lyrics = lyrics,
+            live = liveLyrics,
             onSeekToLyric = onSeekToLyric
         )
 
@@ -403,32 +462,63 @@ private fun RecognizedSongCard(
 @Composable
 private fun SyncedLyricsSection(
     lyrics: Lyrics?,
+    live: LiveLyricsState,
     onSeekToLyric: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = MaterialTheme.colorScheme
     val syncedLines = lyrics?.synced.orEmpty()
 
+    if (syncedLines.isNotEmpty()) {
+        LiveLyricsStatus(live)
+        Spacer(Modifier.height(6.dp))
+    }
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .height(120.dp),
+            .height(if (live is LiveLyricsState.Live) 150.dp else 120.dp),
         shape = RoundedCornerShape(14.dp),
         color = colors.surfaceContainerHigh.copy(alpha = 0.6f)
     ) {
         if (syncedLines.isNotEmpty()) {
+            // The current line, following the music nearby (only once the sync is confirmed).
+            var activeIndex by remember { mutableIntStateOf(-1) }
+            LaunchedEffect(live, syncedLines) {
+                if (live !is LiveLyricsState.Live) { activeIndex = -1; return@LaunchedEffect }
+                while (true) {
+                    withFrameNanos { now ->
+                        val position = live.positionNow(now)
+                        activeIndex = syncedLines.indexOfLast { it.time <= position }
+                    }
+                }
+            }
+            val listState = rememberLazyListState()
+            LaunchedEffect(activeIndex) {
+                if (activeIndex >= 0) listState.animateScrollToItem((activeIndex - 1).coerceAtLeast(0))
+            }
             LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                items(syncedLines) { line ->
+                itemsIndexed(syncedLines) { index, line ->
+                    val isActive = index == activeIndex
+                    val color by animateColorAsState(
+                        when {
+                            activeIndex < 0 -> colors.onSurface
+                            isActive -> colors.primary
+                            index < activeIndex -> colors.onSurfaceVariant.copy(alpha = 0.6f)
+                            else -> colors.onSurfaceVariant
+                        },
+                        label = "liveLyricColor"
+                    )
                     Text(
                         text = line.line,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = colors.onSurface,
+                        style = if (isActive) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
+                        color = color,
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onSeekToLyric(line.time) }
@@ -465,6 +555,47 @@ private fun SyncedLyricsSection(
                         textAlign = TextAlign.Center
                     )
                 }
+            }
+        }
+    }
+}
+
+/** "Syncing to the music…" / "Live" / why it couldn't sync, above the lyrics. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun LiveLyricsStatus(live: LiveLyricsState) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite }
+    ) {
+        when (live) {
+            LiveLyricsState.Idle -> Unit
+            LiveLyricsState.Syncing -> {
+                androidx.compose.material3.LoadingIndicator(Modifier.size(22.dp), color = colors.primary)
+                Spacer(Modifier.width(8.dp))
+                Text("Syncing to the music\u2026", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
+            }
+            is LiveLyricsState.Live -> {
+                val pulse = rememberInfiniteTransition(label = "livePulse").animateFloat(
+                    initialValue = 1f, targetValue = 0.35f,
+                    animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse),
+                    label = "livePulseAlpha"
+                )
+                Box(
+                    Modifier
+                        .size(8.dp)
+                        .graphicsLayer { alpha = pulse.value }
+                        .clip(CircleShape)
+                        .background(colors.error)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Live \u00B7 following the music", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = colors.onSurface)
+            }
+            is LiveLyricsState.Unavailable -> {
+                Text(live.reason, style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
             }
         }
     }

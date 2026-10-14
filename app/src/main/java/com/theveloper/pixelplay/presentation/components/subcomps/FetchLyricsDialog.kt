@@ -67,11 +67,23 @@ fun FetchLyricsDialog(
     onPickResult: (LyricsSearchResult) -> Unit,
     onManualSearch: (String, String?) -> Unit,
     onDismiss: () -> Unit,
-    onImport: () -> Unit
+    onImport: () -> Unit,
+    /**
+     * True: skip the "search online?" step and start searching as soon as the dialog opens,
+     * listing every match to pick from (or, with none, the editable title/artist search).
+     */
+    autoStart: Boolean = false
 ) {
     if (uiState is LyricsSearchUiState.Success) return
 
     var forcePickResults by rememberSaveable { mutableStateOf(false) }
+    var autoStarted by rememberSaveable { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(autoStart, uiState) {
+        if (autoStart && !autoStarted && uiState == LyricsSearchUiState.Idle) {
+            autoStarted = true
+            onConfirm(true)
+        }
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -90,7 +102,8 @@ fun FetchLyricsDialog(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 when (uiState) {
-                    LyricsSearchUiState.Idle -> {
+                    // Auto-start: show the searching state for the frame before it begins.
+                    LyricsSearchUiState.Idle -> if (autoStart && !autoStarted) LoadingContent() else {
                         IdleContent(
                             currentSong = currentSong,
                             forcePickResults = forcePickResults,

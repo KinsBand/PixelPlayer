@@ -29,6 +29,14 @@ import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SdCard
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.StarBorder
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import com.theveloper.pixelplay.ui.theme.MotionTokens
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -72,9 +80,11 @@ private enum class BadgeState { DOWNLOADED, DOWNLOADING, PAUSED, CAN_DOWNLOAD, N
  * a tick when it is (downloaded online song, or a file already on the phone), a download
  * button when it can be downloaded, and a progress ring while it downloads.
  *
- * Tapping download opens a small quality menu right under the button (High / Medium / Low
- * with size and time); a long press downloads High straight away. While downloading, a tap
- * pauses and the next tap resumes; a long press cancels.
+ * With a starred quality (Settings or the star in the menu), tapping download starts that quality
+ * straight away; with none, a tap opens the quality menu (High / Medium / Low with size and
+ * time). A long press always opens the menu, where a row downloads that quality once (the star
+ * stays) and each row's star changes the default. While downloading, a tap pauses and the next
+ * tap resumes; a long press cancels.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -102,15 +112,29 @@ fun SongDownloadBadge(
         isOnDevice -> BadgeState.DOWNLOADED
         else -> BadgeState.NONE
     }
-    if (state == BadgeState.NONE) return
+    // Songs already on the device show nothing (no "downloaded" tick anywhere).
+    if (state == BadgeState.NONE || state == BadgeState.DOWNLOADED) return
 
     val haptics = LocalHapticFeedback.current
     var menuOpen by remember(song.id) { mutableStateOf(false) }
+    val starred by viewModel.preferredQuality.collectAsStateWithLifecycle()
     val openMenu = { menuOpen = true }
-    val quickDownload = {
-        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-        viewModel.download(song, DownloadQuality.HIGH)
+    // Tap: the starred quality at once, or the menu when nothing is starred.
+    val primaryTap = {
+        val quality = starred
+        if (quality != null) {
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            viewModel.download(song, quality)
+        } else {
+            menuOpen = true
+        }
     }
+    // Hold: always the menu, so another quality (or a new star) is one press away.
+    val holdForMenu = {
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        menuOpen = true
+    }
+    val tapLabel = starred?.let { "Download in ${it.label.lowercase(Locale.getDefault())} quality" } ?: "Choose download quality"
     val togglePause = { viewModel.togglePause(song.id) }
     val cancelDownload = {
         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -126,7 +150,12 @@ fun SongDownloadBadge(
             .then(
                 when {
                     state == BadgeState.CAN_DOWNLOAD ->
-                        Modifier.combinedClickable(onClick = openMenu, onLongClick = quickDownload, onLongClickLabel = "Download in high quality")
+                        Modifier.combinedClickable(
+                            onClick = primaryTap,
+                            onClickLabel = tapLabel,
+                            onLongClick = holdForMenu,
+                            onLongClickLabel = "Choose download quality"
+                        )
                     active -> Modifier.combinedClickable(
                         onClick = togglePause,
                         onClickLabel = if (state == BadgeState.PAUSED) "Resume download" else "Pause download",
@@ -203,7 +232,12 @@ fun SongDownloadBadge(
                     .clip(CircleShape)
                     .then(
                         if (boxed) Modifier
-                        else Modifier.combinedClickable(onClick = openMenu, onLongClick = quickDownload)
+                        else Modifier.combinedClickable(
+                            onClick = primaryTap,
+                            onClickLabel = tapLabel,
+                            onLongClick = holdForMenu,
+                            onLongClickLabel = "Choose download quality"
+                        )
                     )
                     .padding(2.dp)
             )
@@ -215,9 +249,12 @@ fun SongDownloadBadge(
             expanded = menuOpen && state == BadgeState.CAN_DOWNLOAD,
             song = song,
             viewModel = viewModel,
+            starred = starred,
+            onToggleStar = { quality -> viewModel.setPreferredQuality(if (starred == quality) null else quality) },
             onDismiss = { menuOpen = false },
             onPick = { quality ->
                 menuOpen = false
+                // This download only: the star (default) stays as it was.
                 viewModel.download(song, quality)
             }
         )
@@ -233,6 +270,8 @@ private fun DownloadQualityMenu(
     expanded: Boolean,
     song: Song,
     viewModel: PlayerDownloadViewModel,
+    starred: DownloadQuality?,
+    onToggleStar: (DownloadQuality) -> Unit,
     onDismiss: () -> Unit,
     onPick: (DownloadQuality) -> Unit,
 ) {
@@ -273,7 +312,11 @@ private fun DownloadQualityMenu(
             loaded.isNullOrEmpty() -> {
                 // Sizes unavailable: still offer the three choices.
                 DownloadQuality.entries.forEach { quality ->
-                    QualityRow(quality, detail = null, onClick = { onPick(quality) })
+                    QualityRow(
+                        quality, detail = null,
+                        starred = starred == quality, onToggleStar = { onToggleStar(quality) },
+                        onClick = { onPick(quality) }
+                    )
                 }
             }
             else -> loaded.forEach { option ->
@@ -283,6 +326,8 @@ private fun DownloadQualityMenu(
                     detail = "${option.codec} · ${option.bitrateKbps} kbps",
                     size = formatMegabytes(option.sizeBytes),
                     time = formatSeconds(seconds),
+                    starred = starred == option.quality,
+                    onToggleStar = { onToggleStar(option.quality) },
                     onClick = { onPick(option.quality) }
                 )
             }
@@ -296,6 +341,8 @@ private fun QualityRow(
     detail: String?,
     size: String? = null,
     time: String? = null,
+    starred: Boolean,
+    onToggleStar: () -> Unit,
     onClick: () -> Unit,
 ) {
     val icon: ImageVector = when (quality) {
@@ -303,16 +350,19 @@ private fun QualityRow(
         DownloadQuality.MEDIUM -> Icons.Rounded.GraphicEq
         DownloadQuality.LOW -> Icons.Rounded.SdCard
     }
-    val trailing: (@Composable () -> Unit)? = if (size != null) {
-        {
-            Column(horizontalAlignment = Alignment.End) {
-                Text(size, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                if (time != null) {
-                    Text(time, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    val trailing: @Composable () -> Unit = {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (size != null) {
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(size, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                    if (time != null) {
+                        Text(time, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
+            QualityStarButton(quality = quality, starred = starred, onToggle = onToggleStar)
         }
-    } else null
+    }
     DropdownMenuItem(
         leadingIcon = {
             Box(
@@ -340,6 +390,34 @@ private fun QualityRow(
         trailingIcon = trailing,
         onClick = onClick
     )
+}
+
+/** Star = this quality is the default for a tap on download. */
+@Composable
+internal fun QualityStarButton(quality: DownloadQuality, starred: Boolean, onToggle: () -> Unit) {
+    IconButton(
+        onClick = onToggle,
+        modifier = Modifier.semantics {
+            contentDescription = if (starred) "Remove ${quality.label} as default" else "Make ${quality.label} the default"
+            stateDescription = if (starred) "Starred" else "Not starred"
+        }
+    ) {
+        AnimatedContent(
+            targetState = starred,
+            transitionSpec = {
+                (fadeIn(tween(MotionTokens.DurationMedium1, easing = MotionTokens.EmphasizedDecelerate)) +
+                    scaleIn(tween(MotionTokens.DurationMedium1, easing = MotionTokens.EmphasizedDecelerate), initialScale = 0.6f)) togetherWith
+                    fadeOut(tween(MotionTokens.DurationShort3, easing = MotionTokens.EmphasizedAccelerate))
+            },
+            label = "qualityStar"
+        ) { on ->
+            Icon(
+                imageVector = if (on) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                contentDescription = null,
+                tint = if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
 }
 
 private fun formatMegabytes(bytes: Long): String =

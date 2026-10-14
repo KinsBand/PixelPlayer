@@ -148,6 +148,7 @@ fun MultiSelectionBottomSheet(
         )
     }
     
+    val dismissSheetAnimated = rememberAnimatedSheetDismiss(sheetState, onDismiss)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState
@@ -267,7 +268,7 @@ fun MultiSelectionBottomSheet(
                                 shape = buttonShape,
                                 onClick = {
                                     onPlayAll()
-                                    onDismiss()
+                                    dismissSheetAnimated()
                                 }
                             ) {
                                 Icon(
@@ -293,7 +294,7 @@ fun MultiSelectionBottomSheet(
                                     .fillMaxHeight(),
                                 onClick = {
                                     onToggleLikeAll(!allAreLiked) // true = like all, false = unlike all
-                                    onDismiss()
+                                    dismissSheetAnimated()
                                 },
                                 shape = favoriteButtonShape,
                                 colors = IconButtonDefaults.filledIconButtonColors(
@@ -323,7 +324,7 @@ fun MultiSelectionBottomSheet(
                                 ),
                                 onClick = {
                                     onShareAll()
-                                    onDismiss()
+                                    dismissSheetAnimated()
                                 },
                                 shape = CircleShape
                             ) {
@@ -357,7 +358,7 @@ fun MultiSelectionBottomSheet(
                                 shape = CircleShape,
                                 onClick = {
                                     onAddToQueue()
-                                    onDismiss()
+                                    dismissSheetAnimated()
                                 }
                             ) {
                                 Icon(
@@ -386,7 +387,7 @@ fun MultiSelectionBottomSheet(
                                 shape = CircleShape,
                                 onClick = {
                                     onPlayNext()
-                                    onDismiss()
+                                    dismissSheetAnimated()
                                 }
                             ) {
                                 Icon(
@@ -426,7 +427,7 @@ fun MultiSelectionBottomSheet(
                                 shape = CircleShape,
                                 onClick = {
                                     onAddToPlaylist()
-                                    onDismiss()
+                                    dismissSheetAnimated()
                                 }
                             ) {
                                 Icon(
@@ -457,7 +458,7 @@ fun MultiSelectionBottomSheet(
                                     val activity = (context as? Activity)
                                     if (activity != null) {
                                         onDeleteAll(activity) { success ->
-                                            if (success) onDismiss()
+                                            if (success) dismissSheetAnimated()
                                         }
                                     }
                                 }

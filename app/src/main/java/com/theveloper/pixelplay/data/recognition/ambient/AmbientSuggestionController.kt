@@ -26,8 +26,7 @@ class AmbientSuggestionController @Inject constructor(
     private val speechRecognition: OnDeviceSpeechRecognition,
     private val dualPlayerEngine: DualPlayerEngine,
     private val heardSongsRepository: HeardSongsRepository,
-    private val musicRepository: MusicRepository,
-    private val youTubeRepository: YouTubeRepository,
+    private val heardSongResolver: HeardSongResolver,
     private val userPreferencesRepository: UserPreferencesRepository
 ) {
     private var session: CoroutineScope? = null
@@ -142,19 +141,12 @@ class AmbientSuggestionController @Inject constructor(
     private suspend fun resolveSuggestion(suggestion: ExtractedSongSuggestion) {
         try {
             val started = System.nanoTime()
-            val local = withTimeoutOrNull(750) {
-                musicRepository.searchSongs(suggestion.cleanTitle).first()
-            }.orEmpty()
-            val localMatch = AmbientSongMatcher.bestMatch(local, suggestion)
-            val match = localMatch ?: withTimeoutOrNull(8_000) {
-                val query = listOfNotNull(suggestion.cleanTitle, suggestion.artist).joinToString(" ")
-                AmbientSongMatcher.bestMatch(youTubeRepository.searchSongs(query), suggestion)
-            } ?: return
+            val resolved = heardSongResolver.resolve(suggestion) ?: return
             currentCoroutineContext().ensureActive()
-            val added = heardSongsRepository.addOrUpvote(match, localMatch == null,
+            val added = heardSongsRepository.addOrUpvote(resolved.song, !resolved.isLocal,
                 suggestion.rawText, currentPlayingSongId)
             Timber.tag("StreamingLatency").d("heard_suggestion_ms=%d local=%b",
-                (System.nanoTime() - started) / 1_000_000, localMatch != null)
+                (System.nanoTime() - started) / 1_000_000, resolved.isLocal)
             if (added && chimeEnabled) {
                 val tone = ToneGenerator(AudioManager.STREAM_MUSIC, 50)
                 try { tone.startTone(ToneGenerator.TONE_PROP_BEEP, 100); delay(150) }

@@ -16,17 +16,30 @@ object TrackMatching {
     )
     private val modifierRegex = MODIFIERS.associateWith { Regex("\\b${Regex.escape(it)}\\b") }
 
-    fun stripAccents(value: String): String =
-        Normalizer.normalize(value, Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
+    // Compiled once. These used to be built on every call; blends and matching run them for
+    // thousands of songs, and compiling an ICU pattern each time churned native memory until it
+    // failed (PatternSyntaxException: U_MEMORY_ALLOCATION_ERROR, then OutOfMemoryError).
+    private val MARKS = Regex("\\p{M}+")
+    private val BRACKETS = Regex("\\(.*?\\)|\\[.*?]")
+    private val FEATURING = Regex("\\b(feat\\.?|ft\\.?|featuring)\\b.*")
+    private val NOT_LETTER_DIGIT_SPACE = Regex("[^\\p{L}\\p{N} ]")
+    private val SPACES = Regex("\\s+")
+    private val ARTIST_SPLIT = Regex("[,&/]|\\bx\\b|\\band\\b|\\bfeat\\.?\\b")
+
+    fun stripAccents(value: String): String {
+        // Plain ASCII has no accents: skip the Unicode normalisation (most titles).
+        if (value.all { it.code < 128 }) return value
+        return Normalizer.normalize(value, Normalizer.Form.NFD).replace(MARKS, "")
+    }
 
     /** Lower-case core title without "(...)", "[...]", " - suffix", "feat." parts. */
     fun normalize(title: String): String {
         var t = stripAccents(title).lowercase(Locale.ROOT).trim()
-        t = t.replace(Regex("\\(.*?\\)|\\[.*?]"), " ")
+        t = t.replace(BRACKETS, " ")
         t = t.substringBefore(" - ")
-        t = t.replace(Regex("\\b(feat\\.?|ft\\.?|featuring)\\b.*"), " ")
-        t = t.replace(Regex("[^\\p{L}\\p{N} ]"), " ")
-        return t.replace(Regex("\\s+"), " ").trim()
+        t = t.replace(FEATURING, " ")
+        t = t.replace(NOT_LETTER_DIGIT_SPACE, " ")
+        return t.replace(SPACES, " ").trim()
     }
 
     fun modifiers(title: String): Set<String> {
@@ -44,8 +57,8 @@ object TrackMatching {
     fun artistsOverlap(source: String, candidate: String): Boolean {
         val tokens = { v: String ->
             stripAccents(v).lowercase(Locale.ROOT).removeSuffix(" - topic")
-                .split(Regex("[,&/]|\\bx\\b|\\band\\b|\\bfeat\\.?\\b"))
-                .map { it.replace(Regex("[^\\p{L}\\p{N} ]"), "").trim() }
+                .split(ARTIST_SPLIT)
+                .map { it.replace(NOT_LETTER_DIGIT_SPACE, "").trim() }
                 .filter { it.isNotEmpty() }
                 .toSet()
         }

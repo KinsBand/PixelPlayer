@@ -11,11 +11,19 @@ import kotlin.math.roundToInt
  * Change a weight → bump [version].
  */
 internal data class MixWeights(
-    val version: String = "w2",
+    val version: String = "w3",
 
     // ── Relevance to what's playing ──────────────────────────────────────────────
-    /** Multiplies [MixVibe.sessionFit] (0…12: same artist 6, same genre 4, same album 2). */
-    val sessionFit: Double = 1.0,
+    /**
+     * Multiplies [MixVibe.sessionFit] (0…12: same artist 6, same genre 4, same album 2).
+     * Lowered from 1.0 in w3 so artist / genre metadata no longer outweighs how a song feels.
+     */
+    val sessionFit: Double = 0.6,
+    /**
+     * How close a song feels to the session vibe ([SessionVibe]): energy, mood, tempo, sound…
+     * Applied to (fit − prior), so an average song scores about 0 and a close match about +4.
+     */
+    val feelFit: Double = 6.0,
     /**
      * A song whose fit can't be judged (no recognised genre, no shared artist) gets this share
      * of the batch's average fit instead of 0, so thin metadata isn't read as "doesn't fit".
@@ -57,6 +65,14 @@ internal data class MixWeights(
     val albumRepeat: Double = 2.0,
     /** Hard rule: an artist can't return within this many songs (unless nothing else fits). */
     val minArtistGap: Int = 4,
+    /** At most this many songs by one artist in any 20 in a row (Focused 5 … Varied 1). */
+    val artistCapPer20: Int = 4,
+    /** A discovery is preferred (to meet the Familiar ↔ Discover balance) within this many points of the best pick. */
+    val discoveryTolerance: Double = 2.5,
+    /** A friend's song is preferred (to meet the friends' share) within this many points of the best pick. */
+    val friendTolerance: Double = 2.5,
+    /** A song counts as familiar for this long after it was last really listened to. */
+    val familiarDays: Double = 60.0,
 
     // ── Transitions ([MixVibe]) ──────────────────────────────────────────────────
     val energy: Double = 4.0,
@@ -77,11 +93,16 @@ internal data class MixWeights(
 ) {
     /**
      * The Variety setting (0 = focused, 1 = varied) sets the artist gap: 2 songs when focused,
-     * up to 8 when varied; the default 0.35 gives 4.
+     * up to 8 when varied; the default 0.35 gives 4. It also caps how many songs one artist gets in
+     * any 20 (Focused 5 … Varied 1; the default gives 4).
      */
     fun withVariety(variety: Double): MixWeights {
         val v = variety.takeIf { it.isFinite() }?.coerceIn(0.0, 1.0) ?: DEFAULT_VARIETY
-        return copy(minArtistGap = (2 + v * 6).roundToInt().coerceIn(2, 8))
+        return copy(
+            minArtistGap = (2 + v * 6).roundToInt().coerceIn(2, 8),
+            // Focused 5 songs per artist in any 20 … Varied 1.
+            artistCapPer20 = (5 - v * 4).roundToInt().coerceIn(1, 5),
+        )
     }
 
     companion object {

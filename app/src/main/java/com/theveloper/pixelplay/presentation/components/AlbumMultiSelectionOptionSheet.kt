@@ -66,6 +66,7 @@ fun AlbumMultiSelectionOptionSheet(
     @Suppress("DEPRECATION")
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
+    val dismissSheetAnimated = rememberAnimatedSheetDismiss(sheetState, onDismiss)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState
@@ -135,7 +136,7 @@ fun AlbumMultiSelectionOptionSheet(
                 AlbumSelectionActionButton(
                     onClick = {
                         onPlay()
-                        onDismiss()
+                        dismissSheetAnimated()
                     },
                     modifier = Modifier
                         .weight(0.5f)
@@ -156,7 +157,7 @@ fun AlbumMultiSelectionOptionSheet(
                 AlbumSelectionActionButton(
                     onClick = {
                         onAddToPlaylist()
-                        onDismiss()
+                        dismissSheetAnimated()
                     },
                     modifier = Modifier
                         .weight(0.5f)
@@ -187,7 +188,7 @@ fun AlbumMultiSelectionOptionSheet(
                 AlbumSelectionActionButton(
                     onClick = {
                         onPlayNext()
-                        onDismiss()
+                        dismissSheetAnimated()
                     },
                     modifier = Modifier
                         .weight(0.4f)
@@ -208,7 +209,7 @@ fun AlbumMultiSelectionOptionSheet(
                 AlbumSelectionActionButton(
                     onClick = {
                         onAddToQueue()
-                        onDismiss()
+                        dismissSheetAnimated()
                     },
                     modifier = Modifier
                         .weight(0.6f)

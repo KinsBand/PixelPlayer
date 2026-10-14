@@ -31,6 +31,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import androidx.core.net.toUri
 import androidx.paging.insertHeaderItem
+import androidx.paging.flatMap
 import com.theveloper.pixelplay.data.model.DownloadState
 import com.theveloper.pixelplay.data.database.FavoritesDao
 import com.theveloper.pixelplay.data.database.MusicDao
@@ -112,6 +113,8 @@ class MusicRepositoryImpl @Inject constructor(
         private const val SEARCH_MORE_PAGE_SIZE = 30
         private const val UNKNOWN_GENRE_NAME = "Unknown"
         private const val UNKNOWN_GENRE_ID = "unknown"
+        /** Placeholder row replaced by the liked cloud songs (compared by identity). */
+        private val CLOUD_FAVORITES_HEADER: Song = Song.emptySong().copy(id = "__cloud_favorites_header__")
     }
 
     private val directoryScanMutex = Mutex()
@@ -320,11 +323,13 @@ class MusicRepositoryImpl @Inject constructor(
                     )
                 }
                 songRepository.getPaginatedFavoriteSongs(sortOption, storageFilter).map { pagingData ->
-                    var resultPagingData = pagingData
-                    for (cloudSong in cloudSongs.reversed()) {
-                        resultPagingData = resultPagingData.insertHeaderItem(item = cloudSong)
-                    }
-                    resultPagingData
+                    // One header that expands into every liked cloud song. Inserting them one
+                    // by one stacked a separate Paging transform per song (hundreds for a big
+                    // YouTube Music library), all re-run on every page load.
+                    if (cloudSongs.isEmpty()) pagingData
+                    else pagingData
+                        .insertHeaderItem(item = CLOUD_FAVORITES_HEADER)
+                        .flatMap { song -> if (song === CLOUD_FAVORITES_HEADER) cloudSongs else listOf(song) }
                 }
             }.flowOn(Dispatchers.IO)
     }
@@ -739,6 +744,8 @@ class MusicRepositoryImpl @Inject constructor(
 
     override fun searchAll(query: String, filterType: SearchFilterType): Flow<List<SearchResultItem>> {
         if (query.isBlank()) return flowOf(emptyList())
+        // People come from Spotify (SearchStateHolder), not the library or YouTube Music.
+        if (filterType == SearchFilterType.PROFILES) return flowOf(emptyList())
         val intent = MusicSearchQuery.parse(query)
         val terms = intent.terms
         return flow {
@@ -769,6 +776,7 @@ class MusicRepositoryImpl @Inject constructor(
                 SearchFilterType.PLAYLISTS -> flow {
                     emit(searchPlaylists(terms).map { SearchResultItem.PlaylistItem(it) })
                 }
+                SearchFilterType.PROFILES -> flowOf(emptyList())
             }
             // One online request per query, independent of Room invalidations.
             val online = flow<List<SearchResultItem>> {
@@ -840,6 +848,17 @@ class MusicRepositoryImpl @Inject constructor(
         val seen = HashSet(shownSongIds).apply { localNew.forEach { add(it.id) } }
         val onlineNew = online.filter { seen.add(it.id) }
         SearchSongsPage(localNew + onlineNew, hasMore = onlineHasMore)
+    }
+
+    override suspend fun moreCollections(
+        query: String,
+        filter: SearchFilterType,
+        reset: Boolean
+    ): com.theveloper.pixelplay.data.repository.SearchItemsPage = withContext(Dispatchers.IO) {
+        val terms = MusicSearchQuery.parse(query).onlineQuery
+        if (terms.isBlank()) return@withContext com.theveloper.pixelplay.data.repository.SearchItemsPage(emptyList(), hasMore = false)
+        val (items, hasMore) = youTubeRepository.moreCollections(terms, filter, reset)
+        com.theveloper.pixelplay.data.repository.SearchItemsPage(items, hasMore)
     }
 
     override suspend fun addSearchHistoryItem(query: String) {
@@ -1160,6 +1179,11 @@ class MusicRepositoryImpl @Inject constructor(
 
     override fun getFavoriteSongIdsByRecentFlow(): Flow<List<String>> =
         favoritesDao.getFavoriteSongIdsByRecent()
+
+    override fun getFavoriteLikeTimesFlow(): Flow<Map<String, Long>> =
+        favoritesDao.getFavoritesByRecentRaw()
+            .map { rows -> rows.associate { it.songId to it.timestamp } }
+            .distinctUntilChanged()
 
     override suspend fun toggleFavoriteStatus(songId: String): Boolean = withContext(Dispatchers.IO) {
         val isFav = favoritesDao.isFavorite(songId) ?: false

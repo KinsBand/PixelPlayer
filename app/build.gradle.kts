@@ -31,7 +31,9 @@ val enableAbiSplits = providers.gradleProperty("pixelplay.enableAbiSplits")
     .toBoolean()
 
 // ABIs we ship splits for. Keep in sync with the `splits.abi.include` call below.
-val supportedAbiSplits = listOf("arm64-v8a", "armeabi-v7a")
+// arm64 only: every phone this is built for is 64-bit ARM, and one ABI keeps builds (native code,
+// packaging) about half as long. Add "armeabi-v7a" back here for old 32-bit phones.
+val supportedAbiSplits = listOf("arm64-v8a")
 
 // Android Studio passes -Pandroid.injected.build.abi=<device abis> whenever you Run/Debug on a
 // device. AGP reacts by disabling every variant output except the one matching that ABI
@@ -52,6 +54,19 @@ val injectedAbis = providers.gradleProperty("android.injected.build.abi").orNull
 val targetAbiSplits = injectedAbis.firstOrNull { it in supportedAbiSplits }
     ?.let(::listOf)
     ?: supportedAbiSplits
+
+// Discord status (Discord Social SDK). The SDK comes from the Discord Developer Portal and is not
+// committed (see .gitignore): put discord_partner_sdk.aar in app/libs to build with it. Without it
+// the app builds as usual and the Discord setting says this build has no Discord support.
+val discordSdkAar = file("libs/discord_partner_sdk.aar")
+val hasDiscordSdk = discordSdkAar.exists()
+
+// Quick local release builds: pixelplay.fastRelease=true (gradle.properties) skips R8 shrinking /
+// obfuscation and resource shrinking, the longest part of a release build. Set it to false for
+// any build you share or publish (smaller APK, and it checks the ProGuard keep rules).
+val fastRelease = providers.gradleProperty("pixelplay.fastRelease")
+    .getOrElse("false")
+    .toBoolean()
 
 val enableComposeCompilerReports = providers.gradleProperty("pixelplay.enableComposeCompilerReports")
     .getOrElse("false")
@@ -102,6 +117,33 @@ android {
         buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"$spotifyClientId\"")
         buildConfigField("String", "YOUTUBE_API_KEY",
             "\"${localProperties.getProperty("YOUTUBE_API_KEY") ?: project.findProperty("YOUTUBE_API_KEY") ?: ""}\"")
+        // Artist tour dates (Ticketmaster Discovery API). Empty = the tour card stays hidden.
+        buildConfigField("String", "TICKETMASTER_API_KEY",
+            "\"${localProperties.getProperty("TICKETMASTER_API_KEY") ?: project.findProperty("TICKETMASTER_API_KEY") ?: ""}\"")
+        // The Discord Application ID is entered in the app (never built in).
+        buildConfigField("boolean", "DISCORD_SOCIAL_SDK", hasDiscordSdk.toString())
+        if (hasDiscordSdk) {
+            externalNativeBuild {
+                cmake {
+                    // Native code only for the ABIs we ship (the splits below).
+                    abiFilters(*supportedAbiSplits.toTypedArray())
+                    // The SDK's Prefab package is built with "stl": "none"; our bridge links the
+                    // C++ runtime statically, so no libc++_shared.so has to be shipped.
+                    arguments += "-DANDROID_STL=c++_static"
+                }
+            }
+        }
+    }
+
+    if (hasDiscordSdk) {
+        // The versions installed in Android Studio's SDK Manager.
+        ndkVersion = "30.0.16248370"
+        externalNativeBuild {
+            cmake {
+                path = file("src/main/discord/CMakeLists.txt")
+                version = "4.1.2"
+            }
+        }
     }
 
     signingConfigs {
@@ -125,8 +167,11 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
-            isMinifyEnabled = true
-            isShrinkResources = true
+            isMinifyEnabled = !fastRelease
+            isShrinkResources = !fastRelease
+            // Skip re-compressing every PNG on each release build (slow, saves little: most art
+            // is vector or WebP).
+            isCrunchPngs = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -149,6 +194,8 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        // The Discord SDK's native library is consumed through Prefab.
+        prefab = hasDiscordSdk
     }
 
     testOptions {
@@ -187,7 +234,8 @@ baselineProfile {
     // startup dex-layout input once they are checked into the app.
     automaticGenerationDuringBuild = false
     saveInSrc = true
-    dexLayoutOptimization = true
+    // Dex layout comes from R8, so it's off with fastRelease.
+    dexLayoutOptimization = !fastRelease
 }
 
 ksp {
@@ -215,6 +263,9 @@ kotlin {
 }
 
 dependencies {
+    // Discord Social SDK (only when its AAR is in app/libs; see hasDiscordSdk).
+    if (hasDiscordSdk) implementation(files("libs/discord_partner_sdk.aar"))
+
     // Core & Optimization
     coreLibraryDesugaring(libs.desugar.jdk.libs)
     implementation(libs.androidx.profileinstaller)
@@ -222,6 +273,8 @@ dependencies {
 
     // AndroidX & Compose
     implementation(libs.androidx.core.ktx)
+    // DataStore used to come in through Glance (widgets); declared directly now that Glance is gone.
+    implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.lifecycleprocess)
@@ -273,12 +326,15 @@ dependencies {
     implementation(libs.androidx.mediarouter)
     implementation(libs.androidx.media)
     implementation(libs.coil.compose)
+    implementation(libs.maplibre.android)
     implementation(libs.taglib)
     implementation(libs.jaudiotagger)
     implementation(libs.vorbisjava.core)
     implementation(libs.wavy.slider)
     implementation(libs.androidx.graphics.shapes)
     implementation("com.google.ai.edge.litert:litert:1.4.2")
+    // On-device lyrics word sync (wav2vec2 CTC model, downloaded at runtime; see data/lyrics/align)
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
 
     // Networking & Serialization
     implementation(libs.retrofit)
@@ -289,6 +345,8 @@ dependencies {
     // Lyricsfile (YAML lyrics from LRCLIB / LRCGET and .lyrics sidecars)
     implementation(libs.snakeyaml.engine)
     implementation(libs.kotlinx.serialization.json)
+    // On-device Gemini Nano (queue prompt, AI playlists, lyrics translation)
+    implementation(libs.mlkit.genai.prompt)
     implementation(libs.kotlinx.collections.immutable)
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.cio)
@@ -314,12 +372,10 @@ dependencies {
     implementation("com.pierfrancescosoffritti.androidyoutubeplayer:core:13.0.0")
     implementation(libs.timber)
     implementation(libs.generativeai)
+    implementation("com.google.ai.edge.litertlm:litertlm-android:latest.release")
     implementation(libs.smooth.corner.rect.android.compose)
     implementation(libs.reorderables)
     implementation(libs.codeview)
-    implementation(libs.androidx.glance)
-    implementation(libs.androidx.glance.appwidget)
-    implementation(libs.androidx.glance.material3)
     implementation(libs.kuromoji.ipadic)
     implementation(libs.pinyin4j.core)
     implementation(libs.accompanist.drawablepainter)

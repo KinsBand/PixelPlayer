@@ -13,6 +13,12 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 
+/**
+ * Placeholder block with a soft highlight that sweeps across it, left to right, then rests a
+ * beat. The sweep is sized to the box (the old fixed 1000px gradient barely moved on small
+ * blocks), and the value is read only in the draw phase, so frames redraw without recomposing.
+ * At animator duration scale 0 (Remove animations) the block stays still.
+ */
 @Composable
 fun ShimmerBox(modifier: Modifier = Modifier) {
     // Use MaterialTheme colors for proper dark/light mode support
@@ -24,27 +30,35 @@ fun ShimmerBox(modifier: Modifier = Modifier) {
     }
 
     val transition = rememberInfiniteTransition(label = "shimmer")
-    val translateAnim = transition.animateFloat(
+    val progress = transition.animateFloat(
         initialValue = 0f,
-        targetValue = 1000f,
+        targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1000, delayMillis = 200),
+            animation = tween(
+                durationMillis = SHIMMER_SWEEP_MS,
+                delayMillis = SHIMMER_REST_MS,
+                easing = com.theveloper.pixelplay.ui.theme.MotionTokens.Standard
+            ),
         ),
-        label = "shimmerTranslate"
+        label = "shimmerSweep"
     )
 
-    // The animated value is read only in the draw phase, so each frame just redraws the box
-    // instead of recomposing every shimmer placeholder on screen (grids show dozens).
     Box(
         modifier = modifier.drawBehind {
-            val t = translateAnim.value
+            drawRect(baseColor)
+            val band = size.width.coerceAtLeast(size.height) * 0.9f
+            // From fully off the left edge to fully off the right edge.
+            val x = -band + (size.width + band * 2f) * progress.value
             drawRect(
                 brush = Brush.linearGradient(
                     colors = shimmerColors,
-                    start = Offset.Zero,
-                    end = Offset(x = t, y = t)
+                    start = Offset(x - band / 2f, 0f),
+                    end = Offset(x + band / 2f, size.height * 0.4f)
                 )
             )
         }
     )
 }
+
+private const val SHIMMER_SWEEP_MS = 1100
+private const val SHIMMER_REST_MS = 250

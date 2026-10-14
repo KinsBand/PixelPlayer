@@ -75,7 +75,8 @@ internal fun PlayerLyricsSettingsContent(
             checked = uiState.showPlayerFileInfo,
             onCheckedChange = { settingsViewModel.setShowPlayerFileInfo(it) },
             leadingIcon = { Icon(painterResource(R.drawable.rounded_attach_file_24), null, tint = MaterialTheme.colorScheme.secondary) },
-            settingKey = "show_player_file_info"
+            settingKey = "show_player_file_info",
+            preview = { on -> FileInfoPreview(on) }
         )
     }
 

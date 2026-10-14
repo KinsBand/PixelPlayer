@@ -11,6 +11,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.animation.togetherWith
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -139,20 +144,79 @@ fun MixFeedbackBottomSheet(
 
             // --- Live status: tuning only reshapes the queue while a mix is running ---
             Spacer(Modifier.height(12.dp))
-            Surface(
-                onClick = { if (!isLive) player.activateSmartMix() },
-                enabled = !isLive,
-                shape = RoundedCornerShape(50),
-                color = if (isLive) colors.tertiaryContainer else colors.surfaceContainerHighest,
-                contentColor = if (isLive) colors.onTertiaryContainer else colors.onSurface
-            ) {
-                Text(
-                    text = if (isLive) "Live · ${activeFlavor?.title} — upcoming songs update as you tune"
-                    else "No mix playing · tap to start Smart Mix",
-                    style = MaterialTheme.typography.labelMedium,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
-                )
+            androidx.compose.animation.AnimatedContent(
+                targetState = isLive,
+                transitionSpec = {
+                    (androidx.compose.animation.fadeIn(
+                        androidx.compose.animation.core.tween(
+                            com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium1,
+                            easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate
+                        )
+                    ) + androidx.compose.animation.scaleIn(
+                        androidx.compose.animation.core.tween(
+                            com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium1,
+                            easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate
+                        ),
+                        initialScale = 0.92f
+                    )) togetherWith androidx.compose.animation.fadeOut(
+                        androidx.compose.animation.core.tween(
+                            com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort3,
+                            easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate
+                        )
+                    )
+                },
+                label = "mixLiveStatus"
+            ) { live ->
+                if (live) {
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = colors.tertiaryContainer,
+                        contentColor = colors.onTertiaryContainer
+                    ) {
+                        Text(
+                            text = "Live · ${activeFlavor?.title} — upcoming songs update as you tune",
+                            style = MaterialTheme.typography.labelMedium,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                        )
+                    }
+                } else {
+                    // No mix running: one clear button that starts Smart Mix.
+                    androidx.compose.material3.FilledTonalButton(
+                        onClick = { player.activateSmartMix() },
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .semantics { contentDescription = "Start Smart Mix" }
+                    ) {
+                        Icon(
+                            imageVector = androidx.compose.material.icons.Icons.Rounded.AutoAwesome,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Smart Mix", style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+            }
+
+            // --- Where the mix is heading: the session vibe in words, plus active steers ---
+            if (isLive) {
+                val steers by player.mixSteers.collectAsStateWithLifecycle()
+                // Re-read when the steers change; the vibe itself moves song by song.
+                val heading = remember(steers, energy) { player.mixHeadingSummary() }
+                if (heading != null || steers.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = listOfNotNull(
+                            heading?.let { "Heading toward: $it" },
+                            steers.takeIf { it.isNotEmpty() }?.joinToString(" · ", prefix = "Steering: ") { it.label }
+                        ).joinToString("\n"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
 
             // --- Top row: Familiar <-> Discover slider ---

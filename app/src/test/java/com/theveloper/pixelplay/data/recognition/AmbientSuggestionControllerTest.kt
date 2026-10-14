@@ -30,7 +30,7 @@ class AmbientSuggestionControllerTest {
             every { ambientDuckingFactorFlow } returns flowOf(.15f)
             every { ambientAudioChimeEnabledFlow } returns flowOf(false)
         }
-        val controller = AmbientSuggestionController(factory, player, HeardSongsRepository(), mockk(), mockk(), prefs)
+        val controller = AmbientSuggestionController(factory, player, HeardSongsRepository(), mockk(), prefs)
         try {
             controller.start { fail<Unit>(it) }
             verify(exactly = 1) { recognizer.startListening(any()) }
@@ -54,7 +54,7 @@ class AmbientSuggestionControllerTest {
 
     @Test fun `missing on device recognizer does not silently send conversations online`() {
         val factory = mockk<OnDeviceSpeechRecognition> { every { isAvailable() } returns false }
-        val controller = AmbientSuggestionController(factory, mockk(), HeardSongsRepository(), mockk(), mockk(), mockk())
+        val controller = AmbientSuggestionController(factory, mockk(), HeardSongsRepository(), mockk(), mockk())
         var error: String? = null
         controller.start { error = it }
         assertNotNull(error)

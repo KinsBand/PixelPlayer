@@ -27,7 +27,7 @@ fun FriendTrack.toPlayableSong(): Song? {
     if (!uri.startsWith("spotify:track:") || title.isBlank()) return null
     return SpotifyTrack(
         id = uri.substringAfterLast(':'), title = title, artistName = artist.ifBlank { "Unknown artist" },
-        albumName = "", durationMs = (durationMs ?: 0L).coerceIn(0L, Int.MAX_VALUE.toLong()).toInt(),
+        albumName = album, durationMs = (durationMs ?: 0L).coerceIn(0L, Int.MAX_VALUE.toLong()).toInt(),
         isrc = null, coverUrl = coverUrl
     ).toSong()
 }

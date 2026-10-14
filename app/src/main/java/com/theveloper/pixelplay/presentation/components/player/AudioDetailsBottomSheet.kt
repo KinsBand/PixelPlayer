@@ -31,6 +31,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.PhoneAndroid
+import androidx.compose.material.icons.rounded.PersonSearch
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.InputChip
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -104,6 +116,8 @@ fun AudioDetailsBottomSheet(
     val scope = rememberCoroutineScope()
     val versionsState by viewModel.versions.collectAsStateWithLifecycle()
     val onlineVersionsState by viewModel.onlineVersions.collectAsStateWithLifecycle()
+    val coverArtists by viewModel.coverArtists.collectAsStateWithLifecycle()
+    val coverVersionsState by viewModel.coverVersions.collectAsStateWithLifecycle()
     val scanState by viewModel.scanState.collectAsStateWithLifecycle()
     val scanned = (scanState as? AudioScanState.Done)?.result
 
@@ -133,6 +147,9 @@ fun AudioDetailsBottomSheet(
             onlineVersionsState = onlineVersionsState,
             onVersionsShown = { viewModel.loadOnline(song) },
             onRetryOnline = { viewModel.loadOnline(song, force = true) },
+            coverArtists = coverArtists,
+            coverVersionsState = coverVersionsState,
+            onCoverArtistsChange = { viewModel.setCoverArtists(song, it) },
             onVersionClick = { version ->
                 if (version.song.id != song.id) onPlayVersion(version.song)
                 hideThenDismiss()
@@ -154,6 +171,9 @@ private fun AudioDetailsSheetContent(
     onlineVersionsState: OnlineVersionsState,
     onVersionsShown: () -> Unit,
     onRetryOnline: () -> Unit,
+    coverArtists: List<String>,
+    coverVersionsState: OnlineVersionsState,
+    onCoverArtistsChange: (List<String>) -> Unit,
     onVersionClick: (SongVersion) -> Unit
 ) {
     val reduceMotion = rememberReduceMotion()
@@ -223,9 +243,13 @@ private fun AudioDetailsSheetContent(
                 )
                 OnlineVersionsList(
                     currentSongId = song.id,
+                    songArtist = song.artist,
                     state = onlineVersionsState,
                     reduceMotion = reduceMotion,
                     onRetry = onRetryOnline,
+                    coverArtists = coverArtists,
+                    coverState = coverVersionsState,
+                    onCoverArtistsChange = onCoverArtistsChange,
                     onVersionClick = onVersionClick
                 )
             }
@@ -311,6 +335,12 @@ private fun VersionsList(
             ),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
+        // "Local" header, matching "Online versions" below: icon, title and how many were found.
+        VersionsSectionHeader(
+            icon = Icons.Rounded.PhoneAndroid,
+            title = "Local",
+            count = (state as? SongVersionsState.Loaded)?.versions?.size
+        )
         when (state) {
             SongVersionsState.Loading -> {
                 repeat(2) { SkeletonSongRow() }
@@ -323,27 +353,82 @@ private fun VersionsList(
                         onClick = { onVersionClick(version) }
                     )
                 }
-                if (state.versions.size <= 1) {
-                    Text(
-                        text = "No other versions in your library · searching online below",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                    )
-                }
             }
         }
     }
 }
 
+/** Section title row for the versions lists: icon, title, and a count badge once known. */
+@Composable
+private fun VersionsSectionHeader(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    count: Int?,
+    trailing: (@Composable () -> Unit)? = null
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 40.dp)
+            .padding(start = 12.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .semantics(mergeDescendants = true) {
+                    count?.let { contentDescription = "$title, $it found" }
+                },
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            if (count != null && count > 0) {
+                Spacer(Modifier.width(8.dp))
+                Badge(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                ) { Text(count.toString()) }
+            }
+        }
+        trailing?.invoke()
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun OnlineVersionsList(
     currentSongId: String,
+    songArtist: String,
     state: OnlineVersionsState,
     reduceMotion: Boolean,
     onRetry: () -> Unit,
+    coverArtists: List<String>,
+    coverState: OnlineVersionsState,
+    onCoverArtistsChange: (List<String>) -> Unit,
     onVersionClick: (SongVersion) -> Unit
 ) {
+    var showCoverPicker by rememberSaveable { mutableStateOf(false) }
+    // Picker suggestions: other artists already found covering this song.
+    val suggestions = remember(state, songArtist) {
+        val own = coverArtistName(songArtist).lowercase(Locale.ROOT)
+        (state as? OnlineVersionsState.Loaded)?.versions.orEmpty()
+            .map { coverArtistName(it.song.artist) }
+            .filter { it.isNotBlank() && it.lowercase(Locale.ROOT) != own }
+            .distinctBy { it.lowercase(Locale.ROOT) }
+    }
+    val showingCovers = coverArtists.isNotEmpty()
+    val shownState = if (showingCovers) coverState else state
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -354,34 +439,60 @@ private fun OnlineVersionsList(
             ),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 4.dp)
-                .semantics(mergeDescendants = true) {},
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.Cloud,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(18.dp)
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = "Online versions",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            if (state is OnlineVersionsState.Loaded && state.versions.isNotEmpty()) {
-                Spacer(Modifier.width(8.dp))
-                Badge(
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                ) { Text(state.versions.size.toString()) }
+        VersionsSectionHeader(
+            icon = Icons.Rounded.Cloud,
+            title = if (showingCovers) "Covers" else "Online versions",
+            count = (shownState as? OnlineVersionsState.Loaded)?.versions?.size,
+            trailing = {
+                // Pick several artists to search covers by.
+                IconButton(onClick = { showCoverPicker = true }) {
+                    BadgedBox(
+                        badge = {
+                            if (coverArtists.isNotEmpty()) Badge { Text(coverArtists.size.toString()) }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.PersonSearch,
+                            contentDescription = if (coverArtists.isEmpty()) "Search covers by artists"
+                            else "Cover artists, ${coverArtists.size} picked"
+                        )
+                    }
+                }
+            }
+        )
+        // Picked artists: tap one to drop it; Clear goes back to every online version.
+        if (showingCovers) {
+            FlowRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                coverArtists.forEach { artist ->
+                    InputChip(
+                        selected = true,
+                        onClick = { onCoverArtistsChange(coverArtists - artist) },
+                        label = { Text(artist, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        trailingIcon = {
+                            Icon(Icons.Rounded.Close, contentDescription = "Remove $artist", modifier = Modifier.size(16.dp))
+                        }
+                    )
+                }
+                TextButton(onClick = { onCoverArtistsChange(emptyList()) }) { Text("Clear") }
             }
         }
-        when (state) {
+        if (showCoverPicker) {
+            CoverArtistsDialog(
+                picked = coverArtists,
+                suggestions = suggestions,
+                onConfirm = { artists ->
+                    showCoverPicker = false
+                    onCoverArtistsChange(artists)
+                },
+                onDismiss = { showCoverPicker = false }
+            )
+        }
+        when (val state = shownState) {
             OnlineVersionsState.Idle, OnlineVersionsState.Loading -> {
                 repeat(3) { SkeletonSongRow() }
             }
@@ -396,13 +507,13 @@ private fun OnlineVersionsList(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f)
                     )
-                    TextButton(onClick = onRetry) { Text("Retry") }
+                    TextButton(onClick = { if (showingCovers) onCoverArtistsChange(coverArtists) else onRetry() }) { Text("Retry") }
                 }
             }
             is OnlineVersionsState.Loaded -> {
                 if (state.versions.isEmpty()) {
                     Text(
-                        text = "No other versions found online",
+                        text = if (showingCovers) "No covers found by these artists" else "No other versions found online",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
@@ -658,4 +769,98 @@ private fun rememberReduceMotion(): Boolean {
             1f
         ) == 0f
     }
+}
+
+/** The main credited artist of a song ("A, B", "A & B", "A feat. B" → "A"). */
+private fun coverArtistName(artist: String): String =
+    artist.split(Regex(""",|\s&\s|\sfeat\.?\s|\sft\.?\s|\sx\s""", RegexOption.IGNORE_CASE))
+        .firstOrNull().orEmpty().trim()
+
+/**
+ * Pick the artists to search covers by: tick any found already covering the song, or type a name
+ * and add it. Several can be picked; Search looks each one up.
+ */
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@Composable
+private fun CoverArtistsDialog(
+    picked: List<String>,
+    suggestions: List<String>,
+    onConfirm: (List<String>) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var selected by remember(picked) { mutableStateOf(picked) }
+    var typed by rememberSaveable { mutableStateOf("") }
+    val options = remember(selected, suggestions) {
+        (selected + suggestions).distinctBy { it.lowercase(Locale.ROOT) }
+    }
+    fun addTyped() {
+        val name = typed.trim()
+        if (name.isEmpty()) return
+        if (selected.none { it.equals(name, ignoreCase = true) }) selected = selected + name
+        typed = ""
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.PersonSearch, contentDescription = null) },
+        title = { Text("Covers by") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = typed,
+                        onValueChange = { typed = it },
+                        label = { Text("Artist name") },
+                        singleLine = true,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            imeAction = androidx.compose.ui.text.input.ImeAction.Done
+                        ),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { addTyped() }),
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = { addTyped() }, enabled = typed.isNotBlank()) {
+                        Icon(Icons.Rounded.Add, contentDescription = "Add artist")
+                    }
+                }
+                if (options.isEmpty()) {
+                    Text(
+                        "Type an artist and add them. Artists already covering this song show up here once the online search finishes.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .heightIn(max = 240.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        options.forEach { artist ->
+                            val isOn = selected.any { it.equals(artist, ignoreCase = true) }
+                            FilterChip(
+                                selected = isOn,
+                                onClick = {
+                                    selected = if (isOn) selected.filterNot { it.equals(artist, ignoreCase = true) }
+                                    else selected + artist
+                                },
+                                label = { Text(artist, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    // Anything still typed counts too.
+                    val name = typed.trim()
+                    val final = if (name.isNotEmpty() && selected.none { it.equals(name, ignoreCase = true) }) selected + name else selected
+                    onConfirm(final)
+                }
+            ) { Text(if (selected.isEmpty() && typed.isBlank()) "Show all" else "Search") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }

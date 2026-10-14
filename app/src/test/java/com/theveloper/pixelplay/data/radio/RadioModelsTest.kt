@@ -56,34 +56,6 @@ class RadioModelsTest {
         assertTrue(RadioScopeFilter.local(listOf(station("a", lat = 1.0, lon = 1.0)), home).isEmpty())
     }
 
-    @Test fun `FM dial places stations at their frequency and seeks in order`() {
-        val a = station("a", name = "Alpha 88.0")
-        val b = station("b", name = "Bravo 98.0")
-        val c = station("c", name = "Charlie 107.9")
-        val web = station("web", name = "Internet Only")
-        val dial = DialLayout.build(RadioBand.FM, listOf(c, web, a, b))
-        assertEquals(listOf("a", "b", "c"), dial.stops.map { it.station.uuid })
-        assertEquals(((98.0 - 87.5) / (108.0 - 87.5)).toFloat(), dial.stops[1].position, 1e-4f)
-        assertEquals("b", dial.next(dial.stops[0].position)?.station?.uuid)
-        assertEquals("a", dial.previous(dial.stops[1].position)?.station?.uuid)
-        // Wraps around like a real seek.
-        assertEquals("a", dial.next(dial.stops[2].position)?.station?.uuid)
-        assertEquals("98.0", dial.readout(dial.stops[1].position))
-    }
-
-    @Test fun `web dial orders west to east and labels groups`() {
-        val ny = station("ny", lat = 40.7, lon = -74.0)
-        val london = station("ldn", lat = 51.5, lon = -0.1)
-        val tokyo = station("tyo", lat = 35.7, lon = 139.7)
-        val dial = DialLayout.build(RadioBand.WEB, listOf(tokyo, london, ny)) { s ->
-            RadioGeo.continentOf(s.lat!!, s.lon!!)
-        }
-        assertEquals(listOf("ny", "ldn", "tyo"), dial.stops.map { it.station.uuid })
-        assertEquals(0f, dial.stops.first().position)
-        assertEquals(1f, dial.stops.last().position)
-        assertEquals(listOf("N. America", "Europe", "Asia"), dial.marks.map { it.second })
-    }
-
     @Test fun `continents are roughly right`() {
         assertEquals("Oceania", RadioGeo.continentOf(-27.5, 153.0))
         assertEquals("Oceania", RadioGeo.continentOf(-41.3, 174.8))
@@ -94,16 +66,28 @@ class RadioModelsTest {
         assertEquals("N. America", RadioGeo.continentOf(19.4, -99.1))
     }
 
-    @Test fun `clustering merges points in the same cell and sorts by popularity`() {
-        val a = station("a", lat = 0.0, lon = 0.0, clicks = 1)
-        val b = station("b", lat = 0.0, lon = 0.1, clicks = 50)
-        val far = station("far", lat = 10.0, lon = 10.0)
-        val clusters = RadioMapMath.cluster(listOf(a, b, far), cellPx = 40f) { s ->
-            (s.lon!!.toFloat() * 100f + 5f) to (-s.lat!!.toFloat() * 100f + 5f)
-        }
-        assertEquals(2, clusters.size)
-        val big = clusters.first { it.stations.size == 2 }
-        assertEquals(listOf("b", "a"), big.stations.map { it.uuid })
+    @Test fun `stations at the same spot share one pin, most popular first`() {
+        val a = station("a", lat = -27.4710, lon = 153.0310, clicks = 1)
+        val b = station("b", lat = -27.4715, lon = 153.0314, clicks = 50)
+        val far = station("far", lat = -33.87, lon = 151.21)
+        val noGeo = station("nogeo")
+        val spots = RadioMapMath.spots(listOf(a, b, far, noGeo))
+        assertEquals(2, spots.size)
+        val city = spots.first { it.stations.size == 2 }
+        assertEquals(listOf("b", "a"), city.stations.map { it.uuid })
+        assertEquals("b", city.lead.uuid)
+    }
+
+    @Test fun `mercator projection round trips and keeps the equator in the middle`() {
+        assertEquals(0.5, RadioMapMath.normX(0.0), 1e-9)
+        assertEquals(0.5, RadioMapMath.normY(0.0), 1e-9)
+        assertEquals(0.0, RadioMapMath.normX(-180.0), 1e-9)
+        assertEquals(1.0, RadioMapMath.normX(180.0), 1e-9)
+        // North is up: Brisbane (south) sits below the middle, London above.
+        assertTrue(RadioMapMath.normY(-27.47) > 0.5)
+        assertTrue(RadioMapMath.normY(51.5) < 0.5)
+        assertEquals(-27.47, RadioMapMath.latOf(RadioMapMath.normY(-27.47)), 1e-6)
+        assertEquals(153.03, RadioMapMath.lonOf(RadioMapMath.normX(153.03)), 1e-6)
     }
 
     @Test fun `bounds trim outliers`() {

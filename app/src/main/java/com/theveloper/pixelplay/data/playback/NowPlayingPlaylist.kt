@@ -18,4 +18,15 @@ object NowPlayingPlaylist {
     fun onQueueStarted(playlistId: String?, queueName: String) {
         _current.value = playlistId?.takeIf { it.isNotBlank() }?.let { Entry(it, queueName) }
     }
+
+    private val _isPlaying = MutableStateFlow(false)
+    /**
+     * Mirrors the player's play/pause state, so "now playing" badges can animate their bars
+     * without each card needing the PlayerViewModel. Fed by PlayerViewModel.
+     */
+    val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
+
+    fun setPlaying(playing: Boolean) {
+        _isPlaying.value = playing
+    }
 }

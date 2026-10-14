@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.data.spotify.web
 
+import java.io.ByteArrayOutputStream
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -9,6 +10,9 @@ import javax.crypto.spec.SecretKeySpec
  * The web player ships a versioned secret string. Each character is XOR-ed with
  * `(index % 33) + 9`, the resulting numbers are joined as decimal text, and that text is the
  * HMAC-SHA1 key of a standard 30-second TOTP.
+ *
+ * Spotube's Spotify plugin gets the same key already derived and base32-encoded from a
+ * community-maintained list ("nuances"); [base32] decodes that form to the identical key bytes.
  */
 object SpotifyTotp {
     /** Secret the web player has used since January 2026 (version 61), as character codes. */
@@ -20,10 +24,32 @@ object SpotifyTotp {
     internal fun key(secret: String): ByteArray =
         secret.mapIndexed { i, c -> (c.code xor ((i % 33) + 9)).toString() }.joinToString("").toByteArray(Charsets.US_ASCII)
 
-    fun code(secret: String, epochSeconds: Long): String {
+    /** RFC 4648 base32 (no padding needed, case-insensitive). */
+    fun base32(input: String): ByteArray {
+        val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+        val out = ByteArrayOutputStream()
+        var buffer = 0
+        var bits = 0
+        for (c in input.trim().trimEnd('=').uppercase()) {
+            if (c.isWhitespace()) continue
+            val v = alphabet.indexOf(c)
+            require(v >= 0) { "Not a base32 secret" }
+            buffer = ((buffer shl 5) or v) and 0xFFFF
+            bits += 5
+            if (bits >= 8) {
+                out.write((buffer shr (bits - 8)) and 0xFF)
+                bits -= 8
+            }
+        }
+        return out.toByteArray()
+    }
+
+    fun code(secret: String, epochSeconds: Long): String = codeForKey(key(secret), epochSeconds)
+
+    fun codeForKey(key: ByteArray, epochSeconds: Long): String {
         val counter = epochSeconds / 30
         val msg = ByteArray(8) { i -> (counter ushr (8 * (7 - i))).toByte() }
-        val mac = Mac.getInstance("HmacSHA1").apply { init(SecretKeySpec(key(secret), "HmacSHA1")) }.doFinal(msg)
+        val mac = Mac.getInstance("HmacSHA1").apply { init(SecretKeySpec(key, "HmacSHA1")) }.doFinal(msg)
         val offset = mac[mac.size - 1].toInt() and 0x0F
         val binary = ((mac[offset].toInt() and 0x7F) shl 24) or
             ((mac[offset + 1].toInt() and 0xFF) shl 16) or

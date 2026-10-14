@@ -91,4 +91,29 @@ class ArtistParsingUtilsTest {
             result
         )
     }
+
+    private fun split(raw: String) = collectArtistNames(
+        rawArtistName = raw,
+        title = "Song",
+        artistDelimiters = UserPreferencesRepository.DEFAULT_ARTIST_DELIMITERS,
+        wordDelimiters = UserPreferencesRepository.DEFAULT_ARTIST_WORD_DELIMITERS
+    )
+
+    @Test
+    fun `default separators split common collaboration credits`() {
+        assertEquals(listOf("Drake", "Rihanna", "Future"), split("Drake, Rihanna & Future"))
+        assertEquals(listOf("Marshmello", "Bastille"), split("Marshmello x Bastille"))
+        assertEquals(listOf("Calvin Harris", "Dua Lipa"), split("Calvin Harris with Dua Lipa"))
+        assertEquals(listOf("Bad Bunny", "J Balvin"), split("Bad Bunny con J Balvin"))
+        assertEquals(listOf("A", "B"), split("A / B"))
+    }
+
+    @Test
+    fun `real names with separators stay whole`() {
+        assertEquals(listOf("Tyler, The Creator", "Kali Uchis"), split("Tyler, The Creator & Kali Uchis"))
+        assertEquals(listOf("Kool & The Gang"), split("Kool & The Gang"))
+        assertEquals(listOf("Simon & Garfunkel"), split("Simon & Garfunkel"))
+        assertEquals(listOf("Earth, Wind & Fire"), split("Earth, Wind & Fire"))
+        assertEquals(listOf("Lil Nas X", "Jack Harlow"), split("Lil Nas X & Jack Harlow"))
+    }
 }

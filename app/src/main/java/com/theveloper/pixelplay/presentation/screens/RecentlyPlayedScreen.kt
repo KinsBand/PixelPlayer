@@ -1,6 +1,10 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import com.theveloper.pixelplay.presentation.components.subcomps.rememberShuffleSpin
+import com.theveloper.pixelplay.presentation.components.subcomps.shuffleSpin
+import com.theveloper.pixelplay.presentation.navigation.popBackStackSafely
 import com.theveloper.pixelplay.presentation.navigation.navigateSafely
+import com.theveloper.pixelplay.presentation.components.ExpressiveFilterChip
 
 import android.os.Trace
 import androidx.compose.foundation.background
@@ -54,6 +58,27 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
+import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
+import com.theveloper.pixelplay.ui.theme.MotionTokens
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
@@ -86,6 +111,16 @@ import com.theveloper.pixelplay.presentation.model.collectRecentlyPlayedSongIds
 import com.theveloper.pixelplay.presentation.model.mapRecentlyPlayedSongs
 import com.theveloper.pixelplay.presentation.viewmodel.PlaylistViewModel
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
+import com.theveloper.pixelplay.presentation.viewmodel.LikedSongsViewModel
+import com.theveloper.pixelplay.presentation.model.resolveBounds
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -98,12 +133,15 @@ import racra.compose.smooth_corner_rect_library.AbsoluteSmoothCornerShape
 import androidx.compose.ui.res.stringResource
 
 @androidx.annotation.OptIn(UnstableApi::class)
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun RecentlyPlayedScreen(
     playerViewModel: PlayerViewModel,
     playlistViewModel: PlaylistViewModel = hiltViewModel(),
-    navController: NavController
+    navController: NavController,
+    /** "Listened" (default) or "Liked", from the Home "Back again" pill. */
+    initialMode: String? = null,
+    likedSongsViewModel: LikedSongsViewModel = hiltViewModel()
 ) {
     Trace.beginSection("RecentlyPlayedScreen.Composition")
 
@@ -121,7 +159,16 @@ fun RecentlyPlayedScreen(
     val selectedSongForInfo by playerViewModel.selectedSongForInfo.collectAsStateWithLifecycle()
     val playlistUiState by playlistViewModel.uiState.collectAsStateWithLifecycle()
 
-    var selectedRange by rememberSaveable { mutableStateOf(StatsTimeRange.WEEK) }
+    var historyMode by rememberSaveable {
+        mutableStateOf(if (initialMode == "Liked") HistoryMode.Liked else HistoryMode.Recent)
+    }
+    // Likes span much longer than a week of plays, so Liked opens on All time.
+    var selectedRange by rememberSaveable {
+        mutableStateOf(if (initialMode == "Liked") StatsTimeRange.ALL else StatsTimeRange.WEEK)
+    }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    val likedWithTimes by likedSongsViewModel.likedSongsWithTimes.collectAsStateWithLifecycle()
+    val hasLikes = !likedWithTimes.isNullOrEmpty()
     val lazyListState = rememberLazyListState()
     var showSongInfoBottomSheet by remember { mutableStateOf(false) }
     var showPlaylistBottomSheet by remember { mutableStateOf(false) }
@@ -151,122 +198,296 @@ fun RecentlyPlayedScreen(
             maxItems = Int.MAX_VALUE
         )
     }
-    val groupedSongs = remember(recentlyPlayedSongs, selectedRange, context) {
-        groupRecentlyPlayedSongs(
+    // Liked: every like with its like time; platform likes (no local time) only show in All time.
+    val likedSongsUi = remember(likedWithTimes, selectedRange) {
+        val liked = likedWithTimes ?: return@remember emptyList<RecentlyPlayedSongUiModel>()
+        val (start, end) = selectedRange.resolveBounds(System.currentTimeMillis(), ZoneId.systemDefault())
+        liked.mapNotNull { (song, likedAt) ->
+            when {
+                likedAt == null -> if (selectedRange == StatsTimeRange.ALL) {
+                    RecentlyPlayedSongUiModel(song = song, lastPlayedTimestamp = UNTIMED_LIKE)
+                } else null
+                likedAt > end -> RecentlyPlayedSongUiModel(song = song, lastPlayedTimestamp = end)
+                start != null && likedAt < start -> null
+                else -> RecentlyPlayedSongUiModel(song = song, lastPlayedTimestamp = likedAt)
+            }
+        }
+    }
+    val isLiked = historyMode == HistoryMode.Liked
+    val isLoading = if (isLiked) likedWithTimes == null else recentlyPlayedSourceSongs == null
+    val modeSongs = if (isLiked) likedSongsUi else recentlyPlayedSongs
+
+    // Live search over title, artist and album; date dividers are rebuilt from the matches.
+    val trimmedQuery = searchQuery.trim()
+    val visibleSongs = remember(modeSongs, trimmedQuery) {
+        if (trimmedQuery.isEmpty()) modeSongs
+        else modeSongs.filter { ui ->
+            val song = ui.song
+            song.title.contains(trimmedQuery, ignoreCase = true) ||
+                song.artist.contains(trimmedQuery, ignoreCase = true) ||
+                song.displayArtist.contains(trimmedQuery, ignoreCase = true) ||
+                song.album.contains(trimmedQuery, ignoreCase = true)
+        }
+    }
+    val untimedLabel = "Liked on your services"
+    val groupedSongs = remember(visibleSongs, selectedRange, context) {
+        val (untimed, timed) = visibleSongs.partition { it.lastPlayedTimestamp == UNTIMED_LIKE }
+        val groups = groupRecentlyPlayedSongs(
             context = context,
-            songs = recentlyPlayedSongs,
+            songs = timed,
             range = selectedRange
         )
+        if (untimed.isEmpty()) groups
+        else groups + TimestampGroup(key = "untimed", label = untimedLabel, isHourBucket = false, songs = untimed)
     }
-    val queueSongs = remember(recentlyPlayedSongs) {
-        recentlyPlayedSongs.map { it.song }.toImmutableList()
+    val queueSongs = remember(visibleSongs) {
+        visibleSongs.map { it.song }.toImmutableList()
     }
-
-    val bgColors = listOf(
-        MaterialTheme.colorScheme.secondary.copy(alpha = 0.24f),
-        MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
-        MaterialTheme.colorScheme.surface
+    val queueName = if (isLiked) "Your Likes" else queueRecentlyPlayed
+    // ---- Your Music-style chrome: header bar, hero, pinned filter row ----
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    var isSearchOpen by rememberSaveable { mutableStateOf(searchQuery.isNotEmpty()) }
+    fun closeSearch() {
+        isSearchOpen = false
+        searchQuery = ""
+        focusManager.clearFocus()
+    }
+    androidx.activity.compose.BackHandler(enabled = isSearchOpen) { closeSearch() }
+    val isHeaderCollapsed by remember {
+        derivedStateOf { lazyListState.firstVisibleItemIndex > 0 }
+    }
+    val colors = MaterialTheme.colorScheme
+    val topBarColor by androidx.compose.animation.animateColorAsState(
+        targetValue = if (isHeaderCollapsed || isSearchOpen) colors.surfaceContainer else colors.primaryContainer,
+        animationSpec = androidx.compose.animation.core.tween(MotionTokens.DurationShort4, easing = MotionTokens.Emphasized),
+        label = "historyTopBar"
     )
-
-    val backgroundBrush = remember {
-        Brush.verticalGradient(
-            colors = bgColors,
-            endY = 1200f
-        )
-    }
+    val screenTitle = if (isLiked) "Liked history" else stringResource(R.string.recently_played_title)
+    val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(backgroundBrush)
+            .background(colors.surface)
     ) {
-        if (recentlyPlayedSourceSongs == null) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
+        Column(Modifier.fillMaxSize()) {
+            // Header bar: back (left), title once scrolled / search field, search (right).
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(topBarColor)
+                    .padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding())
+                    .height(64.dp)
+                    .padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                ContainedLoadingIndicator()
+                FilledTonalIconButton(
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = colors.surfaceContainerHigh),
+                    onClick = {
+                        if (isSearchOpen) closeSearch() else navController.popBackStackSafely()
+                    }
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Rounded.ArrowBack,
+                        contentDescription = if (isSearchOpen) "Close search" else stringResource(R.string.common_back)
+                    )
+                }
+
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .padding(horizontal = 8.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = isSearchOpen,
+                        enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(MotionTokens.DurationShort4, easing = MotionTokens.EmphasizedDecelerate)) +
+                            androidx.compose.animation.expandHorizontally(androidx.compose.animation.core.tween(MotionTokens.DurationShort4, easing = MotionTokens.EmphasizedDecelerate), expandFrom = Alignment.End),
+                        exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(MotionTokens.DurationShort3, easing = MotionTokens.EmphasizedAccelerate)) +
+                            androidx.compose.animation.shrinkHorizontally(androidx.compose.animation.core.tween(MotionTokens.DurationShort3, easing = MotionTokens.EmphasizedAccelerate), shrinkTowards = Alignment.End)
+                    ) {
+                        val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+                        androidx.compose.runtime.LaunchedEffect(Unit) {
+                            kotlinx.coroutines.delay(50)
+                            runCatching { focusRequester.requestFocus() }
+                        }
+                        HistorySearchField(
+                            query = searchQuery,
+                            onQueryChange = { searchQuery = it },
+                            placeholder = if (isLiked) "Search your likes" else "Search your history",
+                            onSearch = { focusManager.clearFocus() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRequester(focusRequester)
+                        )
+                    }
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = !isSearchOpen && isHeaderCollapsed,
+                        enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(MotionTokens.DurationShort4, easing = MotionTokens.EmphasizedDecelerate)),
+                        exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(MotionTokens.DurationShort3, easing = MotionTokens.EmphasizedAccelerate))
+                    ) {
+                        Text(
+                            screenTitle,
+                            style = MaterialTheme.typography.titleLarge.copy(fontFamily = GoogleSansRounded),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                if (!isSearchOpen) {
+                    FilledTonalIconButton(
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = colors.surfaceContainerHigh),
+                        onClick = { isSearchOpen = true }
+                    ) {
+                        Icon(
+                            Icons.Rounded.Search,
+                            contentDescription = if (isLiked) "Search your likes" else "Search your history"
+                        )
+                    }
+                }
             }
-        } else {
-            LazyColumn(
-                state = lazyListState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(
-                    bottom = MiniPlayerHeight + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 16.dp
-                ),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                item(key = "recently_played_header") {
-                    ExpressiveRecentlyPlayedHeader(
-                        title = stringResource(R.string.recently_played_title),
-                        songs = recentlyPlayedSongs,
-                        selectedRange = selectedRange,
-                        scrollState = lazyListState
-                    )
-                }
 
-                item(key = "recently_played_range_selector") {
-                    RecentlyPlayedRangeSelector(
-                        selected = selectedRange,
-                        onRangeSelected = { selectedRange = it },
-                        modifier = Modifier.padding(horizontal = 0.dp)
-                    )
+            if (isLoading) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    ContainedLoadingIndicator()
                 }
-
-                if (recentlyPlayedSongs.isNotEmpty()) {
-                    item(key = "recently_played_actions") {
-                        RecentlyPlayedActions(
-                            onPlay = {
-                                val firstSong = queueSongs.firstOrNull() ?: return@RecentlyPlayedActions
-                                playerViewModel.playSongs(queueSongs, firstSong, queueRecentlyPlayed)
+            } else {
+                LazyColumn(
+                    state = lazyListState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = MiniPlayerHeight + bottomInset + 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    item(key = "history_hero", contentType = "hero") {
+                        HistoryHero(
+                            title = screenTitle,
+                            subtitle = buildString {
+                                append(if (visibleSongs.size == 1) "1 song" else "${visibleSongs.size} songs")
+                                append(" · ")
+                                append(rangeChipLabel(selectedRange))
+                                if (trimmedQuery.isNotEmpty()) append(" · matching \u201c$trimmedQuery\u201d")
                             },
+                            isLiked = isLiked,
+                            artUris = remember(visibleSongs) {
+                                visibleSongs.asSequence().mapNotNull { it.song.albumArtUriString }.distinct().take(4).toList()
+                            },
+                            shuffleEnabled = queueSongs.isNotEmpty(),
                             onShuffle = {
                                 playerViewModel.playSongsShuffled(
                                     songsToPlay = queueSongs,
-                                    queueName = queueRecentlyPlayed,
+                                    queueName = queueName,
                                     startAtZero = true,
                                 )
-                            },
-                            shuffleLabel = shuffleLabel,
-                            modifier = Modifier.padding(horizontal = 16.dp)
+                            }
                         )
                     }
-                }
 
-                if (recentlyPlayedSongs.isEmpty()) {
-                    item(key = "recently_played_empty") {
-                        RecentlyPlayedEmptyState(
-                            range = selectedRange,
-                            modifier = Modifier.padding(horizontal = 16.dp)
-                        )
-                    }
-                } else {
-                    groupedSongs.forEachIndexed { groupIndex, group ->
-                        item(key = "recently_played_time_${groupIndex}_${group.key}") {
-                            RecentlyPlayedTimestampDivider(
-                                label = group.label,
-                                isHourBucket = group.isHourBucket,
-                                modifier = Modifier.padding(horizontal = 16.dp)
+                    // Mode + range filters sit right above the first song and stay pinned under the header.
+                    stickyHeader(key = "history_filters", contentType = "filters") {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .background(colors.surface)
+                                .padding(bottom = 6.dp)
+                        ) {
+                            HistoryFilterRow(
+                                mode = historyMode,
+                                showLiked = hasLikes || isLiked,
+                                range = selectedRange,
+                                onModeChange = { mode ->
+                                    if (mode != historyMode) {
+                                        historyMode = mode
+                                        // Likes reach back further than a week of plays.
+                                        if (mode == HistoryMode.Liked && selectedRange == StatsTimeRange.WEEK) {
+                                            selectedRange = StatsTimeRange.ALL
+                                        }
+                                    }
+                                },
+                                onRangeChange = { selectedRange = it }
                             )
                         }
-                        items(group.songs, key = { songUi -> songUi.song.id }, contentType = { "recently_played_song" }) { item ->
-                            EnhancedSongListItem(
-                                modifier = Modifier.padding(horizontal = 16.dp),
-                                song = item.song,
-                                isCurrentSong = currentSongId == item.song.id,
-                                isPlaying = currentSongId == item.song.id && isPlaying,
-                                onClick = {
-                                    playerViewModel.playSongs(
-                                        songsToPlay = queueSongs,
-                                        startSong = item.song,
-                                        queueName = queueRecentlyPlayed
-                                    )
-                                },
-                                onMoreOptionsClick = { song ->
-                                    playerViewModel.selectSongForInfo(song)
-                                    showSongInfoBottomSheet = true
-                                }
-                            )
+                    }
+
+                    if (visibleSongs.isEmpty()) {
+                        item(key = "history_empty", contentType = "empty") {
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(
+                                    imageVector = when {
+                                        trimmedQuery.isNotEmpty() -> Icons.Rounded.Search
+                                        isLiked -> Icons.Rounded.Favorite
+                                        else -> Icons.Rounded.History
+                                    },
+                                    contentDescription = null,
+                                    modifier = Modifier.size(48.dp),
+                                    tint = colors.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    when {
+                                        trimmedQuery.isNotEmpty() -> "No matches for \u201c$trimmedQuery\u201d"
+                                        isLiked -> "No likes ${rangeChipLabel(selectedRange).lowercase()}"
+                                        else -> stringResource(R.string.recently_played_empty_title, selectedRange.displayName.lowercase())
+                                    },
+                                    style = MaterialTheme.typography.titleMedium,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                                Text(
+                                    when {
+                                        trimmedQuery.isNotEmpty() -> "Try a different title, artist or album."
+                                        isLiked -> "Songs you like show up here as you like them."
+                                        else -> stringResource(R.string.recently_played_empty_subtitle)
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = colors.onSurfaceVariant,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            }
+                        }
+                    } else {
+                        groupedSongs.forEachIndexed { groupIndex, group ->
+                            item(key = "history_time_${historyMode.name}_${groupIndex}_${group.key}", contentType = "date_header") {
+                                RecentlyPlayedTimestampDivider(
+                                    label = group.label,
+                                    count = group.songs.size,
+                                    isHourBucket = group.isHourBucket,
+                                    modifier = Modifier.animateItem()
+                                )
+                            }
+                            items(
+                                group.songs,
+                                key = { songUi -> "${historyMode.name}_${songUi.song.id}" },
+                                contentType = { "recently_played_song" }
+                            ) { item ->
+                                EnhancedSongListItem(
+                                    modifier = Modifier
+                                        .padding(horizontal = 12.dp)
+                                        .animateItem(),
+                                    song = item.song,
+                                    isCurrentSong = currentSongId == item.song.id,
+                                    isPlaying = currentSongId == item.song.id && isPlaying,
+                                    onClick = {
+                                        focusManager.clearFocus()
+                                        playerViewModel.playSongs(
+                                            songsToPlay = queueSongs,
+                                            startSong = item.song,
+                                            queueName = queueName
+                                        )
+                                    },
+                                    onMoreOptionsClick = { song ->
+                                        playerViewModel.selectSongForInfo(song)
+                                        showSongInfoBottomSheet = true
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -276,6 +497,7 @@ fun RecentlyPlayedScreen(
         if (showSongInfoBottomSheet && selectedSongForInfo != null) {
             val song = selectedSongForInfo!!
             SongInfoBottomSheet(
+                onStartSongRadio = { seedSong -> playerViewModel.startSongRadio(seedSong) },
                 song = song,
                 isFavorite = favoriteSongIds.contains(song.id),
                 onToggleFavorite = {
@@ -287,7 +509,7 @@ fun RecentlyPlayedScreen(
                 },
                 onPlaySong = {
                     if (queueSongs.isNotEmpty()) {
-                        playerViewModel.playSongs(queueSongs, song, queueRecentlyPlayed)
+                        playerViewModel.playSongs(queueSongs, song, queueName)
                     }
                 },
                 onAddToQueue = {
@@ -296,12 +518,15 @@ fun RecentlyPlayedScreen(
                 onAddNextToQueue = {
                     playerViewModel.addSongNextToQueue(song)
                 },
+                // Hold Next → Soon (the "after which song" slider).
+                soonPlayer = playerViewModel,
+                onAddSoon = { k -> playerViewModel.addSongAfterUpcoming(song, k) },
                 onAddToPlayList = {
                     showPlaylistBottomSheet = true
                 },
                 onDeleteFromDevice = playerViewModel::deleteFromDevice,
                 onNavigateToAlbum = {
-                    navController.navigateSafely(Screen.AlbumDetail.createRoute(song.albumId))
+                    Screen.AlbumDetail.createRouteForSong(song)?.let { navController.navigateSafely(it) }
                     showSongInfoBottomSheet = false
                 },
                 onNavigateToArtist = {
@@ -352,331 +577,9 @@ fun RecentlyPlayedScreen(
                 )
             }
         }
-
-        FilledIconButton(
-            onClick = { navController.popBackStack() },
-            colors = IconButtonDefaults.filledIconButtonColors(
-                containerColor = MaterialTheme.colorScheme.surface,
-                contentColor = MaterialTheme.colorScheme.onSurface
-            ),
-            modifier = Modifier
-                .statusBarsPadding()
-                .padding(start = 10.dp, top = 8.dp)
-                .clip(CircleShape)
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                contentDescription = stringResource(R.string.common_back)
-            )
-        }
     }
 
     Trace.endSection()
-}
-
-@Composable
-private fun ExpressiveRecentlyPlayedHeader(
-    title: String,
-    songs: List<RecentlyPlayedSongUiModel>,
-    selectedRange: StatsTimeRange,
-    scrollState: LazyListState
-) {
-    val highlightedArt = remember(songs) { songs.take(4).map { it.song.albumArtUriString } }
-    val parallaxOffset by remember {
-        derivedStateOf {
-            if (scrollState.firstVisibleItemIndex == 0) scrollState.firstVisibleItemScrollOffset * 0.36f else 0f
-        }
-    }
-    val headerAlpha by remember {
-        derivedStateOf {
-            (1f - (scrollState.firstVisibleItemScrollOffset / 520f)).coerceIn(0f, 1f)
-        }
-    }
-
-    val surface = MaterialTheme.colorScheme.surface
-    val primary = MaterialTheme.colorScheme.primary
-    val secondary = MaterialTheme.colorScheme.secondary
-    val titleStyle = rememberRecentlyPlayedTitleStyle()
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(190.dp)
-            .graphicsLayer {
-                translationY = parallaxOffset
-                alpha = headerAlpha
-            }
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            secondary.copy(alpha = 0.24f),
-                            primary.copy(alpha = 0.10f),
-                            surface.copy(alpha = 0.95f),
-                            surface
-                        ),
-                        endY = 780f
-                    )
-                )
-        )
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.Bottom
-        ) {
-//            Surface(
-//                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.88f),
-//                shape = RoundedCornerShape(50),
-//                tonalElevation = 0.dp
-//            ) {
-//                Text(
-//                    text = "LIVE HISTORY · ${selectedRange.displayName.uppercase()}",
-//                    style = MaterialTheme.typography.labelMedium,
-//                    fontWeight = FontWeight.SemiBold,
-//                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-//                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
-//                )
-//            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Text(
-                text = title,
-                style = titleStyle,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-        }
-    }
-}
-
-@OptIn(ExperimentalTextApi::class)
-@Composable
-private fun rememberRecentlyPlayedTitleStyle(): TextStyle {
-    return remember {
-        TextStyle(
-            fontFamily = FontFamily(
-                Font(
-                    resId = R.font.gflex_variable,
-                    variationSettings = FontVariation.Settings(
-                        FontVariation.weight(560),
-                        FontVariation.width(122f),
-                        FontVariation.grade(40),
-                        FontVariation.Setting("ROND", 100f),
-                        FontVariation.Setting("XTRA", 520f),
-                        FontVariation.Setting("YOPQ", 90f),
-                        FontVariation.Setting("YTLC", 505f)
-                    )
-                )
-            ),
-            fontWeight = FontWeight(560),
-            fontSize = 34.sp,
-            lineHeight = 38.sp,
-            letterSpacing = (-0.4).sp
-        )
-    }
-}
-
-@Composable
-private fun RecentlyPlayedActions(
-    onPlay: () -> Unit,
-    onShuffle: () -> Unit,
-    shuffleLabel: String,
-    modifier: Modifier = Modifier
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(52.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Button(
-            onClick = onPlay,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxSize(),
-            shape = RoundedCornerShape(
-                topStart = 52.dp,
-                topEnd = 14.dp,
-                bottomStart = 52.dp,
-                bottomEnd = 14.dp
-            ),
-            contentPadding = PaddingValues(horizontal = 10.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.PlayArrow,
-                contentDescription = null,
-                modifier = Modifier.size(ButtonDefaults.IconSize)
-            )
-            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-            TightWrapText(
-                text = stringResource(R.string.recently_played_action_play_latest),
-                modifier = Modifier.padding(end = 4.dp),
-                overflow = TextOverflow.Ellipsis,
-                maxLines = 2,
-                lineHeight = 20.sp
-            )
-        }
-
-        FilledTonalButton(
-            onClick = onShuffle,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxSize(),
-            shape = RoundedCornerShape(
-                topStart = 14.dp,
-                topEnd = 52.dp,
-                bottomStart = 14.dp,
-                bottomEnd = 52.dp
-            ),
-            contentPadding = PaddingValues(horizontal = 10.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.Shuffle,
-                contentDescription = null,
-                modifier = Modifier.size(ButtonDefaults.IconSize)
-            )
-            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-            TightWrapText(
-                text = shuffleLabel,
-                modifier = Modifier.padding(end = 4.dp),
-                overflow = TextOverflow.Ellipsis,
-                maxLines = 2,
-                lineHeight = 20.sp
-            )
-        }
-    }
-}
-
-@Composable
-private fun RecentlyPlayedTimestampDivider(
-    label: String,
-    isHourBucket: Boolean,
-    modifier: Modifier = Modifier
-) {
-    val colors = MaterialTheme.colorScheme
-    val railColor = if (isHourBucket) colors.primary else colors.secondary
-    val chipContainer = if (isHourBucket) {
-        colors.primaryContainer.copy(alpha = 0.78f)
-    } else {
-        colors.secondaryContainer.copy(alpha = 0.78f)
-    }
-    val chipContent = if (isHourBucket) colors.onPrimaryContainer else colors.onSecondaryContainer
-
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(top = 4.dp, bottom = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .height(8.dp)
-                .clip(RoundedCornerShape(50))
-                .background(
-                    Brush.horizontalGradient(
-                        colors = listOf(
-                            railColor.copy(alpha = 0f),
-                            railColor.copy(alpha = 0.50f)
-                        )
-                    )
-                )
-        )
-        Surface(
-            color = chipContainer,
-            shape = AbsoluteSmoothCornerShape(
-                cornerRadiusTL = 22.dp,
-                smoothnessAsPercentTR = 60,
-                cornerRadiusTR = 22.dp,
-                smoothnessAsPercentBR = 60,
-                cornerRadiusBL = 22.dp,
-                smoothnessAsPercentBL = 60,
-                cornerRadiusBR = 22.dp,
-                smoothnessAsPercentTL = 60
-            )
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(railColor)
-                )
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = chipContent
-                )
-            }
-        }
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .height(8.dp)
-                .clip(RoundedCornerShape(50))
-                .background(
-                    Brush.horizontalGradient(
-                        colors = listOf(
-                            railColor.copy(alpha = 0.50f),
-                            railColor.copy(alpha = 0f)
-                        )
-                    )
-                )
-        )
-    }
-}
-
-@Composable
-private fun RecentlyPlayedEmptyState(
-    range: StatsTimeRange,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = AbsoluteSmoothCornerShape(
-            cornerRadiusTL = 26.dp,
-            smoothnessAsPercentTR = 60,
-            cornerRadiusTR = 26.dp,
-            smoothnessAsPercentBR = 60,
-            cornerRadiusBL = 26.dp,
-            smoothnessAsPercentBL = 60,
-            cornerRadiusBR = 26.dp,
-            smoothnessAsPercentTL = 60
-        ),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                text = stringResource(
-                    R.string.recently_played_empty_title,
-                    range.displayName.lowercase()
-                ),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                text = stringResource(R.string.recently_played_empty_subtitle),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
 }
 
 private data class TimestampGroup(
@@ -802,6 +705,287 @@ private fun resolveTimestampBucket(
                 label = date.format(DateTimeFormatter.ofPattern("EEE, MMM d", Locale.getDefault())),
                 isHourBucket = false
             )
+        }
+    }
+}
+
+
+/** Which list the history screen shows. */
+private enum class HistoryMode(val label: String) { Recent("Recent"), Liked("Liked") }
+
+/** Marks a like with no local like time (platform / favourites-playlist likes). */
+private const val UNTIMED_LIKE = -1L
+
+/** Short chip labels for the time ranges ("Week to Date" is too long for a chip). */
+private fun rangeChipLabel(range: StatsTimeRange): String = when (range) {
+    StatsTimeRange.DAY -> "Today"
+    StatsTimeRange.WEEK -> "This week"
+    StatsTimeRange.MONTH -> "This month"
+    StatsTimeRange.YEAR -> "This year"
+    StatsTimeRange.ALL -> "All time"
+}
+
+/**
+ * Playlist-style hero, matching Your Music: tinted backdrop, cover (a 2×2 of the latest album art,
+ * or a gradient tile with the mode icon), title, counts and the big round Shuffle button.
+ */
+@Composable
+private fun HistoryHero(
+    title: String,
+    subtitle: String,
+    isLiked: Boolean,
+    artUris: List<String>,
+    shuffleEnabled: Boolean,
+    onShuffle: () -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    BoxWithConstraints(
+        Modifier
+            .fillMaxWidth()
+            .background(
+                Brush.verticalGradient(
+                    0f to colors.primaryContainer,
+                    0.55f to colors.primaryContainer.copy(alpha = 0.35f),
+                    1f to colors.surface
+                )
+            )
+    ) {
+        val coverSize = (maxWidth * 0.46f).coerceAtMost(220.dp)
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp, bottom = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                Modifier
+                    .size(coverSize)
+                    .shadow(12.dp, MaterialTheme.shapes.large)
+                    .clip(MaterialTheme.shapes.large)
+                    .background(Brush.linearGradient(listOf(colors.primary, colors.tertiary))),
+                contentAlignment = Alignment.Center
+            ) {
+                if (artUris.size >= 4) {
+                    Column(Modifier.fillMaxSize()) {
+                        artUris.take(4).chunked(2).forEach { rowUris ->
+                            Row(Modifier.weight(1f).fillMaxWidth()) {
+                                rowUris.forEach { uri ->
+                                    SmartImage(
+                                        model = uri,
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.weight(1f).fillMaxSize()
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    // Mode badge over the collage.
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(10.dp)
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(colors.primary),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.History,
+                            contentDescription = null,
+                            tint = colors.onPrimary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                } else {
+                    Icon(
+                        if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.History,
+                        contentDescription = null,
+                        tint = colors.onPrimary,
+                        modifier = Modifier.size(coverSize * 0.45f)
+                    )
+                }
+            }
+            Spacer(Modifier.height(18.dp))
+            Text(
+                title,
+                style = MaterialTheme.typography.headlineMedium.copy(fontFamily = GoogleSansRounded),
+                fontWeight = FontWeight.Bold,
+                color = colors.onSurface,
+                modifier = Modifier.semantics { heading() }
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = GoogleSansRounded),
+                color = colors.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 24.dp)
+            )
+            Spacer(Modifier.height(16.dp))
+            val spin = rememberShuffleSpin()
+            Box(
+                Modifier
+                    .size(64.dp)
+                    .clip(CircleShape)
+                    .background(if (shuffleEnabled) colors.onSurface else colors.onSurface.copy(alpha = 0.3f))
+                    .clickable(enabled = shuffleEnabled, onClick = { spin.play(); onShuffle() })
+                    .semantics { contentDescription = "Shuffle $title" },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Rounded.Shuffle, contentDescription = null, tint = colors.surface, modifier = Modifier.size(32.dp).shuffleSpin(spin))
+            }
+        }
+    }
+}
+
+/** Recent · Liked, a divider, then the time ranges — Your Music's filter-chip row. */
+@Composable
+private fun HistoryFilterRow(
+    mode: HistoryMode,
+    showLiked: Boolean,
+    range: StatsTimeRange,
+    onModeChange: (HistoryMode) -> Unit,
+    onRangeChange: (StatsTimeRange) -> Unit
+) {
+    LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        item(key = "mode_recent") {
+            ExpressiveFilterChip(
+                selected = mode == HistoryMode.Recent,
+                onClick = { onModeChange(HistoryMode.Recent) },
+                label = "Recent",
+                leadingIcon = {
+                    Icon(Icons.Rounded.History, contentDescription = null, modifier = Modifier.size(18.dp))
+                }
+            )
+        }
+        if (showLiked) {
+            item(key = "mode_liked") {
+                val selected = mode == HistoryMode.Liked
+                ExpressiveFilterChip(
+                    selected = selected,
+                    onClick = { onModeChange(HistoryMode.Liked) },
+                    label = "Liked",
+                    leadingIcon = {
+                        Icon(
+                            if (selected) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                )
+            }
+        }
+        item(key = "divider") {
+            VerticalDivider(
+                Modifier
+                    .height(24.dp)
+                    .padding(horizontal = 2.dp)
+            )
+        }
+        StatsTimeRange.entries.forEach { r ->
+            item(key = "range_${r.name}") {
+                ExpressiveFilterChip(
+                    selected = r == range,
+                    onClick = { onRangeChange(r) },
+                    label = rangeChipLabel(r)
+                )
+            }
+        }
+    }
+}
+
+/** Date section header: "Today", "Yesterday", "Mon, Oct 5"… with the song count on the right. */
+@Composable
+private fun RecentlyPlayedTimestampDivider(
+    label: String,
+    count: Int,
+    isHourBucket: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 2.dp)
+            .semantics(mergeDescendants = true) { heading() },
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleMedium.copy(fontFamily = GoogleSansRounded),
+            fontWeight = FontWeight.Bold,
+            color = if (isHourBucket) colors.primary else colors.onSurface,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = if (count == 1) "1 song" else "$count songs",
+            style = MaterialTheme.typography.labelLarge.copy(fontFamily = GoogleSansRounded),
+            color = colors.onSurfaceVariant
+        )
+    }
+}
+
+/** A slim (40dp) pill search field, the same one Your Music uses in its header. */
+@Composable
+private fun HistorySearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    placeholder: String,
+    onSearch: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.height(40.dp),
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Rounded.Search,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.size(8.dp))
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                if (query.isEmpty()) {
+                    Text(
+                        placeholder,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                BasicTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { onSearch() }),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            if (query.isNotEmpty()) {
+                IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Rounded.Close, contentDescription = "Clear search", modifier = Modifier.size(16.dp))
+                }
+            }
         }
     }
 }

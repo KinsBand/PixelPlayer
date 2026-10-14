@@ -13,6 +13,8 @@ import com.theveloper.pixelplay.data.model.SyncedLine
 @Immutable
 data class OverlayCutoutState(
     val expansionLevel: CutoutExpansionLevel = CutoutExpansionLevel.COLLAPSED,
+    /** "Tap camera hole" gesture: a tap on the closed island opens it. Off = only a long press opens the app. */
+    val tapToOpen: Boolean = true,
     val isVisible: Boolean = false,
     val song: Song? = null,
     val isPlaying: Boolean = false,
@@ -27,7 +29,18 @@ data class OverlayCutoutState(
      * the open island hides the time and status icons. False with the plain "Appear on top"
      * window, which Android always draws under the status bar.
      */
-    val coversStatusBar: Boolean = true
+    val coversStatusBar: Boolean = true,
+    /** Which way the last track change went, so the header text slides the matching way. */
+    val skipDirection: SkipDirection = SkipDirection.NONE,
+    /**
+     * Bumped on every real track change (not the first load). A closed island peeks its
+     * title / artist row each time this changes.
+     */
+    val peekToken: Long = 0L,
+    /** Song recognition (Listen / Now Playing) is running. */
+    val isListening: Boolean = false,
+    /** The playing song is in Liked songs (the island's heart). */
+    val isFavorite: Boolean = false
 ) {
     val syncedLines: List<SyncedLine>
         get() = lyrics?.synced.orEmpty()
@@ -36,3 +49,5 @@ data class OverlayCutoutState(
     val fallbackLine: String
         get() = song?.album?.takeIf { it.isNotBlank() } ?: song?.artist ?: "PixelPlayer"
 }
+
+enum class SkipDirection { FORWARD, BACKWARD, NONE }

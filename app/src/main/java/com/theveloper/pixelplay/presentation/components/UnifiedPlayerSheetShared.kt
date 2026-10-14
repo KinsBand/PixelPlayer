@@ -2,6 +2,7 @@
 
 package com.theveloper.pixelplay.presentation.components
 
+import com.theveloper.pixelplay.presentation.components.player.miniPlayerSwipeContent
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Indication
@@ -47,8 +48,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Replay
-import androidx.compose.material.icons.rounded.SkipNext
-import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.ColorScheme
@@ -92,8 +93,8 @@ internal fun MiniPlayerContentInternal(
     isCastConnecting: Boolean,
     isPreparingPlayback: Boolean,
     onPlayPause: () -> Unit,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
+    isFavorite: Boolean,
+    onFavoriteToggle: () -> Unit,
     modifier: Modifier = Modifier,
     canScroll: Boolean = true,
     /** Non-null + enabled → the left→right song-change wave renders the row. */
@@ -107,8 +108,8 @@ internal fun MiniPlayerContentInternal(
             isCastConnecting = isCastConnecting,
             isPreparingPlayback = isPreparingPlayback,
             onPlayPause = onPlayPause,
-            onPrevious = onPrevious,
-            onNext = onNext,
+            isFavorite = isFavorite,
+            onFavoriteToggle = onFavoriteToggle,
             modifier = modifier,
             canScroll = canScroll,
             isQueueEnded = isQueueEnded
@@ -118,9 +119,8 @@ internal fun MiniPlayerContentInternal(
     val hapticFeedback = LocalHapticFeedback.current
     val controlsEnabled = !isCastConnecting && !isPreparingPlayback
 
-    val previousInteraction = remember { MutableInteractionSource() }
+    val favoriteInteraction = remember { MutableInteractionSource() }
     val playPauseInteraction = remember { MutableInteractionSource() }
-    val nextInteraction = remember { MutableInteractionSource() }
     val miniPlayerIndication = remember { ripple(bounded = false) }
 
     Row(
@@ -131,7 +131,12 @@ internal fun MiniPlayerContentInternal(
         verticalAlignment = Alignment.CenterVertically
     ) {
         val albumArtModel = song.albumArtUriString?.takeIf { it.isNotBlank() }
-        Box(contentAlignment = Alignment.Center) {
+        // Cover + title + artist slide with a sideways swipe (song change); the buttons stay.
+        val swipeChrome = com.theveloper.pixelplay.presentation.components.player.LocalMiniPlayerChrome.current
+        Box(
+            modifier = Modifier.miniPlayerSwipeContent(swipeChrome),
+            contentAlignment = Alignment.Center
+        ) {
             key(song.id) {
                 SmartImage(
                     model = albumArtModel,
@@ -154,7 +159,9 @@ internal fun MiniPlayerContentInternal(
         }
         Spacer(modifier = Modifier.width(12.dp))
         Column(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .weight(1f)
+                .miniPlayerSwipeContent(swipeChrome),
             verticalArrangement = Arrangement.Center
         ) {
             val titleStyle = MaterialTheme.typography.titleSmall.copy(
@@ -196,18 +203,18 @@ internal fun MiniPlayerContentInternal(
                 .clip(CircleShape)
                 .background(LocalMaterialTheme.current.onPrimary)
                 .clickable(
-                    interactionSource = previousInteraction,
+                    interactionSource = favoriteInteraction,
                     indication = miniPlayerIndication,
                     enabled = controlsEnabled
                 ) {
                     hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    onPrevious()
+                    onFavoriteToggle()
                 },
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = Icons.Rounded.SkipPrevious,
-                contentDescription = "Anterior",
+                imageVector = if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                contentDescription = if (isFavorite) "Unlike" else "Like",
                 tint = LocalMaterialTheme.current.primary,
                 modifier = Modifier.size(22.dp)
             )
@@ -245,28 +252,6 @@ internal fun MiniPlayerContentInternal(
                 modifier = Modifier.size(22.dp)
             )
         }
-
-        Spacer(modifier = Modifier.width(8.dp))
-
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(LocalMaterialTheme.current.onPrimary)
-                .clickable(
-                    interactionSource = nextInteraction,
-                    indication = miniPlayerIndication,
-                    enabled = controlsEnabled
-                ) { onNext() },
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.SkipNext,
-                contentDescription = "Siguiente",
-                tint = LocalMaterialTheme.current.primary,
-                modifier = Modifier.size(22.dp)
-            )
-        }
     }
 }
 
@@ -286,8 +271,8 @@ private fun MiniPlayerWaveRow(
     isCastConnecting: Boolean,
     isPreparingPlayback: Boolean,
     onPlayPause: () -> Unit,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
+    isFavorite: Boolean,
+    onFavoriteToggle: () -> Unit,
     modifier: Modifier = Modifier,
     canScroll: Boolean = true,
     isQueueEnded: Boolean = false
@@ -297,9 +282,8 @@ private fun MiniPlayerWaveRow(
     val geometry = wave.geometry
     val nudgePx = with(LocalDensity.current) { MiniWaveContentNudge.toPx() }
 
-    val previousInteraction = remember { MutableInteractionSource() }
+    val favoriteInteraction = remember { MutableInteractionSource() }
     val playPauseInteraction = remember { MutableInteractionSource() }
-    val nextInteraction = remember { MutableInteractionSource() }
     val miniPlayerIndication = remember { ripple(bounded = false) }
 
     // State reads here only change when a wave starts / ends.
@@ -319,12 +303,15 @@ private fun MiniPlayerWaveRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         // ── Cover ──
+        val swipeChrome = com.theveloper.pixelplay.presentation.components.player.LocalMiniPlayerChrome.current
         Box(
             modifier = Modifier
                 .size(44.dp)
                 .onPlaced { c ->
                     geometry.set(MiniWaveGeometry.SLOT_COVER, c.positionInRoot().x, c.size.width.toFloat())
-                },
+                }
+                // Sideways song swipe moves the cover (after onPlaced, so the wave geometry is unaffected).
+                .miniPlayerSwipeContent(swipeChrome),
             contentAlignment = Alignment.Center
         ) {
             layers.forEach { (layerKey, layerSong) ->
@@ -367,6 +354,7 @@ private fun MiniPlayerWaveRow(
                 .onPlaced { c ->
                     geometry.set(MiniWaveGeometry.SLOT_TEXT, c.positionInRoot().x, c.size.width.toFloat())
                 }
+                .miniPlayerSwipeContent(swipeChrome)
                 .clearAndSetSemantics {
                     contentDescription = shownSong?.let { "${it.title}, ${it.displayArtist}" }.orEmpty()
                     liveRegion = LiveRegionMode.Polite
@@ -401,15 +389,15 @@ private fun MiniPlayerWaveRow(
         MiniWaveButton(
             wave = wave,
             slot = MiniWaveGeometry.SLOT_PREV,
-            icon = Icons.Rounded.SkipPrevious,
-            contentDescription = "Anterior",
+            icon = if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+            contentDescription = if (isFavorite) "Unlike" else "Like",
             filled = false,
             enabled = controlsEnabled,
-            interactionSource = previousInteraction,
+            interactionSource = favoriteInteraction,
             indication = miniPlayerIndication
         ) {
             hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            onPrevious()
+            onFavoriteToggle()
         }
         Spacer(modifier = Modifier.width(8.dp))
         MiniWaveButton(
@@ -433,17 +421,6 @@ private fun MiniPlayerWaveRow(
             hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             onPlayPause()
         }
-        Spacer(modifier = Modifier.width(8.dp))
-        MiniWaveButton(
-            wave = wave,
-            slot = MiniWaveGeometry.SLOT_NEXT,
-            icon = Icons.Rounded.SkipNext,
-            contentDescription = "Siguiente",
-            filled = false,
-            enabled = controlsEnabled,
-            interactionSource = nextInteraction,
-            indication = miniPlayerIndication
-        ) { onNext() }
     }
 }
 

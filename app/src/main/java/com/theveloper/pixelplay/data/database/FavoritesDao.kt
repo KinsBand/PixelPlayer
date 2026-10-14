@@ -39,6 +39,10 @@ interface FavoritesDao {
 
     fun getFavoriteSongIdsByRecent(): Flow<List<String>> = getFavoriteSongIdsByRecentRaw().distinctUntilChanged()
 
+    /** Every favourite row (id + time it was liked), most recent first. Live: re-emits on any like/unlike. */
+    @Query("SELECT * FROM favorites WHERE isFavorite = 1 ORDER BY timestamp DESC")
+    fun getFavoritesByRecentRaw(): Flow<List<FavoritesEntity>>
+
     @Query("SELECT songId FROM favorites WHERE isFavorite = 1 AND songId IN (:ids)")
     suspend fun getFavoriteIdsAmong(ids: List<String>): List<String>
 

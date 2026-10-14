@@ -168,9 +168,9 @@
     <string name="settings_language_turkish">TÃ¼rkÃ§e</string>
     <string name="settings_app_theme_title">Uygulama TemasÄ±</string>
     <string name="settings_app_theme_subtitle">AÃ§Ä±k, koyu tema arasÄ±nda geÃ§iÅŸ yapÄ±n veya sistem gÃ¶rÃ¼nÃ¼mÃ¼nÃ¼ takip edin.</string>
-    <string name="settings_theme_light">AÃ§Ä±k Tema</string>
-    <string name="settings_theme_dark">Koyu Tema</string>
-    <string name="settings_theme_follow_system">Sistemi Takip Et</string>
+    <string name="settings_theme_light">Açık</string>
+    <string name="settings_theme_dark">Koyu</string>
+    <string name="settings_theme_follow_system">Sistem</string>
     <string name="settings_smooth_corners_title">YumuÅŸak KÃ¶ÅŸeleri Kullan</string>
     <string name="settings_smooth_corners_subtitle">EstetiÄŸi etkili bir ÅŸekilde artÄ±rmak iÃ§in karmaÅŸÄ±k ÅŸekilli kÃ¶ÅŸeler kullanÄ±r ancak dÃ¼ÅŸÃ¼k donanÄ±mlÄ± cihazlarda performansÄ± etkileyebilir</string>
     <string name="settings_disable_blur_all_over_title">BulanÄ±klÄ±k Efektlerini Devre DÄ±ÅŸÄ± BÄ±rak</string>

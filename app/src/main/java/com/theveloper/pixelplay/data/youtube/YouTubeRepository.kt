@@ -17,5 +17,14 @@ interface YouTubeRepository {
     suspend fun searchSongs(query: String): List<Song>
     /** Next page of song results for "Show more"; pair.second = another page exists. */
     suspend fun moreSongs(query: String, reset: Boolean = false): Pair<List<Song>, Boolean> = emptyList<Song>() to false
+
+    /** Next page of albums / artists / playlists for [query] (page two first; [reset] starts over). */
+    suspend fun moreCollections(
+        query: String,
+        filter: com.theveloper.pixelplay.data.model.SearchFilterType,
+        reset: Boolean = false,
+    ): Pair<List<com.theveloper.pixelplay.data.model.SearchResultItem>, Boolean> = emptyList<com.theveloper.pixelplay.data.model.SearchResultItem>() to false
     suspend fun resolveStreamUrl(videoId: String): String?
+    /** Autocomplete / spelling-corrected search suggestions for a partly typed query. */
+    suspend fun searchSuggestions(input: String): List<String> = emptyList()
 }

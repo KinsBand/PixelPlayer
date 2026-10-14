@@ -413,6 +413,30 @@ class MusicBrainzRepository @Inject constructor(
         }
     }
 
+    /**
+     * The MusicBrainz artist whose name matches [name] (accents and case ignored) with a high
+     * search score, looked up with its web links and band members; null when unsure.
+     */
+    suspend fun lookupArtistByName(name: String): MbArtistDetails? {
+        val clean = name.trim()
+        if (clean.isBlank()) return null
+        val escaped = clean.replace("\\", "\\\\").replace("\"", "\\\"")
+        val hits = runMbSafely("searchArtists") {
+            musicBrainzApi.searchArtists("artist:\"$escaped\"")
+        }?.artists.orEmpty()
+        val best = hits.firstOrNull { it.score >= MB_ARTIST_SCORE && foldName(it.name) == foldName(clean) }
+            ?: return null
+        return runMbSafely("lookupArtist") { musicBrainzApi.lookupArtist(best.id) }
+    }
+
+    private fun foldName(value: String): String =
+        java.text.Normalizer.normalize(value, java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "")
+            .lowercase(java.util.Locale.ROOT)
+            .replace(Regex("[^a-z0-9]+"), "")
+            // Names in other scripts fold to nothing: compare them as written instead.
+            .ifBlank { value.trim().lowercase(java.util.Locale.ROOT) }
+
     private suspend fun <T> runMbSafely(operation: String, block: suspend () -> T): T? {
         return try {
             callWithRateLimit(block)
@@ -429,6 +453,8 @@ class MusicBrainzRepository @Inject constructor(
         const val SEARCH_LIMIT = 5
         const val MAX_TAGS = 15
         const val MB_SCORE_TRUST_THRESHOLD = 70
+        /** Artist search score needed (plus an exact folded-name match) to trust a hit. */
+        const val MB_ARTIST_SCORE = 90
         const val MB_SCORE_WEIGHT = 0.45
         const val TITLE_WEIGHT = 40.0
         const val ARTIST_WEIGHT = 25.0

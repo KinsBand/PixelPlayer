@@ -1,5 +1,7 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import com.theveloper.pixelplay.presentation.components.subcomps.rememberShuffleSpin
+import com.theveloper.pixelplay.presentation.components.subcomps.shuffleSpin
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -32,12 +34,15 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import com.theveloper.pixelplay.presentation.components.SmartImage
+import com.theveloper.pixelplay.presentation.components.PullToRevealSearchRow
+import com.theveloper.pixelplay.presentation.components.ExpressiveFilterChip
 import com.theveloper.pixelplay.ui.theme.MotionTokens
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -62,8 +67,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.MusicOff
@@ -73,7 +78,6 @@ import kotlinx.coroutines.launch
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.rounded.Shuffle
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
@@ -85,7 +89,6 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.InputChipDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -153,7 +156,6 @@ fun YourMusicScreen(
     val listState = rememberLazyListState()
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
-    var showCustomFilterDialog by rememberSaveable { mutableStateOf(false) }
     var songForOptions by remember { mutableStateOf<Song?>(null) }
     var showPlaylistSheet by remember { mutableStateOf(false) }
     // Search lives behind the icon in the top-right of the header; open while there's a query.
@@ -352,40 +354,12 @@ fun YourMusicScreen(
                     ) {
                         YourMusicFilterRow(
                             controls = controls,
-                            onAddCustom = { showCustomFilterDialog = true },
-                            onClear = viewModel::clearFilters,
+                            onAddCustom = { text -> viewModel.addCustomFilter(text) },
+                            onNewMix = viewModel::regenerateMix,
                             onToggleLiked = viewModel::toggleLikedOnly,
                             onSelect = viewModel::selectFilter,
                             onDeleteCustom = viewModel::deleteCustomFilter
                         )
-                        AnimatedVisibility(
-                            visible = activeMix != null,
-                            enter = fadeIn(tween(MotionTokens.DurationShort4, easing = MotionTokens.EmphasizedDecelerate)) +
-                                expandVertically(tween(MotionTokens.DurationShort4, easing = MotionTokens.EmphasizedDecelerate)),
-                            exit = fadeOut(tween(MotionTokens.DurationShort3, easing = MotionTokens.EmphasizedAccelerate)) +
-                                shrinkVertically(tween(MotionTokens.DurationShort3, easing = MotionTokens.EmphasizedAccelerate))
-                        ) {
-                            activeMix?.let { filter ->
-                                Row(
-                                    modifier = Modifier.padding(start = 20.dp, end = 8.dp, top = 2.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "${filter.label} – ${filter.description}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = colors.onSurfaceVariant,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    TextButton(onClick = viewModel::regenerateMix) {
-                                        Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(Modifier.size(4.dp))
-                                        Text("New mix")
-                                    }
-                                }
-                            }
-                        }
                     }
                 }
 
@@ -496,17 +470,6 @@ fun YourMusicScreen(
         }
     }
 
-    if (showCustomFilterDialog) {
-        CustomFilterDialog(
-            existing = controls.customFilters,
-            onDismiss = { showCustomFilterDialog = false },
-            onSave = { text ->
-                viewModel.addCustomFilter(text)
-                showCustomFilterDialog = false
-            }
-        )
-    }
-
     songForOptions?.let { song ->
         val navBarCompactMode by playerViewModel.navBarCompactMode.collectAsStateWithLifecycle()
         val bottomBarHeight = resolveNavBarOccupiedHeight(
@@ -518,6 +481,7 @@ fun YourMusicScreen(
         val copies = state.copies[song.id].orEmpty().ifEmpty { listOf(song) }
         val isLiked = song.isFavorite || copies.any { it.id in favoriteIds }
         SongInfoBottomSheet(
+            onStartSongRadio = { seedSong -> playerViewModel.startSongRadio(seedSong) },
             song = song,
             isFavorite = isLiked,
             onToggleFavorite = {
@@ -528,6 +492,9 @@ fun YourMusicScreen(
             onPlaySong = { playerViewModel.showAndPlaySong(song) },
             onAddToQueue = { playerViewModel.addSongToQueue(song) },
             onAddNextToQueue = { playerViewModel.addSongNextToQueue(song) },
+            // Hold Next → Soon (the "after which song" slider).
+            soonPlayer = playerViewModel,
+            onAddSoon = { k -> playerViewModel.addSongAfterUpcoming(song, k) },
             onAddToPlayList = { showPlaylistSheet = true },
             // Delete here removes the song completely: its file, download and like, every copy.
             onDeleteFromDevice = { activity, target, onResult ->
@@ -535,10 +502,12 @@ fun YourMusicScreen(
             },
             onNavigateToAlbum = {
                 songForOptions = null
-                navController.navigateSafelyReplacing(
-                    route = Screen.AlbumDetail.createRoute(song.albumId),
-                    patternToPop = Screen.AlbumDetail.route
-                )
+                Screen.AlbumDetail.createRouteForSong(song)?.let { route ->
+                    navController.navigateSafelyReplacing(
+                        route = route,
+                        patternToPop = Screen.AlbumDetail.route
+                    )
+                }
             },
             onNavigateToArtist = {
                 songForOptions = null
@@ -636,98 +605,145 @@ private fun YourMusicHero(subtitle: String, shuffleEnabled: Boolean, onShuffle: 
                 modifier = Modifier.padding(horizontal = 24.dp)
             )
             Spacer(Modifier.height(16.dp))
+            val spin = rememberShuffleSpin()
             Box(
                 Modifier
                     .size(64.dp)
                     .clip(CircleShape)
                     .background(if (shuffleEnabled) colors.onSurface else colors.onSurface.copy(alpha = 0.3f))
-                    .clickable(enabled = shuffleEnabled, onClick = onShuffle)
+                    .clickable(enabled = shuffleEnabled, onClick = { spin.play(); onShuffle() })
                     .semantics { contentDescription = "Shuffle Your Music" },
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Rounded.Shuffle, contentDescription = null, tint = colors.surface, modifier = Modifier.size(32.dp))
+                Icon(Icons.Rounded.Shuffle, contentDescription = null, tint = colors.surface, modifier = Modifier.size(32.dp).shuffleSpin(spin))
             }
         }
     }
 }
 
-/** The horizontal filter row: custom-filter sparkle, Clear, Liked, custom filters, then presets. */
+/**
+ * The horizontal filter row: [New mix] · Liked · the picked filter · your custom filters · presets.
+ * Tap a selected chip again to turn it off. Picking a filter moves it to the front (next to
+ * Liked) and brings in the icon-only New mix button at the very start.
+ * Scrolled to the start, keep swiping right (on Liked or any chip) to type a custom filter —
+ * any vibe, genre, artist, decade or activity. It's saved as a chip and switched on.
+ */
 @Composable
 private fun YourMusicFilterRow(
     controls: com.theveloper.pixelplay.presentation.viewmodel.YourMusicControls,
-    onAddCustom: () -> Unit,
-    onClear: () -> Unit,
+    onAddCustom: (String) -> Unit,
+    onNewMix: () -> Unit,
     onToggleLiked: () -> Unit,
     onSelect: (String) -> Unit,
     onDeleteCustom: (String) -> Unit,
 ) {
-    LazyRow(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 6.dp),
+    var typing by rememberSaveable { mutableStateOf(false) }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val selectedId = controls.selectedFilterId
+    val selected = remember(selectedId, controls.customFilters) {
+        selectedId?.let { id -> (controls.customFilters + MusicVibeFilters.presets).firstOrNull { it.id == id } }
+    }
+    // A newly picked filter jumps to the front: show it.
+    LaunchedEffect(selectedId) {
+        if (selectedId != null) listState.animateScrollToItem(0)
+    }
+
+    @Composable
+    fun CustomChip(filter: VibeFilter, modifier: Modifier) {
+        InputChip(
+            selected = filter.id == selectedId,
+            onClick = { onSelect(filter.id) },
+            label = { Text(filter.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            leadingIcon = {
+                Icon(Icons.Rounded.Edit, contentDescription = null, modifier = Modifier.size(InputChipDefaults.IconSize))
+            },
+            trailingIcon = {
+                Icon(
+                    Icons.Rounded.Close,
+                    contentDescription = "Delete ${filter.label}",
+                    modifier = Modifier
+                        .size(InputChipDefaults.IconSize)
+                        .clip(CircleShape)
+                        .clickable { onDeleteCustom(filter.id) }
+                )
+            },
+            modifier = modifier
+        )
+    }
+
+    @Composable
+    fun PresetChip(filter: VibeFilter, modifier: Modifier) {
+        ExpressiveFilterChip(
+            selected = filter.id == selectedId,
+            onClick = { onSelect(filter.id) },
+            label = filter.label,
+            modifier = modifier
+        )
+    }
+
+    PullToRevealSearchRow(
+        revealed = typing,
+        onRevealedChange = { typing = it },
+        onSubmit = onAddCustom,
+        placeholder = "Any vibe — late night lofi, 90s rock, rainy day…",
+        pullLabel = "Custom filter",
+        listState = listState,
+        modifier = Modifier.padding(top = 6.dp),
         contentPadding = PaddingValues(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        item(key = "sparkle") {
-            FilledTonalIconButton(
-                onClick = onAddCustom,
-                modifier = Modifier.size(36.dp),
-                colors = IconButtonDefaults.filledTonalIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                )
-            ) { Icon(Icons.Rounded.AutoAwesome, contentDescription = "Add a custom filter", modifier = Modifier.size(18.dp)) }
-        }
-        if (controls.likedOnly || controls.selectedFilterId != null) {
-            item(key = "clear") {
-                TextButton(onClick = onClear) { Text("Clear") }
+        if (selected != null) {
+            item(key = "new_mix") {
+                FilledTonalIconButton(
+                    onClick = onNewMix,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .animateItem()
+                ) {
+                    Icon(Icons.Rounded.Refresh, contentDescription = "New ${selected.label} mix", modifier = Modifier.size(18.dp))
+                }
             }
         }
         item(key = "liked") {
-            FilterChip(
+            ExpressiveFilterChip(
                 selected = controls.likedOnly,
                 onClick = onToggleLiked,
-                label = { Text("Liked") },
+                label = "Liked",
                 leadingIcon = {
                     Icon(
                         if (controls.likedOnly) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                         contentDescription = null,
-                        modifier = Modifier.size(FilterChipDefaults.IconSize)
+                        modifier = Modifier.size(18.dp)
                     )
-                }
+                },
+                modifier = Modifier.animateItem()
             )
         }
-        items(controls.customFilters, key = { it.id }) { filter ->
-            InputChip(
-                selected = filter.id == controls.selectedFilterId,
-                onClick = { onSelect(filter.id) },
-                label = { Text(filter.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                leadingIcon = {
-                    Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(InputChipDefaults.IconSize))
-                },
-                trailingIcon = {
-                    Icon(
-                        Icons.Rounded.Close,
-                        contentDescription = "Delete ${filter.label}",
-                        modifier = Modifier
-                            .size(InputChipDefaults.IconSize)
-                            .clip(CircleShape)
-                            .clickable { onDeleteCustom(filter.id) }
-                    )
-                }
-            )
+        // The picked filter, first after Liked; tap it again to turn it off.
+        if (selected != null) {
+            item(key = selected.id) {
+                if (selected.category == VibeCategory.CUSTOM) CustomChip(selected, Modifier.animateItem())
+                else PresetChip(selected, Modifier.animateItem())
+            }
+        }
+        items(controls.customFilters.filter { it.id != selectedId }, key = { it.id }) { filter ->
+            CustomChip(filter, Modifier.animateItem())
         }
         VibeCategory.values().filter { it != VibeCategory.CUSTOM }.forEach { category ->
             item(key = "divider_${category.name}") {
-                VerticalDivider(Modifier.height(24.dp).padding(horizontal = 2.dp))
-            }
-            items(MusicVibeFilters.presets.filter { it.category == category }, key = { it.id }) { filter ->
-                FilterChip(
-                    selected = filter.id == controls.selectedFilterId,
-                    onClick = { onSelect(filter.id) },
-                    label = { Text(filter.label) }
+                VerticalDivider(
+                    Modifier
+                        .height(24.dp)
+                        .padding(horizontal = 2.dp)
+                        .animateItem()
                 )
+            }
+            items(
+                MusicVibeFilters.presets.filter { it.category == category && it.id != selectedId },
+                key = { it.id }
+            ) { filter ->
+                PresetChip(filter, Modifier.animateItem())
             }
         }
     }
@@ -839,14 +855,17 @@ private fun VersionRow(
     val colors = MaterialTheme.colorScheme
     val label = remember(song.title) { com.theveloper.pixelplay.data.library.SongUnifier.versionLabel(song) ?: "Version" }
     Surface(
-        onClick = onClick,
-        modifier = modifier.semantics(mergeDescendants = true) { contentDescription = "$label version, ${song.title}" },
+        // No ⋮ button: hold the row for its options.
+        modifier = modifier
+            .clip(MaterialTheme.shapes.large)
+            .combinedClickable(onClick = onClick, onLongClick = onOptions, onLongClickLabel = "Song options")
+            .semantics(mergeDescendants = true) { contentDescription = "$label version, ${song.title}" },
         shape = MaterialTheme.shapes.large,
         color = if (isCurrent) colors.primaryContainer else colors.surfaceContainerLow,
         contentColor = if (isCurrent) colors.onPrimaryContainer else colors.onSurface
     ) {
         Row(
-            Modifier.padding(start = 10.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+            Modifier.padding(start = 10.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             SmartImage(
@@ -878,46 +897,8 @@ private fun VersionRow(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            IconButton(onClick = onOptions) {
-                Icon(Icons.Rounded.MoreVert, contentDescription = "More options for ${song.title}")
-            }
         }
     }
-}
-
-@Composable
-private fun CustomFilterDialog(existing: List<VibeFilter>, onDismiss: () -> Unit, onSave: (String) -> Unit) {
-    var text by rememberSaveable { mutableStateOf("") }
-    val duplicate = existing.any { it.label.equals(text.trim(), ignoreCase = true) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Rounded.AutoAwesome, contentDescription = null) },
-        title = { Text("Custom filter") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "Describe a vibe, genre, artist, decade or activity — e.g. “late night lofi”, “90s rock”, “rainy day”. It stays saved in your filter row.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it.take(60) },
-                    singleLine = true,
-                    label = { Text("Filter") },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { if (text.isNotBlank()) onSave(text) }),
-                    supportingText = if (duplicate) {
-                        { Text("Already saved — it will be switched on.") }
-                    } else null
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(enabled = text.isNotBlank(), onClick = { onSave(text) }) { Text("Save") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
-    )
 }
 
 /** A slim (40dp) pill search field; Material TextField can't go below 56dp without clipping. */

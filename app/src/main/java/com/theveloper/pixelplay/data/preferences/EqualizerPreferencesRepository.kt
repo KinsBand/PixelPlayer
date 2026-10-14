@@ -62,7 +62,16 @@ class EqualizerPreferencesRepository @Inject constructor(
         val AUDITION_SLOT_B_BANDS = stringPreferencesKey("audition_slot_b_bands")
         val AUDITION_ACTIVE_SLOT = stringPreferencesKey("audition_active_slot")
         val AUDITION_LOUDNESS_COMP = booleanPreferencesKey("audition_loudness_comp")
+        val VOLUME_BOOST_DB = floatPreferencesKey("volume_boost_db")
     }
+
+    /** Extreme volume boost in dB above the device's maximum media volume (0 = off). */
+    val volumeBoostDbFlow: Flow<Float> = dataStore.data.map { preferences ->
+        preferences[Keys.VOLUME_BOOST_DB] ?: 0f
+    }
+
+    suspend fun setVolumeBoostDb(db: Float) =
+        dataStore.edit { preferences -> preferences[Keys.VOLUME_BOOST_DB] = db }
 
     val adaptToGenreFlow: Flow<Boolean> = dataStore.data.map { it[Keys.ADAPT_TO_GENRE] ?: false }
 

@@ -85,6 +85,20 @@ object SettingsRegistry {
             keywords = listOf("mini player", "animation", "transition", "wave", "skip", "song change", "motion")
         ),
         SettingEntry(
+            key = "mini_player_swipe",
+            categoryId = "appearance",
+            titleRes = R.string.settings_mini_player_swipe_title,
+            descriptionRes = R.string.settings_mini_player_swipe_subtitle,
+            keywords = listOf("mini player", "swipe", "gesture", "next", "previous", "skip", "dismiss")
+        ),
+        SettingEntry(
+            key = "up_next_notification",
+            categoryId = "appearance",
+            titleRes = R.string.settings_up_next_notification_title,
+            descriptionRes = R.string.settings_up_next_notification_subtitle,
+            keywords = listOf("queue", "next", "upcoming", "notification", "up next")
+        ),
+        SettingEntry(
             key = "show_scrollbar",
             categoryId = "appearance",
             titleRes = R.string.settings_show_scrollbar_title,
@@ -112,6 +126,20 @@ object SettingsRegistry {
             descriptionRes = R.string.settings_navbar_corner_subtitle,
             keywords = listOf("navbar", "corner", "radius", "dp")
         ),
+        SettingEntry(
+            key = "library_navigation",
+            categoryId = "appearance",
+            titleRes = R.string.settings_library_navigation_title,
+            descriptionRes = R.string.settings_library_navigation_subtitle,
+            keywords = listOf("library navigation", "tabs", "pill", "grid")
+        ),
+        SettingEntry(
+            key = "practice_mode",
+            categoryId = "appearance",
+            titleRes = R.string.settings_practice_mode_title,
+            descriptionRes = R.string.settings_practice_mode_subtitle,
+            keywords = listOf("practice", "practice mode", "learning", "library", "card", "songs")
+        ),
 
         // General
         SettingEntry(
@@ -120,13 +148,6 @@ object SettingsRegistry {
             titleRes = R.string.settings_default_tab_title,
             descriptionRes = R.string.settings_default_tab_subtitle,
             keywords = listOf("default tab", "launch", "home", "library", "start")
-        ),
-        SettingEntry(
-            key = "library_navigation",
-            categoryId = "general",
-            titleRes = R.string.settings_library_navigation_title,
-            descriptionRes = R.string.settings_library_navigation_subtitle,
-            keywords = listOf("library navigation", "tabs", "pill", "grid")
         ),
 
         // Player & Lyrics (id "lyrics")
@@ -346,6 +367,13 @@ object SettingsRegistry {
             keywords = listOf("lyrics offset", "lyrics timing", "sync lyrics", "lyrics delay", "out of sync", "automatic offset")
         ),
         SettingEntry(
+            key = "lyrics_word_align",
+            categoryId = "lyrics",
+            titleRes = R.string.settings_lyrics_word_align_title,
+            descriptionRes = R.string.settings_lyrics_word_align_subtitle,
+            keywords = listOf("word sync", "karaoke", "word by word", "letter sync", "forced alignment", "on-device")
+        ),
+        SettingEntry(
             key = "immersive_lyrics",
             categoryId = "lyrics",
             titleRes = R.string.settings_immersive_lyrics_title,
@@ -471,12 +499,16 @@ object SettingsRegistry {
         SettingEntry(
             key = "export_backup",
             categoryId = "backup_restore",
+            // Lives in Profile now (Settings → Profile → Backup file).
+            route = Screen.Profile.route,
             titleRes = R.string.settings_export_backup_title,
             keywords = listOf("export", "backup", "pxpl", "save settings")
         ),
         SettingEntry(
             key = "import_backup",
             categoryId = "backup_restore",
+            // Lives in Profile now (Settings → Profile → Backup file).
+            route = Screen.Profile.route,
             titleRes = R.string.settings_import_backup_title,
             keywords = listOf("import", "restore", "load backup")
         ),
@@ -499,125 +531,6 @@ object SettingsRegistry {
             descriptionRes = R.string.settings_category_device_capabilities_subtitle,
             route = Screen.DeviceCapabilities.route,
             keywords = listOf("device capabilities", "hardware decoders", "storage specs", "codecs")
-        ),
-
-        // Visual widgets
-        SettingEntry(
-            key = "widget_background",
-            categoryId = "widgets",
-            titleRes = R.string.settings_widget_background_title,
-            descriptionRes = R.string.settings_widget_background_subtitle,
-            keywords = listOf("widget", "background", "transparent", "solid", "outline", "home screen")
-        ),
-        SettingEntry(
-            key = "widget_corner",
-            categoryId = "widgets",
-            titleRes = R.string.settings_widget_corner_title,
-            keywords = listOf("widget", "corner", "radius", "rounded", "shape")
-        ),
-        SettingEntry(
-            key = "widget_accent",
-            categoryId = "widgets",
-            titleRes = R.string.settings_widget_accent_title,
-            descriptionRes = R.string.settings_widget_accent_subtitle,
-            keywords = listOf("widget", "accent", "colour", "color", "material you", "album art")
-        ),
-        SettingEntry(
-            key = "turntable_spin_mode",
-            categoryId = "widgets",
-            titleRes = R.string.settings_turntable_spin_mode_title,
-            keywords = listOf("turntable", "vinyl", "record", "spin", "rotate", "animation", "battery")
-        ),
-        SettingEntry(
-            key = "turntable_spin_speed",
-            categoryId = "widgets",
-            titleRes = R.string.settings_turntable_spin_speed_title,
-            keywords = listOf("turntable", "spin", "speed", "rpm", "fast", "slow")
-        ),
-        SettingEntry(
-            key = "turntable_direction",
-            categoryId = "widgets",
-            titleRes = R.string.settings_turntable_direction_title,
-            keywords = listOf("turntable", "direction", "clockwise", "anticlockwise", "reverse")
-        ),
-        SettingEntry(
-            key = "turntable_disc_size",
-            categoryId = "widgets",
-            titleRes = R.string.settings_turntable_disc_scale_title,
-            keywords = listOf("turntable", "record", "disc", "size", "scale", "bigger", "smaller")
-        ),
-        SettingEntry(
-            key = "turntable_label_size",
-            categoryId = "widgets",
-            titleRes = R.string.settings_turntable_label_scale_title,
-            keywords = listOf("turntable", "album art", "label", "size", "cover")
-        ),
-        SettingEntry(
-            key = "turntable_badges",
-            categoryId = "widgets",
-            titleRes = R.string.settings_turntable_badges_title,
-            descriptionRes = R.string.settings_turntable_badges_subtitle,
-            keywords = listOf("turntable", "buttons", "bubbles", "play", "favourite", "favorite")
-        ),
-        SettingEntry(
-            key = "turntable_tonearm",
-            categoryId = "widgets",
-            titleRes = R.string.settings_turntable_tonearm_title,
-            keywords = listOf("turntable", "tonearm", "arm", "needle", "stylus")
-        ),
-        SettingEntry(
-            key = "turntable_grooves",
-            categoryId = "widgets",
-            titleRes = R.string.settings_turntable_grooves_title,
-            keywords = listOf("turntable", "grooves", "rings", "vinyl", "texture")
-        ),
-        SettingEntry(
-            key = "turntable_sheen",
-            categoryId = "widgets",
-            titleRes = R.string.settings_turntable_sheen_title,
-            keywords = listOf("turntable", "sheen", "highlight", "gloss", "shine", "light")
-        ),
-        SettingEntry(
-            key = "widget_show_title",
-            categoryId = "widgets",
-            titleRes = R.string.settings_widget_show_title,
-            keywords = listOf("widget", "song title", "text", "show")
-        ),
-        SettingEntry(
-            key = "widget_show_artist",
-            categoryId = "widgets",
-            titleRes = R.string.settings_widget_show_artist,
-            keywords = listOf("widget", "artist", "text", "show")
-        ),
-        SettingEntry(
-            key = "widget_show_prev_next",
-            categoryId = "widgets",
-            titleRes = R.string.settings_widget_show_prev_next,
-            keywords = listOf("widget", "previous", "next", "skip", "controls", "buttons")
-        ),
-        SettingEntry(
-            key = "widget_show_shuffle",
-            categoryId = "widgets",
-            titleRes = R.string.settings_widget_show_shuffle,
-            keywords = listOf("widget", "shuffle", "controls", "buttons")
-        ),
-        SettingEntry(
-            key = "widget_show_repeat",
-            categoryId = "widgets",
-            titleRes = R.string.settings_widget_show_repeat,
-            keywords = listOf("widget", "repeat", "loop", "controls", "buttons")
-        ),
-        SettingEntry(
-            key = "widget_show_favorite",
-            categoryId = "widgets",
-            titleRes = R.string.settings_widget_show_favorite,
-            keywords = listOf("widget", "favourite", "favorite", "like", "heart")
-        ),
-        SettingEntry(
-            key = "widget_progress",
-            categoryId = "widgets",
-            titleRes = R.string.settings_widget_progress_title,
-            keywords = listOf("widget", "progress", "bar", "wavy", "seek")
         ),
 
         // Developer

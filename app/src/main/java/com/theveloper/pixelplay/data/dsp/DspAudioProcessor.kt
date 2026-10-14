@@ -49,6 +49,10 @@ class DspAudioProcessor(
     private val truePeakLimiter = TruePeakLimiter()
     private val autoPreamp = AutoPreamp()
 
+    // Extreme volume: its own limiter with a slower release so heavy boost pumps less.
+    private val boostLimiter = TruePeakLimiter(isEnabled = true, isSoftSaturationEnabled = true)
+    private var appliedBoostGain = 1.0f
+
     // Cached state to detect sample rate or config updates
     private var currentSampleRate: Float = 0f
     private var lastConfig: DspConfig? = null
@@ -72,6 +76,7 @@ class DspAudioProcessor(
         ultrasonicFilter.setSampleRate(currentSampleRate)
         stereoCrossfeed.setSampleRate(currentSampleRate)
         truePeakLimiter.setSampleRate(currentSampleRate)
+        boostLimiter.setSampleRate(currentSampleRate, releaseTimeSec = 0.15f)
 
         return outputAudioFormat
     }
@@ -164,6 +169,25 @@ class DspAudioProcessor(
             }
         }
 
+        // 2b. Extreme volume (beyond the device maximum). Runs whether or not the EQ is on.
+        // The gain ramps across the buffer so slider moves don't click, then the boost
+        // limiter keeps the result under full scale.
+        val targetBoost = config.volumeBoostGain
+        if (targetBoost > 1.0005f || appliedBoostGain > 1.0005f) {
+            val step = if (frameCount > 0) (targetBoost - appliedBoostGain) / frameCount else 0f
+            var gain = appliedBoostGain
+            var idx = 0
+            for (i in 0 until frameCount) {
+                gain += step
+                for (c in 0 until channels) {
+                    floatProcessingBuffer[idx] *= gain
+                    idx++
+                }
+            }
+            appliedBoostGain = targetBoost
+            boostLimiter.processInterleaved(floatProcessingBuffer, frameCount, channels)
+        }
+
         // 3. Write back to output buffer
         val outputByteCount = frameCount * bytesPerFrame
         val out = ensureOutputBuffer(outputByteCount)
@@ -247,6 +271,7 @@ class DspAudioProcessor(
         ultrasonicFilter.reset()
         stereoCrossfeed.reset()
         truePeakLimiter.reset()
+        boostLimiter.reset()
         autoPreamp.reset()
     }
 
@@ -257,5 +282,6 @@ class DspAudioProcessor(
         outputAudioFormat = AudioFormat.NOT_SET
         currentSampleRate = 0f
         lastConfig = null
+        appliedBoostGain = 1.0f
     }
 }

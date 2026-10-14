@@ -126,6 +126,7 @@ import com.theveloper.pixelplay.ui.theme.MotionTokens
 import com.theveloper.pixelplay.ui.theme.rememberSystemReducedMotion
 import androidx.compose.animation.core.snap
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -161,6 +162,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.material.icons.rounded.ViewAgenda
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.theveloper.pixelplay.data.preferences.dataStore
@@ -182,6 +186,10 @@ private class RelayoutTracker { var key: Any? = UnsetRelayoutKey }
 
 /** DataStore key: Instruments page shows live lyrics above the tab ("Lyrics + Tab"). */
 private const val LYRICS_WITH_TAB_KEY = "lyrics_tab_combined_view"
+/** DataStore key: Instruments page colours: "follow" (app), "light" or "dark". */
+private const val TAB_APPEARANCE_KEY = "tab_page_appearance"
+/** Share of the Lyrics + Tab page given to lyrics (0.2–0.8, default half). */
+private const val LYRICS_TAB_SPLIT_RATIO_KEY = "lyrics_tab_split_ratio"
 
 /** Largest lyric size (sp) full screen, immersive included. */
 private const val MAX_LYRIC_FONT_SP = 40f
@@ -214,6 +222,33 @@ internal data class LyricsSheetColors(
     val toastContainer: Color = accent,
     val toastContent: Color = accentContent
 )
+
+/** Every colour of [from] blended toward [to] by [t] (0..1). */
+internal fun lerpLyricsSheetColors(from: LyricsSheetColors, to: LyricsSheetColors, t: Float): LyricsSheetColors {
+    if (t <= 0f) return from
+    if (t >= 1f) return to
+    fun c(a: Color, b: Color) = androidx.compose.ui.graphics.lerp(a, b, t)
+    return LyricsSheetColors(
+        container = c(from.container, to.container),
+        content = c(from.content, to.content),
+        controlContainer = c(from.controlContainer, to.controlContainer),
+        controlContent = c(from.controlContent, to.controlContent),
+        accent = c(from.accent, to.accent),
+        accentContent = c(from.accentContent, to.accentContent),
+        lyricHighlight = c(from.lyricHighlight, to.lyricHighlight),
+        warmHighlight = c(from.warmHighlight, to.warmHighlight),
+        playPauseContainer = c(from.playPauseContainer, to.playPauseContainer),
+        playPauseContent = c(from.playPauseContent, to.playPauseContent),
+        syncButtonContainer = c(from.syncButtonContainer, to.syncButtonContainer),
+        syncButtonContent = c(from.syncButtonContent, to.syncButtonContent),
+        surfaceSecondary = c(from.surfaceSecondary, to.surfaceSecondary),
+        onSurfaceSecondary = c(from.onSurfaceSecondary, to.onSurfaceSecondary),
+        reactionPositive = c(from.reactionPositive, to.reactionPositive),
+        reactionNegative = c(from.reactionNegative, to.reactionNegative),
+        toastContainer = c(from.toastContainer, to.toastContainer),
+        toastContent = c(from.toastContent, to.toastContent),
+    )
+}
 
 internal fun lyricsSheetColors(colorScheme: ColorScheme): LyricsSheetColors {
     val container = colorScheme.primaryContainer
@@ -371,7 +406,11 @@ fun LyricsSheet(
     onLyricsSyncOffsetResetToAutomatic: (() -> Unit)? = null,
     lyricsTextStyle: TextStyle,
     colorScheme: ColorScheme,
+    /** Light + dark versions of [colorScheme]; lets the Instruments page be forced light or dark. */
+    colorSchemePair: com.theveloper.pixelplay.presentation.viewmodel.ColorSchemePair? = null,
     onBackClick: () -> Unit,
+    /** False while the host is animating the sheet out; true while it is (or is coming back) on screen. */
+    isShown: Boolean = true,
     onSeekTo: (Long) -> Unit,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
@@ -412,33 +451,73 @@ fun LyricsSheet(
     // ─── Enter / Exit animation state ────────────────────────────────────────
     // Mirrors the player-sheet pattern: a plain Float in state drives graphicsLayer
     // at draw-phase (no recomposition per frame). 0f = fully visible, 1f = dismissed.
-    var backProgress by remember { mutableFloatStateOf(1f) }
+    // One Animatable drives both the enter spring and the predictive-back gesture, so a back
+    // swipe that starts while the sheet is still springing in takes over smoothly instead of
+    // two animations fighting over the same value. 0f = fully visible, 1f = dismissed.
+    val sheetProgress = remember { Animatable(1f) }
 
-    // Draw-phase lambda provider — read only inside graphicsLayer so layout is never
-    // re-triggered during the gesture (same technique as SheetVisualState).
-    val backProgressProvider = rememberUpdatedState(backProgress)
+    // Draw-phase provider — read only inside graphicsLayer so layout is never re-triggered
+    // during the gesture (same technique as SheetVisualState).
+    val backProgressProvider = sheetProgress.asState()
 
-    // Enter animation: slide up from +6 % height + fade in.
-    LaunchedEffect(Unit) {
-        val anim = Animatable(1f)
-        anim.animateTo(
-            targetValue = 0f,
-            animationSpec = spring(
-                stiffness = Spring.StiffnessMediumLow,
-                dampingRatio = Spring.DampingRatioLowBouncy
+    // Enter animation (and re-enter if the sheet is reopened while it was animating out).
+    LaunchedEffect(isShown) {
+        if (isShown && sheetProgress.value != 0f) {
+            sheetProgress.animateTo(
+                targetValue = 0f,
+                animationSpec = spring(
+                    stiffness = Spring.StiffnessMediumLow,
+                    dampingRatio = Spring.DampingRatioLowBouncy
+                )
             )
-        ) { backProgress = value }
+        }
     }
 
-    // Predictive-back (Android 13+) or plain back on older devices.
+    // Predictive-back (Android 14+) or plain back on older devices.
     LyricsPredictiveBackHandler(
-        enabled = true,
-        onProgressChanged = { backProgress = it },
+        enabled = isShown,
+        onProgressChanged = {},
+        progress = sheetProgress,
         onBack = onBackClick
     )
 
     val stablePlayerState by stablePlayerStateFlow.collectAsStateWithLifecycle()
-    val sheetColors = remember(colorScheme) { lyricsSheetColors(colorScheme) }
+    // Lyrics or Instruments page (declared here because the Instruments page can have its own colours).
+    var performanceView by remember { mutableStateOf(PerformanceView.Lyrics) }
+    // Tab appearance (Instruments options): Follow app / Light / Dark, remembered. Only the
+    // Instruments page uses it; the Lyrics page always follows the app.
+    val tabAppearanceContext = LocalContext.current
+    val tabAppearanceFlow = remember(tabAppearanceContext) {
+        tabAppearanceContext.dataStore.data.map { com.theveloper.pixelplay.presentation.components.tabs.TabAppearance.fromKey(it[stringPreferencesKey(TAB_APPEARANCE_KEY)]) }
+    }
+    val tabAppearance by tabAppearanceFlow.collectAsStateWithLifecycle(initialValue = com.theveloper.pixelplay.presentation.components.tabs.TabAppearance.FollowApp)
+    val tabAppearanceScope = androidx.compose.runtime.rememberCoroutineScope()
+    val setTabAppearance: (com.theveloper.pixelplay.presentation.components.tabs.TabAppearance) -> Unit = { value ->
+        tabAppearanceScope.launch {
+            tabAppearanceContext.dataStore.edit { prefs -> prefs[stringPreferencesKey(TAB_APPEARANCE_KEY)] = value.key }
+        }
+    }
+    val forcedInstrumentsScheme = when (tabAppearance) {
+        com.theveloper.pixelplay.presentation.components.tabs.TabAppearance.Light -> colorSchemePair?.light
+        com.theveloper.pixelplay.presentation.components.tabs.TabAppearance.Dark -> colorSchemePair?.dark
+        else -> null
+    }
+    val baseSheetColors = remember(colorScheme) { lyricsSheetColors(colorScheme) }
+    val forcedSheetColors = remember(forcedInstrumentsScheme) { forcedInstrumentsScheme?.let { lyricsSheetColors(it) } }
+    // 0 = app colours, 1 = the forced light/dark colours; animated so switching recolours smoothly.
+    val tabAppearanceReducedMotion = com.theveloper.pixelplay.ui.theme.rememberSystemReducedMotion()
+    val forcedColorsFraction by animateFloatAsState(
+        targetValue = if (performanceView == PerformanceView.Instruments && forcedSheetColors != null) 1f else 0f,
+        animationSpec = if (tabAppearanceReducedMotion) snap<Float>() else
+            tween<Float>(MotionTokens.DurationMedium2, easing = MotionTokens.Emphasized),
+        label = "tabAppearanceFraction"
+    )
+    // Keep the last forced colours so the fade back to the app colours has a start point.
+    var lastForcedSheetColors by remember { mutableStateOf<LyricsSheetColors?>(null) }
+    if (forcedSheetColors != null && lastForcedSheetColors != forcedSheetColors) lastForcedSheetColors = forcedSheetColors
+    val sheetColors = lastForcedSheetColors?.takeIf { forcedColorsFraction > 0f }
+        ?.let { lerpLyricsSheetColors(baseSheetColors, it, forcedColorsFraction) }
+        ?: baseSheetColors
     // Sideways: song + controls on one half, lyrics on the other (and face-to-face goes side by side).
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
@@ -532,6 +611,22 @@ fun LyricsSheet(
             context.dataStore.edit { prefs -> prefs[booleanPreferencesKey(LYRICS_WITH_TAB_KEY)] = enabled }
         }
     }
+    // Lyrics + Tab split: share of the page given to lyrics, dragged on the divider, remembered.
+    val lyricsTabSplitRatioFlow = remember(context) {
+        context.dataStore.data.map { it[floatPreferencesKey(LYRICS_TAB_SPLIT_RATIO_KEY)] ?: 0.5f }
+    }
+    val storedLyricsTabSplitRatio by lyricsTabSplitRatioFlow.collectAsStateWithLifecycle(initialValue = 0.5f)
+    // Live value while dragging (smooth, no DataStore round-trip per frame); saved on release.
+    var lyricsTabSplitRatio by remember { mutableFloatStateOf(0.5f) }
+    var isDraggingSplit by remember { mutableStateOf(false) }
+    LaunchedEffect(storedLyricsTabSplitRatio) {
+        if (!isDraggingSplit) lyricsTabSplitRatio = storedLyricsTabSplitRatio.coerceIn(0.2f, 0.8f)
+    }
+    val saveLyricsTabSplitRatio: (Float) -> Unit = { ratio ->
+        coroutineScope.launch {
+            context.dataStore.edit { prefs -> prefs[floatPreferencesKey(LYRICS_TAB_SPLIT_RATIO_KEY)] = ratio.coerceIn(0.2f, 0.8f) }
+        }
+    }
     val reducedMotion = rememberSystemReducedMotion()
 
     // Apply FLAG_KEEP_SCREEN_ON via the window when enabled
@@ -608,7 +703,6 @@ fun LyricsSheet(
     var showCustomLyricsEditor by remember { mutableStateOf(false) }
     var showSyncControls by remember { mutableStateOf(false) }
     var previewSeekPositionMs by remember(currentSong?.id) { mutableStateOf<Long?>(null) }
-    var performanceView by remember { mutableStateOf(PerformanceView.Lyrics) }
     // The Instruments page shares one tab controller with the practice panel and options menu.
     val tabPractice = if (performanceView == PerformanceView.Instruments) {
         rememberTabPractice(
@@ -684,7 +778,9 @@ fun LyricsSheet(
     var faceToFaceHold by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     val faceToFaceHoldState = rememberUpdatedState(faceToFaceHold)
     val immersivePageAllows = performanceView == PerformanceView.Instruments || showSyncedLyrics == true
-    val immersiveActive = immersiveLyricsEnabled && immersivePageAllows && !isImmersiveTemporarilyDisabled
+    // Never auto-hide the controls while a tab is being edited.
+    val immersiveActive = immersiveLyricsEnabled && immersivePageAllows && !isImmersiveTemporarilyDisabled &&
+        tabPractice?.editor == null
     val immersiveManual = immersiveActive && immersiveLyricsTimeout <= IMMERSIVE_TIMEOUT_OFF
     val immersiveManualState = rememberUpdatedState(immersiveManual)
     LaunchedEffect(immersiveActive, immersiveManual, lastInteractionTime, immersiveLyricsTimeout, faceToFaceHold) {
@@ -964,7 +1060,9 @@ fun LyricsSheet(
                     showFetchLyricsDialog = false
                     onDismissLyricsSearch()
                 },
-                onImport = onImportLyrics
+                onImport = onImportLyrics,
+                // Opened because nothing was found (or "Find lyrics"): search straight away.
+                autoStart = true
             )
         }
     }
@@ -1147,6 +1245,27 @@ fun LyricsSheet(
                             .zIndex(2f)
                             .onSizeChanged { headerHeightPx = it.height }
                     ) {
+                        // Edit mode: ✕ · the song minimised in the middle · ✓, with bar · beat under it.
+                        val tabEditor = tabPractice?.editor
+                        if (tabEditor != null) {
+                            com.theveloper.pixelplay.presentation.components.tabs.edit.EditHeader(
+                                editor = tabEditor,
+                                songTitle = currentSong?.title.orEmpty(),
+                                onBg = onBackgroundColor,
+                                accent = accentColor,
+                                onAccent = onAccentColor,
+                                containerColor = containerColor,
+                                cover = {
+                                    SmartImage(
+                                        model = currentSong?.albumArtUriString ?: R.drawable.rounded_album_24,
+                                        shape = CircleShape,
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                    )
+                                }
+                            )
+                        } else
                         AnimatedContent(
                             targetState = headerCollapsed,
                             transitionSpec = {
@@ -1248,7 +1367,20 @@ fun LyricsSheet(
                             AnimatedContent(
                                 targetState = showSyncedLyrics,
                                 transitionSpec = {
-                                    if (initialState == false && targetState == true) {
+                                    if (initialState == null && targetState != null) {
+                                        // Finding → lyrics: the placeholder lines lift away and
+                                        // the real lines rise into their place.
+                                        if (reducedMotion) {
+                                            fadeIn(tween(MotionTokens.DurationMedium2)).togetherWith(fadeOut(tween(MotionTokens.DurationShort4)))
+                                        } else {
+                                            (fadeIn(tween(MotionTokens.DurationMedium2, easing = MotionTokens.EmphasizedDecelerate)) +
+                                                slideInVertically(tween(MotionTokens.DurationMedium2, easing = MotionTokens.EmphasizedDecelerate)) { it / 24 })
+                                                .togetherWith(
+                                                    fadeOut(tween(MotionTokens.DurationShort4, easing = MotionTokens.EmphasizedAccelerate)) +
+                                                        slideOutVertically(tween(MotionTokens.DurationShort4, easing = MotionTokens.EmphasizedAccelerate)) { -it / 24 }
+                                                )
+                                        }
+                                    } else if (initialState == false && targetState == true) {
                                         (fadeIn(animationSpec = tween(380, easing = LinearOutSlowInEasing)) +
                                             scaleIn(initialScale = 0.98f, animationSpec = tween(380, easing = LinearOutSlowInEasing)))
                                             .togetherWith(fadeOut(animationSpec = tween(220, easing = FastOutLinearInEasing)))
@@ -1276,18 +1408,12 @@ fun LyricsSheet(
                                                     contentAlignment = Alignment.Center
                                                 ) {
                                                     if (isLoadingLyrics) {
-                                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                            Text(
-                                                                text = stringResource(R.string.lyrics_loading),
-                                                                style = MaterialTheme.typography.titleMedium
-                                                            )
-                                                            Spacer(modifier = Modifier.height(8.dp))
-                                                            LinearWavyProgressIndicator(
-                                                                trackColor = accentColor.copy(alpha = 0.4f),
-                                                                color = accentColor,
-                                                                modifier = Modifier.width(100.dp)
-                                                            )
-                                                        }
+                                                        LyricsFindingView(
+                                                            lineHeight = lyricsTextStyle.fontSize,
+                                                            contentColor = contentColor,
+                                                            accentColor = accentColor,
+                                                            reducedMotion = reducedMotion
+                                                        )
                                                     } else {
                                                         Column(
                                                             horizontalAlignment = Alignment.CenterHorizontally,
@@ -1471,16 +1597,22 @@ fun LyricsSheet(
                                 label = "lyricsTabFraction"
                             )
                             val combinedShown = lyricsTabFraction > 0.001f
+                            var splitColumnHeightPx by remember { mutableFloatStateOf(0f) }
+                            // Lyrics grows in from 0; at full it takes `ratio` and the tab the rest.
+                            val lyricsWeight = (lyricsTabSplitRatio * lyricsTabFraction).coerceAtLeast(0.01f)
+                            val tabWeight = ((1f - lyricsTabSplitRatio) * lyricsTabFraction + (1f - lyricsTabFraction))
+                                .coerceAtLeast(0.01f)
                             Column(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .padding(top = lyricsTop * lyricsTabFraction)
+                                    .onSizeChanged { splitColumnHeightPx = it.height.toFloat() }
                             ) {
                                 if (combinedShown) {
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .weight(lyricsTabFraction)
+                                            .weight(lyricsWeight)
                                             .graphicsLayer {
                                                 alpha = lyricsTabFraction
                                                 translationY = -(1f - lyricsTabFraction) * 24.dp.toPx()
@@ -1490,17 +1622,37 @@ fun LyricsSheet(
                                     ) {
                                         lyricsPaneContent(12.dp, Modifier.fillMaxSize())
                                     }
-                                    HorizontalDivider(
-                                        modifier = Modifier
-                                            .padding(horizontal = 24.dp)
-                                            .graphicsLayer { alpha = lyricsTabFraction },
-                                        color = onBackgroundColor.copy(alpha = 0.12f)
+                                    // Drag to resize the panes (20–80 %); double-tap for 50/50.
+                                    LyricsTabSplitHandle(
+                                        color = onBackgroundColor,
+                                        activeColor = accentColor,
+                                        dragging = isDraggingSplit,
+                                        modifier = Modifier.graphicsLayer { alpha = lyricsTabFraction },
+                                        onDragStart = {
+                                            isDraggingSplit = true
+                                            resetImmersiveTimer()
+                                        },
+                                        onDrag = { deltaPx ->
+                                            if (splitColumnHeightPx > 0f) {
+                                                lyricsTabSplitRatio = (lyricsTabSplitRatio + deltaPx / splitColumnHeightPx)
+                                                    .coerceIn(0.2f, 0.8f)
+                                            }
+                                        },
+                                        onDragEnd = {
+                                            isDraggingSplit = false
+                                            saveLyricsTabSplitRatio(lyricsTabSplitRatio)
+                                        },
+                                        onDoubleTap = {
+                                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            lyricsTabSplitRatio = 0.5f
+                                            saveLyricsTabSplitRatio(0.5f)
+                                        }
                                     )
                                 }
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .weight(1f)
+                                        .weight(tabWeight)
                                         .clipToBounds()
                                         .semantics { paneTitle = "Tab" }
                                 ) {
@@ -1633,7 +1785,8 @@ fun LyricsSheet(
                                             practice.panelExpanded = true
                                         }
                                         controlsUpDrag = 0f
-                                        val committed = controlsDragOffset.value > controlsHideThresholdPx
+                                        val committed = controlsDragOffset.value > controlsHideThresholdPx &&
+                                            tabPracticeState.value?.editor == null
                                         if (committed) {
                                             hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                             hideControlsNow()
@@ -1676,6 +1829,43 @@ fun LyricsSheet(
                                 .size(width = 32.dp, height = 4.dp)
                                 .background(contentColor.copy(alpha = 0.25f), CircleShape)
                         )
+                    // Tab timing (Instruments page): opened from "Adjust tab timing" in the
+                    // options menu; drag it down or pick "Hide tab timing" to close it.
+                    AnimatedVisibility(
+                        visible = tabPractice?.timingPanelVisible == true,
+                        enter = expandVertically(
+                            animationSpec = tween(
+                                com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium2,
+                                easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate
+                            )
+                        ) + fadeIn(
+                            tween(
+                                com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium2,
+                                easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate
+                            )
+                        ),
+                        exit = shrinkVertically(
+                            animationSpec = tween(
+                                com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort4,
+                                easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate
+                            )
+                        ) + fadeOut(
+                            tween(
+                                com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort4,
+                                easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate
+                            )
+                        )
+                    ) {
+                        tabPractice?.let { practice ->
+                            com.theveloper.pixelplay.presentation.components.tabs.TabTimingPanel(
+                                controller = practice,
+                                backgroundColor = backgroundColor,
+                                accentColor = sheetColors.syncButtonContainer,
+                                onAccentColor = sheetColors.syncButtonContent,
+                                onBackgroundColor = onBackgroundColor
+                            )
+                        }
+                    }
                                     AnimatedVisibility(
                         visible = showSyncedLyrics == true && lyrics?.synced != null && showSyncControls,
                         enter = expandVertically() + fadeIn(),
@@ -1763,86 +1953,159 @@ fun LyricsSheet(
                             isPlaying = isPlaying
                         )
 
-                        // Skip forward, same glyph as the full player's next button. Sits right of
-                        // the timeline, so the timeline sits centred between play/pause and skip.
-                        val skipInteraction = remember { MutableInteractionSource() }
-                        val skipPressed by skipInteraction.collectIsPressedAsState()
-                        val skipScale by animateFloatAsState(
-                            targetValue = if (skipPressed) 0.86f else 1f,
-                            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
-                            label = "skipPressScale"
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(if (compactControls) 48.dp else 58.dp)
-                                .graphicsLayer {
-                                    scaleX = skipScale
-                                    scaleY = skipScale
-                                }
-                                .clip(CircleShape)
-                                .background(sheetColors.surfaceSecondary)
-                                .clickable(
-                                    interactionSource = skipInteraction,
-                                    indication = androidx.compose.material3.ripple()
-                                ) {
-                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    resetImmersiveTimer()
-                                    onNext()
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.SkipNext,
-                                contentDescription = "Next song",
-                                tint = sheetColors.onSurfaceSecondary,
-                                modifier = Modifier.size(28.dp)
+                        // Edit mode: undo + redo take the skip button's place.
+                        val undoEditor = tabPractice?.editor
+                        if (undoEditor != null) {
+                            com.theveloper.pixelplay.presentation.components.tabs.edit.EditUndoRedo(
+                                editor = undoEditor,
+                                size = if (compactControls) 48.dp else 52.dp,
+                                container = sheetColors.surfaceSecondary,
+                                tint = sheetColors.onSurfaceSecondary
                             )
+                        } else {
+                            // Skip forward, same glyph as the full player's next button. Sits right of
+                            // the timeline, so the timeline sits centred between play/pause and skip.
+                            val skipInteraction = remember { MutableInteractionSource() }
+                            val skipPressed by skipInteraction.collectIsPressedAsState()
+                            val skipScale by animateFloatAsState(
+                                targetValue = if (skipPressed) 0.86f else 1f,
+                                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+                                label = "skipPressScale"
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(if (compactControls) 48.dp else 58.dp)
+                                    .graphicsLayer {
+                                        scaleX = skipScale
+                                        scaleY = skipScale
+                                    }
+                                    .clip(CircleShape)
+                                    .background(sheetColors.surfaceSecondary)
+                                    .clickable(
+                                        interactionSource = skipInteraction,
+                                        indication = androidx.compose.material3.ripple()
+                                    ) {
+                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        resetImmersiveTimer()
+                                        onNext()
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.SkipNext,
+                                    contentDescription = "Next song",
+                                    tint = sheetColors.onSurfaceSecondary,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
                         }
                     }
                 
                     Spacer(modifier = Modifier.height(if (compactControls) 8.dp else 16.dp))
 
-                    // Floating Toolbar
-                    LyricsFloatingToolbar(
-                        modifier = Modifier.padding(horizontal = 0.dp),
-                        showSyncedLyrics = showSyncedLyrics,
-                        hasSyncedLyrics = hasSyncedLyrics,
-                        onShowSyncedLyricsChange = { showSyncedLyrics = it },
-                        onNavigateBack = {
-                            onBackClick()
+                    // Floating Toolbar (edit mode: the edit bar takes its place)
+                    AnimatedContent(
+                        targetState = tabPractice?.editor != null,
+                        modifier = Modifier.fillMaxWidth(),
+                        transitionSpec = {
+                            (androidx.compose.animation.fadeIn(
+                                tween(
+                                    com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium2,
+                                    easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate
+                                )
+                            ) + androidx.compose.animation.slideInVertically(
+                                tween(
+                                    com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium2,
+                                    easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate
+                                )
+                            ) { it / 8 }) togetherWith androidx.compose.animation.fadeOut(
+                                tween(
+                                    com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort4,
+                                    easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate
+                                )
+                            )
                         },
-                        onMoreClick = { showMoreSheet = true },
-                        backgroundColor = backgroundColor,
-                        onBackgroundColor = onBackgroundColor,
-                        accentColor = accentColor,
-                        onAccentColor = onAccentColor,
-                        performanceView = performanceView,
-                        onPerformanceViewChange = { performanceView = it },
-                        instrumentsPanelOpen = tabPractice?.panelExpanded == true,
-                        onInstrumentsClick = {
-                            resetImmersiveTimer()
-                            tabPractice?.let { it.panelExpanded = !it.panelExpanded }
-                        },
-                        // Pass progress so the back button animates with the gesture (draw-phase).
-                        backProgressProvider = { backProgressProvider.value },
-                        onAddSongClick = onAddSongClick?.let { open ->
-                            {
-                                resetImmersiveTimer()
-                                open()
-                            }
-                        },
-                    )
-
-                    // Guitar / drum practice panel: the toolbar's Instruments button opens it.
-                    tabPractice?.let { practice ->
-                        com.theveloper.pixelplay.presentation.components.tabs.TabPracticePanel(
-                            controller = practice,
+                        label = "toolbarEditSwap"
+                    ) { editing ->
+                        // Edit mode: ✕ and ✓ live in the header at the top, so nothing goes here.
+                        if (!editing) {
+                        LyricsFloatingToolbar(
+                            modifier = Modifier.padding(horizontal = 0.dp),
+                            showSyncedLyrics = showSyncedLyrics,
+                            hasSyncedLyrics = hasSyncedLyrics,
+                            onShowSyncedLyricsChange = { showSyncedLyrics = it },
+                            onNavigateBack = {
+                                onBackClick()
+                            },
+                            onMoreClick = { showMoreSheet = true },
+                            backgroundColor = backgroundColor,
                             onBackgroundColor = onBackgroundColor,
                             accentColor = accentColor,
                             onAccentColor = onAccentColor,
-                            containerColor = containerColor,
-                            modifier = Modifier.padding(top = 4.dp)
+                            performanceView = performanceView,
+                            onPerformanceViewChange = { performanceView = it },
+                            instrumentsPanelOpen = tabPractice?.panelExpanded == true,
+                            onInstrumentsClick = {
+                                resetImmersiveTimer()
+                                tabPractice?.let { it.panelExpanded = !it.panelExpanded }
+                            },
+                            // Pass progress so the back button animates with the gesture (draw-phase).
+                            backProgressProvider = { backProgressProvider.value },
+                            onAddSongClick = onAddSongClick?.let { open ->
+                                {
+                                    resetImmersiveTimer()
+                                    open()
+                                }
+                            },
                         )
+                        }
+                    }
+
+                    // Guitar / drum practice panel: the toolbar's Instruments button opens it.
+                    // In edit mode the tools area becomes the edit tools (drum pads etc.).
+                    tabPractice?.let { practice ->
+                        AnimatedContent(
+                            targetState = practice.editor != null,
+                            modifier = Modifier.fillMaxWidth(),
+                            transitionSpec = {
+                                (androidx.compose.animation.fadeIn(
+                                    tween(
+                                        com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium2,
+                                        easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate
+                                    )
+                                ) + androidx.compose.animation.slideInVertically(
+                                    tween(
+                                        com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium2,
+                                        easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate
+                                    )
+                                ) { it / 8 }) togetherWith androidx.compose.animation.fadeOut(
+                                    tween(
+                                        com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort4,
+                                        easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate
+                                    )
+                                )
+                            },
+                            label = "toolsEditSwap"
+                        ) { editing ->
+                            val ed = practice.editor
+                            if (editing && ed != null) {
+                                com.theveloper.pixelplay.presentation.components.tabs.edit.EditToolsPanel(
+                                    editor = ed,
+                                    onBg = onBackgroundColor,
+                                    accent = accentColor,
+                                    onAccent = onAccentColor
+                                )
+                            } else if (!editing) {
+                                com.theveloper.pixelplay.presentation.components.tabs.TabPracticePanel(
+                                    controller = practice,
+                                    onBackgroundColor = onBackgroundColor,
+                                    accentColor = accentColor,
+                                    onAccentColor = onAccentColor,
+                                    containerColor = containerColor,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
+                        }
                     }
                  }
                 }
@@ -1926,6 +2189,8 @@ fun LyricsSheet(
                         onToggleSyncControls = {
                             resetImmersiveTimer()
                             showSyncControls = !showSyncControls
+                            // Only one timing panel above the play row at a time.
+                            if (showSyncControls) tabPractice?.timingPanelVisible = false
                         },
                         isImmersiveTemporarilyDisabled = isImmersiveTemporarilyDisabled,
                         onSetImmersiveTemporarilyDisabled = {
@@ -1995,16 +2260,21 @@ fun LyricsSheet(
                         onWriteCustomLyrics = { showCustomLyricsEditor = true },
                         onFindLyrics = { showFetchLyricsDialog = true },
                         tabOptions = tabPractice?.let { practice ->
-                            {
+                            { dismissMenu ->
                                 com.theveloper.pixelplay.presentation.components.tabs.TabOptionsSection(
                                     controller = practice,
                                     contentColor = contentColor,
                                     accentColor = accentColor,
                                     itemBackgroundColor = contentColor.copy(alpha = 0.08f),
-                                    lyricsWithTab = lyricsWithTab,
-                                    onLyricsWithTabChange = { enabled ->
+                                    onAccentColor = onAccentColor,
+                                    appearance = tabAppearance,
+                                    // Only offered when the light + dark colours are known.
+                                    onAppearanceChange = if (colorSchemePair != null) setTabAppearance else null,
+                                    onToggleTimingPanel = {
+                                        dismissMenu()
                                         resetImmersiveTimer()
-                                        setLyricsWithTab(enabled)
+                                        practice.timingPanelVisible = !practice.timingPanelVisible
+                                        if (practice.timingPanelVisible) showSyncControls = false
                                     }
                                 )
                             }
@@ -2277,6 +2547,40 @@ fun LyricsSheet(
                 }
             }
        
+           // Lyrics + Tab shortcut on the Instruments page, right of the arrow (where the
+           // face-to-face shortcut sits on the Lyrics page). Toggles the split view.
+           AnimatedVisibility(
+                visible = immersiveMode && !splitActive &&
+                    performanceView == PerformanceView.Instruments && tabPractice != null,
+                enter = fadeIn() + scaleIn(initialScale = 0.6f) + slideInVertically { it / 2 },
+                exit = fadeOut() + scaleOut(targetScale = 0.6f) + slideOutVertically { it / 2 },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .offset(x = overlayShiftX + 52.dp)
+                    .padding(bottom = 38.dp)
+            ) {
+                FilledTonalIconButton(
+                    onClick = {
+                        hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        resetImmersiveTimer()
+                        setLyricsWithTab(!lyricsWithTab)
+                    },
+                    modifier = Modifier
+                        .size(36.dp)
+                        .graphicsLayer { alpha = chromeIdleAlpha },
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = if (lyricsWithTab) accentColor else accentColor.copy(alpha = 0.22f),
+                        contentColor = if (lyricsWithTab) onAccentColor else accentColor
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.ViewAgenda,
+                        contentDescription = if (lyricsWithTab) "Hide lyrics above tab" else "Show lyrics above tab",
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
            // Add Song shortcut while the controls are hidden, left of the arrow (mirrors the
            // face-to-face shortcut on the right).
            if (onAddSongClick != null) {
@@ -2302,10 +2606,9 @@ fun LyricsSheet(
                            contentColor = accentColor
                        )
                    ) {
-                       Icon(
-                           imageVector = Icons.Rounded.Add,
-                           contentDescription = "Add a song",
-                           modifier = Modifier.size(18.dp)
+                       MusicNoteAddIcon(
+                           noteSize = 16.dp,
+                           contentDescription = "Add a song"
                        )
                    }
                }
@@ -3257,14 +3560,30 @@ fun PlainLyricsLine(
     val dullColor = LocalContentColor.current.copy(alpha = 0.50f)
     val translationColor = LocalContentColor.current.copy(alpha = 0.36f)
 
+    // Adaptive expressive typography for plain (unsynced) lyrics: the song's voice keeps its
+    // weight and tracking (instead of the fixed light look), and words carry their own cues
+    // (SHOUTED, "!", (backing vocals)). Plain lyrics have no timing, so no loudness per word.
+    val expression = com.theveloper.pixelplay.presentation.components.lyrics.LocalLyricExpression.current
+    val primaryStyle = remember(style, expression) {
+        if (expression != null) style.copy(fontWeight = style.fontWeight ?: FontWeight.Normal)
+        else style.copy(fontWeight = FontWeight.Normal, letterSpacing = 0.2.sp)
+    }
+    val primaryAnnotated = remember(primaryText, expression, primaryStyle.fontWeight) {
+        val spans = expression?.let {
+            com.theveloper.pixelplay.presentation.components.lyrics.buildUntimedLineExpression(
+                text = primaryText,
+                profile = it,
+                restWeight = primaryStyle.fontWeight ?: FontWeight.Normal
+            )
+        }.orEmpty()
+        androidx.compose.ui.text.AnnotatedString(primaryText, spanStyles = spans)
+    }
+
     Column(modifier = modifier, horizontalAlignment = horizontalAlignment) {
         if (primaryText.isNotBlank()) {
             Text(
-                text = primaryText,
-                style = style.copy(
-                    fontWeight = FontWeight.Normal,
-                    letterSpacing = 0.2.sp
-                ),
+                text = primaryAnnotated,
+                style = primaryStyle,
                 color = dullColor,
                 textAlign = textAlign
             )
@@ -3657,21 +3976,6 @@ internal fun LyricsTrackInfo(
     }
 }
 
-/** Reuses the last BlurEffect while the (whole-pixel) radius is unchanged. */
-private class LyricLineBlurCache {
-    private var radiusPx = -1f
-    private var effect: BlurEffect? = null
-
-    fun effectFor(radius: Float): BlurEffect {
-        val cached = effect
-        if (cached != null && radius == radiusPx) return cached
-        return BlurEffect(radius, radius, TileMode.Clamp).also {
-            effect = it
-            radiusPx = radius
-        }
-    }
-}
-
 /**
  * Face-to-face placeholder while the next song's lyrics load (or when it has none): the same
  * note for both people, the top copy turned around. Tapping the song name leaves face-to-face,
@@ -3724,5 +4028,135 @@ private fun FaceToFaceWaiting(
     Column(modifier) {
         half(Modifier.weight(1f).graphicsLayer { rotationZ = 180f })
         half(Modifier.weight(1f))
+    }
+}
+
+
+/**
+ * Drag handle between the lyrics and tab panes in "Lyrics + Tab": a 36 × 4 dp pill in a 24 dp
+ * touch strip. Vertical drags report pixel deltas; double-tap resets to an even split.
+ */
+@Composable
+private fun LyricsTabSplitHandle(
+    color: Color,
+    activeColor: Color,
+    dragging: Boolean,
+    onDragStart: () -> Unit,
+    onDrag: (Float) -> Unit,
+    onDragEnd: () -> Unit,
+    onDoubleTap: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val pillColor by animateColorAsState(
+        targetValue = if (dragging) activeColor else color.copy(alpha = 0.32f),
+        label = "splitHandleColor"
+    )
+    val pillWidth by animateDpAsState(
+        targetValue = if (dragging) 48.dp else 36.dp,
+        label = "splitHandleWidth"
+    )
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(24.dp)
+            .pointerInput(Unit) {
+                detectVerticalDragGestures(
+                    onDragStart = { onDragStart() },
+                    onDragEnd = { onDragEnd() },
+                    onDragCancel = { onDragEnd() },
+                    onVerticalDrag = { change, amount ->
+                        change.consume()
+                        onDrag(amount)
+                    }
+                )
+            }
+            .pointerInput(Unit) {
+                detectTapGestures(onDoubleTap = { onDoubleTap() })
+            }
+            .semantics { contentDescription = "Resize lyrics and tab. Double-tap to reset" },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .width(pillWidth)
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(pillColor)
+        )
+    }
+}
+
+/**
+ * Full-screen "finding lyrics" state: three placeholder lyric lines (sized like the user's
+ * lyrics text) with a soft accent sweep, a wavy progress bar and "Finding lyrics…". The sweep
+ * is read only in the draw phase, so it never recomposes. Reduced motion: still lines.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun LyricsFindingView(
+    lineHeight: androidx.compose.ui.unit.TextUnit,
+    contentColor: Color,
+    accentColor: Color,
+    reducedMotion: Boolean
+) {
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val barHeight = with(density) {
+        if (lineHeight.isSp) (lineHeight.toPx() * 0.9f).toDp() else 24.dp
+    }.coerceIn(16.dp, 40.dp)
+    val sweep = rememberInfiniteTransition(label = "lyricsFinding").animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            tween(MotionTokens.DurationLong2 * 3, easing = MotionTokens.Standard)
+        ),
+        label = "lyricsFindingSweep"
+    )
+    val baseColor = contentColor.copy(alpha = 0.10f)
+    val sweepColor = accentColor.copy(alpha = 0.35f)
+    val findingLabel = stringResource(R.string.lyrics_finding)
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics {
+                liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite
+                contentDescription = findingLabel
+            }
+    ) {
+        listOf(0.82f, 0.64f, 0.74f).forEachIndexed { index, widthFraction ->
+            Box(
+                Modifier
+                    .fillMaxWidth(widthFraction)
+                    .height(barHeight)
+                    .clip(MaterialTheme.shapes.small)
+                    .drawBehind {
+                        drawRect(baseColor)
+                        if (reducedMotion) return@drawBehind
+                        // Each line's sweep trails the one above a little.
+                        val p = ((sweep.value * 1.4f) - index * 0.15f).coerceIn(-0.2f, 1.2f)
+                        val band = size.width * 0.45f
+                        val x = -band + (size.width + band * 2f) * p
+                        drawRect(
+                            brush = Brush.horizontalGradient(
+                                colors = listOf(Color.Transparent, sweepColor, Color.Transparent),
+                                startX = x - band / 2f,
+                                endX = x + band / 2f
+                            )
+                        )
+                    }
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        LinearWavyProgressIndicator(
+            trackColor = accentColor.copy(alpha = 0.4f),
+            color = accentColor,
+            modifier = Modifier.width(120.dp)
+        )
+        Text(
+            text = findingLabel,
+            style = MaterialTheme.typography.titleMedium,
+            color = contentColor.copy(alpha = 0.8f)
+        )
     }
 }

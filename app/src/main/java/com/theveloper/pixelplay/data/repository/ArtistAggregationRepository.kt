@@ -21,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -112,6 +113,32 @@ enum class FansFilterType {
     PLAYLISTS
 }
 
+/**
+ * A part of the artist profile that's ready before the rest, so the artist page can fill each
+ * section as soon as its own sources answer instead of waiting for everything.
+ */
+sealed interface ArtistProfileSection {
+    /** Albums and singles (iTunes) plus who the Deezer artist is (image, fans, "Not this artist?"). */
+    data class Releases(
+        val albums: List<ArtistAlbumItem>,
+        val singlesAndEPs: List<ArtistAlbumItem>,
+        val effectiveImageUrl: String?,
+        val fanCount: Long?,
+        val deezerArtistId: Long?,
+        val deezerCandidates: List<RelatedArtistItem>
+    ) : ArtistProfileSection
+
+    /** Fans also like: related artists. Their songs and playlists come with the full profile. */
+    data class RelatedArtists(val artists: List<RelatedArtistItem>) : ArtistProfileSection
+
+    /** The folded catalogue, songs the artist appears on, and catalogue genres. */
+    data class Catalogue(
+        val tracks: List<ArtistTrack>,
+        val appearsOn: List<ArtistTrack>,
+        val genres: List<String>
+    ) : ArtistProfileSection
+}
+
 /** Thrown when no catalogue source could be reached at all (usually: offline). */
 class ArtistCatalogUnavailableException : Exception("Couldn't reach any music catalogue")
 
@@ -169,6 +196,47 @@ class ArtistAggregationRepository @Inject constructor(
         diskCache.read(artistName)?.also { cache.put(cacheKey(artistName), it.data) }
     }
 
+    /** Search's discovery hub: related artists without building a whole artist page. */
+    private val relatedCache = android.util.LruCache<String, Pair<Long, List<RelatedArtistItem>>>(32)
+
+    /**
+     * Deezer's "related artists" for [artistName], closest first. Uses the artist page's cache
+     * when it has them; otherwise one artist search plus one related lookup (both small, and
+     * both behind the app's network policy like every Deezer call). Kept for [RELATED_TTL_MS].
+     * Failures return what was cached before (or nothing) and aren't cached, so they retry.
+     */
+    suspend fun relatedArtists(artistName: String, limit: Int = 20): List<RelatedArtistItem> = withContext(Dispatchers.IO) {
+        if (artistName.isBlank()) return@withContext emptyList()
+        val key = cacheKey(artistName)
+        val now = System.currentTimeMillis()
+        val cached = relatedCache.get(key)
+        if (cached != null && now - cached.first < RELATED_TTL_MS) return@withContext cached.second
+        val fromPage = try {
+            // Gson can leave a "non-null" list null in an old cache file.
+            val list: List<RelatedArtistItem>? = getCachedProfile(artistName)?.takeIf { !it.isStale }?.data?.fansAlsoLikeArtists
+            list.orEmpty()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (e: Exception) {
+            emptyList()
+        }
+        if (fromPage.isNotEmpty()) {
+            return@withContext fromPage.take(limit).also { relatedCache.put(key, now to it) }
+        }
+        try {
+            val candidates = deezerApiService.searchArtist(artistName, 8).data
+            val artist = chooseDeezerArtist(artistName, candidates, emptySet(), deezerOverride(artistName))
+            val related = if (artist == null) emptyList() else
+                deezerApiService.getRelatedArtists(artist.id, limit).data.map { it.toRelatedItem() }
+            related.take(limit).also { relatedCache.put(key, now to it) }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (e: Exception) {
+            Timber.w(e, "Related artists unavailable for discovery")
+            cached?.second.orEmpty()
+        }
+    }
+
     /** The Deezer artist the user picked with "Not this artist?", if any. */
     fun deezerOverride(artistName: String): Long? =
         overrides.getLong(cacheKey(artistName), -1L).takeIf { it > 0L }
@@ -191,7 +259,9 @@ class ArtistAggregationRepository @Inject constructor(
     suspend fun getArtistProfileData(
         artistName: String,
         forceRefresh: Boolean = false,
-        localTitles: Set<String> = emptySet()
+        localTitles: Set<String> = emptySet(),
+        /** Called with each section as soon as it's ready, before the full profile returns. */
+        onSection: (suspend (ArtistProfileSection) -> Unit)? = null
     ): ArtistCrossPlatformData = withContext(Dispatchers.IO) {
         val key = cacheKey(artistName)
         if (!forceRefresh) {
@@ -203,7 +273,7 @@ class ArtistAggregationRepository @Inject constructor(
             }
         }
 
-        val profile = fetchProfile(artistName, localTitles, deezerOverride(artistName))
+        val profile = fetchProfile(artistName, localTitles, deezerOverride(artistName), onSection)
         cache.put(key, profile)
         diskCache.write(artistName, profile)
         profile
@@ -212,7 +282,8 @@ class ArtistAggregationRepository @Inject constructor(
     private suspend fun fetchProfile(
         artistName: String,
         localTitles: Set<String>,
-        overrideId: Long?
+        overrideId: Long?,
+        onSection: (suspend (ArtistProfileSection) -> Unit)? = null
     ): ArtistCrossPlatformData = coroutineScope {
         val failures = java.util.concurrent.atomic.AtomicInteger(0)
         suspend fun <T> attempt(label: String, fallback: T, block: suspend () -> T): T = try {
@@ -247,6 +318,20 @@ class ArtistAggregationRepository @Inject constructor(
         // ── Full tracklists: iTunes albums + Deezer discography (B2) ─────────────────────
         val filteredItunesAlbums = rawItunesAlbums.filter { isTargetArtist(it.artistName, artistName) }
             .distinctBy { it.collectionId }
+
+        // Releases only need the album search, so the page can show them now.
+        val (albums, singlesAndEPs) = processReleases(artistName, filteredItunesAlbums)
+        val fans = deezerArtist?.fanCount?.toLong()?.takeIf { it > 0 }
+        onSection?.invoke(
+            ArtistProfileSection.Releases(
+                albums = albums,
+                singlesAndEPs = singlesAndEPs,
+                effectiveImageUrl = deezerArtist?.pictureXl ?: deezerArtist?.pictureBig,
+                fanCount = fans,
+                deezerArtistId = deezerArtist?.id,
+                deezerCandidates = deezerCandidates
+            )
+        )
         val albumGate = Semaphore(4)
         val itunesAlbumTracksDeferred = filteredItunesAlbums.take(MAX_ITUNES_ALBUM_LOOKUPS).map { album ->
             async {
@@ -270,6 +355,12 @@ class ArtistAggregationRepository @Inject constructor(
         }
         val deezerAlbums = if (deezerArtist == null) emptyList() else fetchDeezerAlbums(deezerArtist.id)
         val deezerGate = Semaphore(6)
+        // Related artists usually answer long before the album tracklists.
+        if (onSection != null) {
+            launch {
+                onSection(ArtistProfileSection.RelatedArtists(deezerRelatedDeferred.await().map { it.toRelatedItem() }))
+            }
+        }
         val deezerAlbumTracks: List<Pair<DeezerAlbum, List<DeezerTrack>>> = deezerAlbums
             .filter { it.recordType != "compile" }
             .take(MAX_DEEZER_ALBUM_LOOKUPS)
@@ -353,8 +444,12 @@ class ArtistAggregationRepository @Inject constructor(
         }
         val appearsOn = ArtistCatalog.sort(appearsOnSongs.values.map(::toTrack), ArtistSongSort.POPULAR).take(MAX_APPEARS_ON)
 
-        // ── Releases ───────────────────────────────────────────────────────────────────────
-        val (albums, singlesAndEPs) = processReleases(artistName, filteredItunesAlbums)
+        val genres = (ownItunes.mapNotNull { it.primaryGenreName } + filteredItunesAlbums.mapNotNull { it.primaryGenreName })
+            .filter { it.isNotBlank() && !it.equals("Music", true) }
+            .groupingBy { it }.eachCount()
+            .entries.sortedByDescending { it.value }
+            .take(4).map { it.key }
+        onSection?.invoke(ArtistProfileSection.Catalogue(tracks = tracks, appearsOn = appearsOn, genres = genres))
 
         // ── Fans also like: real songs by related artists ────────────────────────────────────
         val fansAlsoLikeArtists = deezerRelated.map { it.toRelatedItem() }
@@ -377,13 +472,6 @@ class ArtistAggregationRepository @Inject constructor(
             )
         }
 
-        val genres = (ownItunes.mapNotNull { it.primaryGenreName } + filteredItunesAlbums.mapNotNull { it.primaryGenreName })
-            .filter { it.isNotBlank() && !it.equals("Music", true) }
-            .groupingBy { it }.eachCount()
-            .entries.sortedByDescending { it.value }
-            .take(4).map { it.key }
-
-        val fans = deezerArtist?.fanCount?.toLong()?.takeIf { it > 0 }
         ArtistCrossPlatformData(
             artistName = artistName,
             effectiveImageUrl = deezerArtist?.pictureXl ?: deezerArtist?.pictureBig,
@@ -402,6 +490,39 @@ class ArtistAggregationRepository @Inject constructor(
             deezerCandidates = deezerCandidates,
             genres = genres
         )
+    }
+
+    /**
+     * The artist page's "Similar" section from artist names (Spotify related artists or Last.fm):
+     * each name resolved on Deezer by exact (folded) name for a picture, then top songs from the
+     * first [songsFrom] of them, interleaved. Bounded: at most 12 lookups + [songsFrom] top-track
+     * calls, 4 at a time. Names that don't resolve are dropped.
+     */
+    suspend fun similarFor(
+        names: List<String>,
+        songsFrom: Int = 6,
+        perArtist: Int = 3
+    ): Pair<List<RelatedArtistItem>, List<Song>> = withContext(Dispatchers.IO) {
+        coroutineScope {
+            val gate = Semaphore(4)
+            val resolved = names.distinctBy { ArtistCatalog.fold(it) }.take(MAX_SIMILAR).map { name ->
+                async {
+                    gate.withPermit {
+                        attemptQuiet { deezerApiService.searchArtist(name, 3).data }.orEmpty()
+                            .firstOrNull { ArtistCatalog.fold(it.name) == ArtistCatalog.fold(name) }
+                    }
+                }
+            }.awaitAll().filterNotNull()
+            val songs = resolved.take(songsFrom).map { artist ->
+                async {
+                    gate.withPermit {
+                        attemptQuiet { deezerApiService.getArtistTopTracks(artist.id, perArtist).data }.orEmpty()
+                            .map { deezerSong(it, it.album, it.artist?.name ?: artist.name) }
+                    }
+                }
+            }.awaitAll()
+            resolved.map { it.toRelatedItem() } to interleave(songs).take(MAX_SIMILAR_SONGS)
+        }
     }
 
     private suspend fun <T> attemptQuiet(block: suspend () -> T): T? = try {
@@ -661,11 +782,16 @@ class ArtistAggregationRepository @Inject constructor(
     }
 
     private companion object {
+        /** Similar section: names looked up / songs kept. */
+        const val MAX_SIMILAR = 12
+        const val MAX_SIMILAR_SONGS = 18
         const val MAX_ITUNES_ALBUM_LOOKUPS = 40
         const val MAX_DEEZER_ALBUM_PAGES = 3
         const val MAX_DEEZER_ALBUM_LOOKUPS = 80
         const val MAX_APPEARS_ON = 50
         const val RELATED_FOR_SONGS = 6
+        /** How long Search's discovery hub keeps an artist's related artists. */
+        const val RELATED_TTL_MS = 24L * 60 * 60 * 1000
         const val RELATED_PLAYLISTS = 4
     }
 }

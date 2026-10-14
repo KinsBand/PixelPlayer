@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import com.theveloper.pixelplay.presentation.navigation.popBackStackSafely
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -141,7 +142,7 @@ fun EditTransitionScreen(
                     FilledIconButton(
                         modifier = Modifier
                             .padding(start = 10.dp),
-                        onClick = { navController.navigateUp() },
+                        onClick = { navController.popBackStackSafely() },
                         colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
                     ) {
                         Icon(painterResource(R.drawable.rounded_arrow_back_24), contentDescription = stringResource(R.string.common_back), tint = MaterialTheme.colorScheme.onSurface)
@@ -754,4 +755,4 @@ private fun CurveSelectionColumn(
             }
         }
     }
-}
+}

@@ -145,38 +145,90 @@ class YouTubeMusicApiService @Inject constructor(
             downloadState = if (downloads[song.id]?.isDownloaded == true) DownloadState.DOWNLOADED else DownloadState.NOT_DOWNLOADED) }
     }
 
+    private fun collectionContentFilter(filter: SearchFilterType): String? = when (filter) {
+        SearchFilterType.ARTISTS -> "music_artists"
+        SearchFilterType.ALBUMS -> "music_albums"
+        SearchFilterType.PLAYLISTS -> "music_playlists"
+        else -> null
+    }
+
     suspend fun searchCollections(query: String, filter: SearchFilterType): List<SearchResultItem> = withContext(Dispatchers.IO) {
-        val contentFilter = when (filter) {
-            SearchFilterType.ARTISTS -> "music_artists"
-            SearchFilterType.ALBUMS -> "music_albums"
-            SearchFilterType.PLAYLISTS -> "music_playlists"
-            else -> return@withContext emptyList()
-        }
+        val contentFilter = collectionContentFilter(filter) ?: return@withContext emptyList()
         val handler = ServiceList.YouTube.searchQHFactory.fromQuery(query, listOf(contentFilter), "")
         val info = NewPipeExecution.run(NewPipeExecution.Lane.BACKGROUND) { SearchInfo.getInfo(ServiceList.YouTube, handler) }
         ensureActive()
-        info.relatedItems.mapNotNull { item ->
-            val url = item.url.toHttpUrlOrNull() ?: return@mapNotNull null
-            val art = item.thumbnails.maxByOrNull { it.height }?.url
-            val localId = item.url.hashCode().toLong() or Long.MIN_VALUE
-            when (item) {
-                is org.schabi.newpipe.extractor.channel.ChannelInfoItem -> {
-                    val browseId = url.pathSegments.lastOrNull()?.takeIf { it.startsWith("UC") } ?: return@mapNotNull null
-                    SearchResultItem.ArtistItem(
-                        Artist(localId, item.name, 0, art), browseId)
-                }
-                is org.schabi.newpipe.extractor.playlist.PlaylistInfoItem -> {
-                    val playlistId = url.queryParameter("list") ?: return@mapNotNull null
-                    if (filter == SearchFilterType.ALBUMS)
-                        SearchResultItem.AlbumItem(
-                            Album(localId, item.name, item.uploaderName.orEmpty(), 0, 0, art,
-                                item.streamCount.coerceAtLeast(0).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()), "VL$playlistId")
-                    else SearchResultItem.PlaylistItem(
-                        Playlist("ytbrowse_$playlistId", item.name, emptyList(),
-                            coverImageUri = art, source = "YOUTUBE_MUSIC"), "VL$playlistId")
-                }
-                else -> null
+        info.relatedItems.mapNotNull { item -> mapCollectionItem(item, filter) }
+    }
+
+    /** Next NewPipe page per (filter, normalized query), for paging albums / artists / playlists. */
+    private val moreCollectionPages = object : LinkedHashMap<String, org.schabi.newpipe.extractor.Page?>(16, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, org.schabi.newpipe.extractor.Page?>): Boolean = size > 16
+    }
+
+    private fun collectionKey(query: String, filter: SearchFilterType) =
+        filter.name + ":" + query.trim().lowercase(java.util.Locale.ROOT)
+
+    /**
+     * The next page of albums, artists or playlists for [query]. The first call walks past page
+     * one (already on screen) and returns page two. Returns the items and whether more exist.
+     */
+    suspend fun moreCollections(query: String, filter: SearchFilterType): Result<Pair<List<SearchResultItem>, Boolean>> = withContext(Dispatchers.IO) {
+        val contentFilter = collectionContentFilter(filter)
+        if (query.isBlank() || contentFilter == null) return@withContext Result.success(emptyList<SearchResultItem>() to false)
+        try {
+            val key = collectionKey(query, filter)
+            val handler = ServiceList.YouTube.searchQHFactory.fromQuery(query, listOf(contentFilter), "")
+            val known = synchronized(moreCollectionPages) { moreCollectionPages.containsKey(key) }
+            val page: org.schabi.newpipe.extractor.Page? = if (known) {
+                synchronized(moreCollectionPages) { moreCollectionPages[key] }
+            } else {
+                NewPipeExecution.run(NewPipeExecution.Lane.BACKGROUND) { SearchInfo.getInfo(ServiceList.YouTube, handler) }.nextPage
             }
+            ensureActive()
+            if (!org.schabi.newpipe.extractor.Page.isValid(page)) {
+                synchronized(moreCollectionPages) { moreCollectionPages[key] = null }
+                return@withContext Result.success(emptyList<SearchResultItem>() to false)
+            }
+            val more = NewPipeExecution.run(NewPipeExecution.Lane.BACKGROUND) { SearchInfo.getMoreItems(ServiceList.YouTube, handler, page) }
+            ensureActive()
+            val next = more.nextPage
+            synchronized(moreCollectionPages) { moreCollectionPages[key] = next }
+            val items = more.items.mapNotNull { mapCollectionItem(it, filter) }
+            Result.success(items to org.schabi.newpipe.extractor.Page.isValid(next))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Timber.tag(TAG).e(e, "Loading more $filter failed for query: $query")
+            Result.failure(e)
+        }
+    }
+
+    /** Forget paging for [query] under [filter] so the next load starts from page two again. */
+    fun resetMoreCollections(query: String, filter: SearchFilterType) {
+        synchronized(moreCollectionPages) { moreCollectionPages.remove(collectionKey(query, filter)) }
+    }
+
+    private fun mapCollectionItem(item: org.schabi.newpipe.extractor.InfoItem, filter: SearchFilterType): SearchResultItem? {
+        val url = item.url.toHttpUrlOrNull() ?: return null
+        val art = item.thumbnails.maxByOrNull { it.height }?.url
+        val localId = item.url.hashCode().toLong() or Long.MIN_VALUE
+        return when (item) {
+            is org.schabi.newpipe.extractor.channel.ChannelInfoItem -> {
+                val browseId = url.pathSegments.lastOrNull()?.takeIf { it.startsWith("UC") } ?: return null
+                SearchResultItem.ArtistItem(
+                    Artist(localId, item.name, 0, art), browseId)
+            }
+            is org.schabi.newpipe.extractor.playlist.PlaylistInfoItem -> {
+                val playlistId = url.queryParameter("list") ?: return null
+                if (filter == SearchFilterType.ALBUMS)
+                    SearchResultItem.AlbumItem(
+                        Album(localId, item.name, item.uploaderName.orEmpty(), 0, 0, art,
+                            item.streamCount.coerceAtLeast(0).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()), "VL$playlistId")
+                else SearchResultItem.PlaylistItem(
+                    Playlist("ytbrowse_$playlistId", item.name, emptyList(),
+                        coverImageUri = art, source = "YOUTUBE_MUSIC"), "VL$playlistId")
+            }
+            else -> null
         }
     }
 

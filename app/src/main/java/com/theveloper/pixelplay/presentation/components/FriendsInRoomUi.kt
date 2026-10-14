@@ -5,7 +5,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -29,6 +31,7 @@ import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -49,6 +52,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.theveloper.pixelplay.data.social.FriendsRoomMode
+import com.theveloper.pixelplay.data.social.FriendsShare
 import com.theveloper.pixelplay.presentation.viewmodel.FriendUi
 import com.theveloper.pixelplay.ui.theme.MotionTokens
 import kotlinx.coroutines.launch
@@ -117,7 +122,11 @@ internal fun FriendsInRoomRow(
     }
 }
 
-/** Check off who's here in person; Save keeps the selection (their playlists join the mix). */
+/**
+ * Check off who's here in person; Save keeps the selection. In "Mix it in" (default) their songs
+ * join the mix's pool at the chosen share and are picked when they fit; "Take turns" keeps the
+ * old rotation (1–2 of yours, then one from each friend).
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun FriendsInRoomSheet(
@@ -125,6 +134,10 @@ internal fun FriendsInRoomSheet(
     selected: Set<String>,
     onSave: (Set<String>) -> Unit,
     onDismiss: () -> Unit,
+    mode: FriendsRoomMode = FriendsRoomMode.MIX_IN,
+    onModeChange: (FriendsRoomMode) -> Unit = {},
+    share: FriendsShare = FriendsShare.EVEN,
+    onShareChange: (FriendsShare) -> Unit = {},
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
@@ -140,11 +153,52 @@ internal fun FriendsInRoomSheet(
                 modifier = Modifier.padding(horizontal = 24.dp)
             )
             Text(
-                "Songs from their playlists get mixed into your queue when they fit the mood.",
+                if (mode == FriendsRoomMode.MIX_IN) "Their songs join the mix and play when they fit the feel, tempo and mood."
+                else "After one or two of your songs, one from each friend, in turn.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 4.dp, bottom = 8.dp)
             )
+            // How they join: Mix it in (default) or Take turns.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                listOf(FriendsRoomMode.MIX_IN to "Mix it in", FriendsRoomMode.TAKE_TURNS to "Take turns").forEach { (value, label) ->
+                    FilterChip(
+                        selected = mode == value,
+                        onClick = { onModeChange(value) },
+                        label = { Text(label) }
+                    )
+                }
+            }
+            // Their share of the mix (Mix it in only): Sprinkle 15 % · Even 30 % · Lots 50 %.
+            if (mode == FriendsRoomMode.MIX_IN) {
+                Text(
+                    "Their share of the mix",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 8.dp)
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 24.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FriendsShare.entries.forEach { option ->
+                        FilterChip(
+                            selected = share == option,
+                            onClick = { onShareChange(option) },
+                            label = { Text("${option.label} ${(option.share * 100).toInt()}%") }
+                        )
+                    }
+                }
+            }
             if (friends.isEmpty()) {
                 Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
                     Text(

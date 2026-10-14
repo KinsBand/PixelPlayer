@@ -17,8 +17,7 @@ import timber.log.Timber
 
 /**
  * Snapshot of the currently casting remote player, projected from the Cast
- * [MediaStatus]. Consumed by both the listening-stats sync and the widget
- * surfaces, so it lives at file scope rather than nested in [MusicService].
+ * [MediaStatus]. Lives at file scope rather than nested in [MusicService].
  */
 internal data class RemotePlaybackSnapshot(
     val occurrenceId: String,
@@ -43,17 +42,14 @@ internal data class RemotePlaybackSnapshot(
  *    [RemoteMediaClient.Callback].
  *  - Tracking the observed [CastSession] and mirroring its playback into the
  *    [ListeningStatsTracker].
- *  - Projecting the remote [MediaStatus] into a [RemotePlaybackSnapshot] for the
- *    widget surfaces.
+ *  - Projecting the remote [MediaStatus] into a [RemotePlaybackSnapshot].
  *
- * The service supplies [requestWidgetUpdate] so the coordinator can trigger a UI
- * refresh without depending on the widget pipeline directly. All Cast SDK access
+ * All Cast SDK access
  * is wrapped in [runCatching] to tolerate Play Services being unavailable.
  */
 internal class CastSyncCoordinator(
     private val context: Context,
     private val listeningStatsTracker: ListeningStatsTracker,
-    private val requestWidgetUpdate: (force: Boolean) -> Unit,
 ) {
     private companion object {
         private const val TAG = "MusicService_PixelPlay"
@@ -82,21 +78,17 @@ internal class CastSyncCoordinator(
         val remoteCallback = object : RemoteMediaClient.Callback() {
             override fun onStatusUpdated() {
                 syncListeningStatsFromRemote()
-                requestWidgetUpdate(false)
             }
 
             override fun onMetadataUpdated() {
                 syncListeningStatsFromRemote()
-                requestWidgetUpdate(false)
             }
 
             override fun onQueueStatusUpdated() {
                 syncListeningStatsFromRemote()
-                requestWidgetUpdate(false)
             }
 
             override fun onPreloadStatusUpdated() {
-                requestWidgetUpdate(false)
             }
         }
         remoteClientCallback = remoteCallback
@@ -113,17 +105,15 @@ internal class CastSyncCoordinator(
             override fun onSessionEnded(session: CastSession, error: Int) {
                 if (observedSession === session) {
                     attachRemoteClient(null)
-                } else {
-                    requestWidgetUpdate(true)
                 }
             }
 
             override fun onSessionStarting(session: CastSession) = Unit
-            override fun onSessionStartFailed(session: CastSession, error: Int) = requestWidgetUpdate(true)
+            override fun onSessionStartFailed(session: CastSession, error: Int) = Unit
             override fun onSessionEnding(session: CastSession) = Unit
             override fun onSessionResuming(session: CastSession, sessionId: String) = Unit
-            override fun onSessionResumeFailed(session: CastSession, error: Int) = requestWidgetUpdate(true)
-            override fun onSessionSuspended(session: CastSession, reason: Int) = requestWidgetUpdate(true)
+            override fun onSessionResumeFailed(session: CastSession, error: Int) = Unit
+            override fun onSessionSuspended(session: CastSession, reason: Int) = Unit
         }
         sessionManagerListener = sessionListener
         runCatching {
@@ -156,7 +146,6 @@ internal class CastSyncCoordinator(
             activePlaybackIntent = false
             listeningStatsTracker.onPlaybackStopped()
         }
-        requestWidgetUpdate(true)
     }
 
     fun stop() {

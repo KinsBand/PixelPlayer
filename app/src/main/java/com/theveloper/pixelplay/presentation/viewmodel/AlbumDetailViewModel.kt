@@ -11,6 +11,7 @@ import com.theveloper.pixelplay.data.model.Album
 import com.theveloper.pixelplay.data.model.Song
 import com.theveloper.pixelplay.data.repository.MusicRepository // Importar MusicRepository
 import com.theveloper.pixelplay.R
+import com.theveloper.pixelplay.presentation.navigation.Screen
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
@@ -19,9 +20,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import javax.inject.Inject
 
 data class AlbumDetailUiState(
@@ -45,6 +49,8 @@ data class AlbumDetailUiState(
     val canToggleSave: Boolean = false,
     /** The official tracklist could not be loaded (offline / no match); the page offers Retry. */
     val tracklistFailed: Boolean = false,
+    /** The official tracklist is being looked up (first load or Retry). */
+    val isLoadingTracklist: Boolean = false,
     /** Resolving tracks to start "Play" / "Shuffle" on an album you don't own songs of. */
     val isStartingPlayback: Boolean = false
 ) {
@@ -61,6 +67,8 @@ class AlbumDetailViewModel @Inject constructor(
     private val tracklists: AlbumTracklistRepository,
     private val youTubeResolver: com.theveloper.pixelplay.data.spotify.SpotifyToYouTubeResolver,
     private val downloadCoordinator: com.theveloper.pixelplay.data.youtube.DownloadCoordinator,
+    private val innerTubeClient: com.theveloper.pixelplay.data.youtube.InnerTubeClient,
+    private val youTubeMusicApiService: com.theveloper.pixelplay.data.youtube.YouTubeMusicApiService,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -70,13 +78,31 @@ class AlbumDetailViewModel @Inject constructor(
     private var tracklistJob: Job? = null
     private var onlineSaveJob: Job? = null
     private var tracklistFor: String? = null
+    private var currentBrowsePayload: Screen.AlbumDetail.BrowsePayload? = null
+    private var browseJob: Job? = null
 
     init {
         val albumIdString: String? = savedStateHandle.get("albumId")
         if (albumIdString != null) {
             val decoded = try { java.net.URLDecoder.decode(albumIdString, "UTF-8") } catch (e: Exception) { albumIdString }
             val albumId = decoded.toLongOrNull()
-            if (albumId != null && CollectionKeys.isStreamAlbumId(albumId)) {
+            if (decoded.startsWith(Screen.AlbumDetail.BROWSE_PREFIX)) {
+                val payload = Screen.AlbumDetail.parseBrowsePayload(
+                    decoded.removePrefix(Screen.AlbumDetail.BROWSE_PREFIX)
+                )
+                if (payload != null) {
+                    currentBrowsePayload = payload
+                    loadBrowseAlbum(payload)
+                } else {
+                    _uiState.update { it.copy(error = context.getString(R.string.album_detail_invalid_id), isLoading = false) }
+                }
+            } else if (decoded.startsWith(Screen.AlbumDetail.NAME_PREFIX)) {
+                val (title, artist) = Screen.AlbumDetail.parseNamePayload(
+                    decoded.removePrefix(Screen.AlbumDetail.NAME_PREFIX)
+                )
+                if (title.isNotBlank()) loadAlbumByName(title, artist)
+                else _uiState.update { it.copy(error = context.getString(R.string.album_detail_invalid_id), isLoading = false) }
+            } else if (albumId != null && CollectionKeys.isStreamAlbumId(albumId)) {
                 loadStreamAlbum(albumId)
             } else if (albumId != null) {
                 loadAlbumData(albumId)
@@ -85,6 +111,161 @@ class AlbumDetailViewModel @Inject constructor(
             }
         } else {
             _uiState.update { it.copy(error = context.getString(R.string.album_detail_id_not_found), isLoading = false) }
+        }
+    }
+
+    /**
+     * Album opened via YouTube Music browseId from search results.
+     * Displays initial metadata immediately while fetching and hydrating the full tracklist.
+     */
+    private fun loadBrowseAlbum(payload: Screen.AlbumDetail.BrowsePayload) {
+        val streamId = CollectionKeys.streamAlbumId(
+            CollectionKeys.albumKey(payload.artist.ifBlank { "Unknown Artist" }, payload.title.ifBlank { "Album" })
+        )
+        val initialAlbum = Album(
+            id = streamId,
+            title = payload.title.ifBlank { "Album" },
+            artist = payload.artist.ifBlank { "Unknown Artist" },
+            year = payload.year,
+            dateAdded = 0L,
+            albumArtUriString = payload.artUrl,
+            songCount = 0,
+            albumArtist = payload.artist.ifBlank { "Unknown Artist" }
+        )
+
+        _uiState.update {
+            it.copy(
+                album = initialAlbum,
+                isLoading = true,
+                isLoadingTracklist = true,
+                error = null,
+                canToggleSave = true,
+                tracklistFailed = false
+            )
+        }
+
+        streamCollection.albumIdForName(payload.title, payload.artist, payload.artUrl, payload.year)
+
+        if (onlineSaveJob == null) {
+            onlineSaveJob = viewModelScope.launch {
+                streamCollection.observeIsSaved(streamId).collect { saved ->
+                    _uiState.update { it.copy(isSaved = saved) }
+                }
+            }
+        }
+
+        val transient = getTransientAlbum(payload.browseId)
+        if (transient != null && transient.second.isNotEmpty()) {
+            val (cachedAlbum, cachedSongs) = transient
+            _uiState.update {
+                it.copy(
+                    album = cachedAlbum.copy(
+                        id = streamId,
+                        songCount = cachedSongs.size,
+                        albumArtUriString = cachedAlbum.albumArtUriString ?: payload.artUrl
+                    ),
+                    songs = cachedSongs,
+                    isLoading = false,
+                    isLoadingTracklist = false,
+                    releaseTrackCount = cachedSongs.size,
+                    streamingCount = cachedSongs.size,
+                    canToggleSave = true,
+                    error = null
+                )
+            }
+            return
+        }
+
+        browseJob?.cancel()
+        browseJob = viewModelScope.launch {
+            try {
+                val songsMap = LinkedHashMap<String, Song>()
+                val seen = mutableSetOf<String>()
+                var continuation: String? = null
+                val maxPages = 10
+                repeat(maxPages) {
+                    val page = innerTubeClient.browse(payload.browseId, continuation)
+                    youTubeMusicApiService.hydrate(page.songs).forEach { songsMap.putIfAbsent(it.id, it) }
+                    val next = page.continuation ?: return@repeat
+                    if (!seen.add(next)) return@repeat
+                    continuation = next
+                }
+
+                val tracklist = songsMap.values.mapIndexed { index, song ->
+                    song.copy(
+                        album = if (song.album.isBlank() || song.album == "YouTube Music") initialAlbum.title else song.album,
+                        albumId = streamId,
+                        albumArtist = song.albumArtist?.takeIf { it.isNotBlank() } ?: initialAlbum.artist,
+                        albumArtUriString = song.albumArtUriString ?: initialAlbum.albumArtUriString,
+                        trackNumber = if (song.trackNumber > 0) song.trackNumber else (index + 1)
+                    )
+                }
+
+                if (tracklist.isNotEmpty()) {
+                    val finalAlbum = initialAlbum.copy(
+                        songCount = tracklist.size,
+                        albumArtUriString = initialAlbum.albumArtUriString ?: tracklist.firstOrNull()?.albumArtUriString
+                    )
+                    registerTransientAlbum(payload.browseId, finalAlbum, tracklist)
+                    _uiState.update {
+                        it.copy(
+                            album = finalAlbum,
+                            songs = tracklist,
+                            isLoading = false,
+                            isLoadingTracklist = false,
+                            releaseTrackCount = tracklist.size,
+                            streamingCount = tracklist.size,
+                            canToggleSave = true,
+                            error = null,
+                            tracklistFailed = false
+                        )
+                    }
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            isLoadingTracklist = false,
+                            error = context.getString(R.string.album_detail_not_found),
+                            tracklistFailed = true
+                        )
+                    }
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to load browse album ${payload.browseId}")
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        isLoadingTracklist = false,
+                        error = context.getString(R.string.album_detail_error_loading_album, e.localizedMessage ?: ""),
+                        tracklistFailed = true
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Album opened by name (cloud songs, streams and unindexed files have no library album id):
+     * a matching library album opens as usual; otherwise it opens as a stream album of that name,
+     * which shows any liked songs of it and fills in the official tracklist from the catalogue.
+     */
+    private fun loadAlbumByName(title: String, artist: String?) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, error = null) }
+            val wantedTitle = CollectionKeys.normalizeAlbum(title)
+            val wantedArtist = artist?.let { CollectionKeys.normalizeArtist(it) }?.takeIf { it.isNotBlank() }
+            val local = runCatching {
+                musicRepository.searchAlbums(title).first()
+            }.getOrNull().orEmpty().filter { CollectionKeys.normalizeAlbum(it.title) == wantedTitle }
+            val match = local.firstOrNull { album ->
+                wantedArtist == null ||
+                    CollectionKeys.normalizeArtist(album.albumArtist?.takeIf { it.isNotBlank() } ?: album.artist) == wantedArtist ||
+                    CollectionKeys.normalizeArtist(album.artist) == wantedArtist
+            } ?: local.singleOrNull()
+            val id = match?.id ?: streamCollection.albumIdForName(title, artist)
+            if (CollectionKeys.isStreamAlbumId(id)) loadStreamAlbum(id) else loadAlbumData(id)
         }
     }
 
@@ -144,6 +325,7 @@ class AlbumDetailViewModel @Inject constructor(
                                             _uiState.update { it.copy(isSaved = saved) }
                                         }
                                     }
+                                    loadMissingTracks(onlineAlbum)
                                 } else {
                                     _uiState.value = AlbumDetailUiState(
                                         error = context.getString(R.string.album_detail_not_found),
@@ -224,6 +406,9 @@ class AlbumDetailViewModel @Inject constructor(
                 }
             }
             streamCollection.songsByAlbumId
+                // Right after launch the collection hasn't been rebuilt yet (empty map): keep the
+                // page loading instead of showing an album with no songs.
+                .filter { byAlbum -> row == null || byAlbum.isNotEmpty() }
                 .map { it[id].orEmpty() }
                 .collect { liked ->
                     // The playing song stays on the page until the album's own songs arrive.
@@ -231,7 +416,11 @@ class AlbumDetailViewModel @Inject constructor(
                     val songs = liked + seed.filterNot { AlbumTracklistRepository.normalizeTrack(it.title) in known }
                     _uiState.update {
                         it.copy(
-                            album = album.copy(songCount = maxOf(songs.size, album.songCount, 1)),
+                            album = album.copy(
+                                songCount = maxOf(songs.size, album.songCount, 1),
+                                // Keep a cover the catalogue filled in for albums opened by name.
+                                albumArtUriString = album.albumArtUriString ?: it.album?.albumArtUriString
+                            ),
                             songs = songs.sortedWith(trackOrder),
                             streamingCount = songs.size,
                             isLoading = false,
@@ -265,7 +454,14 @@ class AlbumDetailViewModel @Inject constructor(
 
     /** Retry after the tracklist lookup failed (offline, or no match). */
     fun retryTracklist() {
+        val currentBrowse = currentBrowsePayload
+        if (currentBrowse != null) {
+            loadBrowseAlbum(currentBrowse)
+            return
+        }
         val album = _uiState.value.album ?: return
+        if (_uiState.value.isLoadingTracklist) return
+        tracklistJob?.cancel()
         tracklistFor = null
         tracklistJob = null
         _uiState.update { it.copy(tracklistFailed = false) }
@@ -320,13 +516,21 @@ class AlbumDetailViewModel @Inject constructor(
         }
         tracklistFor = request
         tracklistJob = viewModelScope.launch {
-            val tracklist = runCatching { tracklists.find(albumArtist, album.title) }.getOrNull()
+            _uiState.update { it.copy(isLoadingTracklist = true, tracklistFailed = false) }
+            // Same catalogue lookup for library, online and stream albums, so "Missing from your
+            // library" shows on every album the release is found for.
+            val tracklist = try {
+                tracklists.find(albumArtist, album.title)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
             if (tracklist == null) {
-                // Only worth a Retry on pages that are mostly the tracklist (stream albums).
-                if (CollectionKeys.isStreamAlbumId(album.id)) _uiState.update { it.copy(tracklistFailed = true) }
+                _uiState.update { it.copy(isLoadingTracklist = false, tracklistFailed = true) }
                 return@launch
             }
-            _uiState.update { it.copy(tracklistFailed = false) }
+            _uiState.update { it.copy(isLoadingTracklist = false, tracklistFailed = false) }
             applyTracklist(tracklist, album)
         }
     }
@@ -355,7 +559,14 @@ class AlbumDetailViewModel @Inject constructor(
                     year = tracklist.year
                 )
             }
-        _uiState.update { it.copy(missingTracks = missing, releaseTrackCount = tracklist.size) }
+        _uiState.update { state ->
+            // Albums opened by name have no cover until the catalogue supplies one.
+            val current = state.album
+            val withArt = if (current != null && current.albumArtUriString.isNullOrBlank() && !tracklist.artworkUrl.isNullOrBlank()) {
+                current.copy(albumArtUriString = tracklist.artworkUrl)
+            } else current
+            state.copy(album = withArt, missingTracks = missing, releaseTrackCount = tracklist.size)
+        }
     }
 
     /**
@@ -434,5 +645,20 @@ class AlbumDetailViewModel @Inject constructor(
                 songs = songs
             )
         }
+    }
+
+    companion object {
+        private val transientBrowseAlbums = java.util.concurrent.ConcurrentHashMap<String, Pair<Album, List<Song>>>()
+        private const val MAX_TRANSIENT_ALBUMS = 12
+
+        fun registerTransientAlbum(browseId: String, album: Album, songs: List<Song>) {
+            if (transientBrowseAlbums.size >= MAX_TRANSIENT_ALBUMS && !transientBrowseAlbums.containsKey(browseId)) {
+                transientBrowseAlbums.clear()
+            }
+            transientBrowseAlbums[browseId] = album to songs
+        }
+
+        fun getTransientAlbum(browseId: String): Pair<Album, List<Song>>? =
+            transientBrowseAlbums[browseId]
     }
 }

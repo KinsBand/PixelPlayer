@@ -161,24 +161,10 @@ private fun FilterCategoryRow(
         ) {
             items(items) { item ->
                 val isSelected = item == selectedItem
-                FilterChip(
+                ExpressiveFilterChip(
+                    label = item,
                     selected = isSelected,
-                    onClick = { onSelect(item) },
-                    label = { Text(item) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        containerColor = Color.Transparent,
-                        selectedContainerColor = OliveAccentYellow,
-                        labelColor = OliveCream,
-                        selectedLabelColor = OliveDarker
-                    ),
-                    border = FilterChipDefaults.filterChipBorder(
-                        enabled = true,
-                        selected = isSelected,
-                        borderColor = OliveCream.copy(alpha = 0.2f),
-                        selectedBorderColor = Color.Transparent,
-                        borderWidth = 1.dp,
-                        selectedBorderWidth = 0.dp
-                    )
+                    onClick = { onSelect(item) }
                 )
             }
         }

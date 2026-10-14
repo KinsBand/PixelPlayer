@@ -3,6 +3,8 @@ package com.theveloper.pixelplay.presentation.components
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,6 +31,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.AudioFile
 import androidx.compose.material.icons.rounded.Cloud
@@ -36,8 +39,6 @@ import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -45,11 +46,9 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.LargeExtendedFloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -68,7 +67,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -87,7 +85,6 @@ import coil.size.Size
 import com.theveloper.pixelplay.R
 import com.theveloper.pixelplay.data.model.LibraryTabId
 import com.theveloper.pixelplay.data.model.Song
-import com.theveloper.pixelplay.presentation.screens.TabAnimation
 import com.theveloper.pixelplay.presentation.viewmodel.PlayerViewModel
 import com.theveloper.pixelplay.ui.theme.GoogleSansRounded
 import com.theveloper.pixelplay.ui.theme.LocalShowScrollbar
@@ -132,22 +129,30 @@ fun SongPickerBottomSheet(
 fun SongPickerContent(
     selectedSongIds: MutableMap<String, Boolean>,
     onConfirm: (Set<String>) -> Unit,
-    playerViewModel: PlayerViewModel = hiltViewModel()
+    playerViewModel: PlayerViewModel = hiltViewModel(),
+    modifier: Modifier = Modifier,
+    /** False when the host screen already shows a title (Create playlist's "Add songs" step). */
+    showTitle: Boolean = true,
+    confirmContentDescription: String = stringResource(R.string.song_picker_cd_confirm_add_songs),
 ) {
     val storageFilter by playerViewModel.playlistPickerStorageFilter.collectAsStateWithLifecycle()
     val hasCloudSongs by playerViewModel.hasCloudSongsFlow.collectAsStateWithLifecycle()
-    val showCloudFilter = hasCloudSongs != false
 
+    val stablePlayerState by playerViewModel.stablePlayerState.collectAsStateWithLifecycle()
+    val currentSong = stablePlayerState.currentSong
+
+    // Without cloud songs there's nothing to show under "Online": fall back to everything.
     LaunchedEffect(hasCloudSongs, storageFilter) {
-        if (hasCloudSongs == false && storageFilter != StorageFilter.OFFLINE) {
-            playerViewModel.setPlaylistPickerStorageFilter(StorageFilter.OFFLINE)
+        if (hasCloudSongs == false && storageFilter == StorageFilter.ONLINE) {
+            playerViewModel.setPlaylistPickerStorageFilter(StorageFilter.ALL)
         }
     }
 
     Scaffold(
+        modifier = modifier,
         containerColor = Color.Transparent,
         topBar = {
-            Row(
+            if (showTitle) Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 26.dp, vertical = 8.dp),
@@ -162,112 +167,42 @@ fun SongPickerContent(
             }
         },
         bottomBar = {
-            if (showCloudFilter) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    val tabs = listOf(
-                        StorageFilter.OFFLINE to R.string.library_storage_filter_offline,
-                        StorageFilter.ONLINE to R.string.library_storage_filter_online
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (currentSong != null) {
+                    NowPlayingQuickAddCard(
+                        song = currentSong,
+                        isSelected = selectedSongIds[currentSong.id] == true,
+                        onToggle = {
+                            val isCurrentSelected = selectedSongIds[currentSong.id] == true
+                            selectedSongIds[currentSong.id] = !isCurrentSelected
+                        },
+                        modifier = Modifier.weight(1f)
                     )
-                    val selectedTabIndex = tabs.indexOfFirst { it.first == storageFilter }.coerceAtLeast(0)
-
-                    PrimaryTabRow(
-                        selectedTabIndex = selectedTabIndex,
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                            .padding(5.dp),
-                        containerColor = Color.Transparent,
-                        divider = {},
-                        indicator = {}
-                    ) {
-                        tabs.forEachIndexed { index, (filter, labelRes) ->
-                            TabAnimation(
-                                index = index,
-                                title = stringResource(labelRes),
-                                selectedIndex = selectedTabIndex,
-                                onClick = { playerViewModel.setPlaylistPickerStorageFilter(filter) },
-                                transformOrigin = if (index == 0) TransformOrigin(0f, 0.5f) else TransformOrigin(1f, 0.5f)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    if (filter == StorageFilter.OFFLINE) {
-                                        Icon(
-                                            painter = painterResource(R.drawable.ic_phonef),
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    } else {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Cloud,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(
-                                        text = stringResource(labelRes),
-                                        fontFamily = GoogleSansRounded,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(end = 4.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    FilledIconButton(
-                        onClick = { onConfirm(selectedSongIds.filterValues { it }.keys) },
-                        modifier = Modifier.size(56.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                    ) {
-                        Icon(
-                            Icons.Rounded.Check,
-                            contentDescription = stringResource(R.string.song_picker_cd_confirm_add_songs),
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
+                } else {
+                    Spacer(Modifier.weight(1f))
                 }
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 16.dp)
-                ) {
-                    LargeExtendedFloatingActionButton(
-                        onClick = { onConfirm(selectedSongIds.filterValues { it }.keys) },
-                        modifier = Modifier.align(Alignment.CenterEnd),
-                        shape = RoundedCornerShape(20.dp),
+
+                FilledIconButton(
+                    onClick = { onConfirm(selectedSongIds.filterValues { it }.keys) },
+                    modifier = Modifier.size(56.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(
                         containerColor = MaterialTheme.colorScheme.tertiaryContainer,
                         contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                    ) {
-                        Icon(
-                            Icons.Rounded.Check,
-                            contentDescription = null,
-                            modifier = Modifier.size(28.dp)
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Text(
-                            text = stringResource(R.string.song_picker_action_add),
-                            fontFamily = GoogleSansRounded,
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                    }
+                    )
+                ) {
+                    Icon(
+                        Icons.Rounded.Check,
+                        contentDescription = confirmContentDescription,
+                        modifier = Modifier.size(28.dp)
+                    )
                 }
             }
         }
@@ -276,13 +211,80 @@ fun SongPickerContent(
             selectedSongIds = selectedSongIds,
             modifier = Modifier.fillMaxSize().padding(top = innerPadding.calculateTopPadding()),
             contentPadding = PaddingValues(
-                bottom = if (showCloudFilter) 120.dp else 128.dp,
+                bottom = 120.dp,
                 top = 8.dp
             ),
             playerViewModel = playerViewModel
         )
     }
 }
+
+/**
+ * The song playing right now, with a one-tap add: tap the card or the button to tick or untick
+ * it for this playlist (the same selection as the list above).
+ */
+@Composable
+private fun NowPlayingQuickAddCard(
+    song: Song,
+    isSelected: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = onToggle,
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier.padding(PaddingValues(horizontal = 12.dp, vertical = 8.dp)),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SmartImage(
+                model = song.albumArtUriString,
+                contentDescription = song.title,
+                shape = RoundedCornerShape(10.dp),
+                targetSize = Size(112, 112),
+                modifier = Modifier.size(40.dp)
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = song.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = song.displayArtist,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            FilledIconButton(
+                onClick = onToggle,
+                modifier = Modifier.size(36.dp),
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.surfaceContainerHighest,
+                    contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
+                    else MaterialTheme.colorScheme.onSurface
+                )
+            ) {
+                Icon(
+                    imageVector = if (isSelected) Icons.Rounded.Check else Icons.Rounded.Add,
+                    contentDescription = if (isSelected) "Remove ${song.title} from selection" else "Add ${song.title}",
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+    }
+}
+
 @OptIn(UnstableApi::class)
 @Composable
 fun SongPickerSelectionPane(
@@ -296,12 +298,15 @@ fun SongPickerSelectionPane(
     val storageFilter by playerViewModel.playlistPickerStorageFilter.collectAsStateWithLifecycle()
     
     val pagedSongs = playerViewModel.playlistPickerSongs.collectAsLazyPagingItems()
-    val pagedFavoriteSongs = playerViewModel.playlistPickerFavoriteSongs.collectAsLazyPagingItems()
+    // Liked songs are only loaded when the Liked chip is on (collected in that branch below),
+    // so opening the picker runs one list query instead of two.
 
     val favoriteIds by playerViewModel.favoriteSongIds.collectAsStateWithLifecycle()
     val searchResultsInitialValue: List<Song>? = remember(searchQuery) {
         if (searchQuery.isBlank()) emptyList() else null
     }
+    val hasCloudSongs by playerViewModel.hasCloudSongsFlow.collectAsStateWithLifecycle()
+    // ALL (the default) keeps local and cloud songs together; the chips narrow it.
     val searchResults by remember(searchQuery, playerViewModel, storageFilter) {
         playerViewModel.searchSongs(searchQuery)
             .map { songs ->
@@ -319,6 +324,12 @@ fun SongPickerSelectionPane(
             }
             .map<List<Song>, List<Song>?> { it }
     }.collectAsStateWithLifecycle(initialValue = searchResultsInitialValue)
+    // While a new query runs, keep showing the previous results instead of a spinner, so
+    // typing feels instant (local songs come straight from the database).
+    var lastSearchResults by remember { mutableStateOf<List<Song>?>(null) }
+    LaunchedEffect(searchResults) {
+        searchResults?.let { lastSearchResults = it }
+    }
 
     val animatedAlbumCornerRadius = 60.dp
     val albumShape = remember(animatedAlbumCornerRadius) {
@@ -345,37 +356,15 @@ fun SongPickerSelectionPane(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            FilterChip(
+            ExpressiveFilterChip(
+                label = stringResource(R.string.song_picker_filter_favorites),
                 selected = favoritesOnly,
                 onClick = { favoritesOnly = !favoritesOnly },
-                label = {
-                    Text(
-                        text = stringResource(R.string.song_picker_filter_favorites),
-                        fontFamily = GoogleSansRounded,
-                        fontWeight = if (favoritesOnly) FontWeight.Bold else FontWeight.Medium
-                    )
-                },
-                shape = if (favoritesOnly) ShapeCache.smooth12 else ShapeCache.smoothPill,
-                border = FilterChipDefaults.filterChipBorder(
-                    enabled = true,
-                    selected = favoritesOnly,
-                    borderColor = Color.Transparent,
-                    selectedBorderColor = Color.Transparent,
-                    borderWidth = 0.dp,
-                    selectedBorderWidth = 0.dp
-                ),
-                colors = FilterChipDefaults.filterChipColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    iconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimaryContainer
-                ),
                 leadingIcon = {
                     Icon(
                         painter = painterResource(
@@ -383,28 +372,67 @@ fun SongPickerSelectionPane(
                             else R.drawable.round_favorite_border_24
                         ),
                         contentDescription = null,
-                        modifier = Modifier.size(FilterChipDefaults.IconSize)
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             )
+
+            // Local / Online narrow the list; tapping the selected one goes back to everything.
+            StorageFilterChip(
+                selected = storageFilter == StorageFilter.OFFLINE,
+                label = stringResource(R.string.library_storage_filter_offline),
+                onClick = {
+                    playerViewModel.setPlaylistPickerStorageFilter(
+                        if (storageFilter == StorageFilter.OFFLINE) StorageFilter.ALL else StorageFilter.OFFLINE
+                    )
+                },
+                icon = {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_phonef),
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            )
+            if (hasCloudSongs != false) {
+                StorageFilterChip(
+                    selected = storageFilter == StorageFilter.ONLINE,
+                    label = stringResource(R.string.library_storage_filter_online),
+                    onClick = {
+                        playerViewModel.setPlaylistPickerStorageFilter(
+                            if (storageFilter == StorageFilter.ONLINE) StorageFilter.ALL else StorageFilter.ONLINE
+                        )
+                    },
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Rounded.Cloud,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                )
+            }
         }
 
         when {
             searchQuery.isNotBlank() -> {
-                val displayed = (searchResults ?: emptyList()).let { results ->
+                val shownResults = searchResults ?: lastSearchResults
+                val displayed = (shownResults ?: emptyList()).let { results ->
                     if (favoritesOnly) results.filter { it.id in favoriteIds } else results
                 }
                 SongPickerList(
                     filteredSongs = displayed,
-                    isLoading = searchResults == null,
+                    isLoading = shownResults == null,
                     selectedSongIds = selectedSongIds,
                     albumShape = albumShape,
                     searchQuery = searchQuery,
                     modifier = Modifier.weight(1f),
-                    contentPadding = contentPadding
+                    contentPadding = contentPadding,
+                    onClearSearch = { searchQuery = "" }
                 )
             }
             favoritesOnly -> {
+                val pagedFavoriteSongs = playerViewModel.playlistPickerFavoriteSongs.collectAsLazyPagingItems()
                 SongPickerPagingList(
                     pagedSongs = pagedFavoriteSongs,
                     selectedSongIds = selectedSongIds,
@@ -428,6 +456,21 @@ fun SongPickerSelectionPane(
             }
         }
     }
+}
+
+@Composable
+private fun StorageFilterChip(
+    selected: Boolean,
+    label: String,
+    onClick: () -> Unit,
+    icon: @Composable () -> Unit
+) {
+    ExpressiveFilterChip(
+        label = label,
+        selected = selected,
+        onClick = onClick,
+        leadingIcon = icon
+    )
 }
 
 @Composable
@@ -637,7 +680,8 @@ private fun SongPickerRow(
                 model = song.albumArtUriString,
                 contentDescription = song.title,
                 shape = albumShape,
-                targetSize = Size(168, 168),
+                // 36 dp cover: 112 px is enough at 3x and decodes ~2.2x less than 168 px.
+                targetSize = Size(112, 112),
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -785,7 +829,9 @@ fun SongPickerList(
     albumShape: androidx.compose.ui.graphics.Shape,
     searchQuery: String = "",
     modifier: Modifier = Modifier,
-    contentPadding: PaddingValues = PaddingValues(bottom = 100.dp, top = 20.dp)
+    contentPadding: PaddingValues = PaddingValues(bottom = 100.dp, top = 20.dp),
+    /** Shown as a "Clear search" button under the no-results message. */
+    onClearSearch: (() -> Unit)? = null,
 ) {
     if (isLoading) {
         Box(
@@ -839,6 +885,11 @@ fun SongPickerList(
                         fontWeight = FontWeight.SemiBold,
                         textAlign = TextAlign.Center
                     )
+                }
+                if (onClearSearch != null && searchQuery.isNotBlank()) {
+                    androidx.compose.material3.FilledTonalButton(onClick = onClearSearch) {
+                        Text(stringResource(R.string.song_picker_clear_search))
+                    }
                 }
             }
         }

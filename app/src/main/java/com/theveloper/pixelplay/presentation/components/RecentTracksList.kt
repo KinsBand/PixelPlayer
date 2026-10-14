@@ -10,6 +10,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -232,9 +233,12 @@ fun RecentTrackPillItem(
             .fillMaxWidth()
             .height(46.dp)
             .clip(RoundedCornerShape(50))
+            .songStartFeedback(song.id, RoundedCornerShape(50))
+            .offlineVeil(song, RoundedCornerShape(50))
             .background(if (isCurrentSong) OliveAccentYellow.copy(alpha = 0.25f) else bgColor)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp),
+            // No ⋮ button: hold the row for the song's options.
+            .combinedClickable(onClick = onClick, onLongClick = onMoreClick, onLongClickLabel = "Song options")
+            .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Thumbnail image
@@ -266,19 +270,6 @@ fun RecentTrackPillItem(
                 color = (if (isCurrentSong) OliveAccentYellow else OliveCream).copy(alpha = 0.7f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
-            )
-        }
-
-        // More actions button
-        IconButton(
-            onClick = onMoreClick,
-            modifier = Modifier.size(32.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.MoreVert,
-                contentDescription = "More actions",
-                tint = (if (isCurrentSong) OliveAccentYellow else OliveCream).copy(alpha = 0.8f),
-                modifier = Modifier.size(18.dp)
             )
         }
     }

@@ -1,5 +1,8 @@
 package com.theveloper.pixelplay.presentation.screens
 
+import com.theveloper.pixelplay.presentation.components.subcomps.rememberShuffleSpin
+import com.theveloper.pixelplay.presentation.components.subcomps.shuffleSpin
+import com.theveloper.pixelplay.presentation.navigation.popBackStackSafely
 import com.theveloper.pixelplay.presentation.navigation.navigateSafely
 
 import androidx.compose.foundation.background
@@ -178,6 +181,7 @@ fun DailyMixScreen(
             }
         }
         SongInfoBottomSheet(
+            onStartSongRadio = { seedSong -> playerViewModel.startSongRadio(seedSong) },
             song = song,
             isFavorite = favoriteSongIds.contains(song.id),
             onToggleFavorite = { playerViewModel.toggleFavoriteSpecificSong(song) },
@@ -191,13 +195,16 @@ fun DailyMixScreen(
             onAddNextToQueue = {
                 playerViewModel.addSongNextToQueue(song)
             },
+            // Hold Next → Soon (the "after which song" slider).
+            soonPlayer = playerViewModel,
+            onAddSoon = { k -> playerViewModel.addSongAfterUpcoming(song, k) },
             onAddToPlayList = {
                 showPlaylistBottomSheet = true;
             },
             onDeleteFromDevice = playerViewModel::deleteFromDevice,
             onNavigateToAlbum = {
                 // Assuming Screen object has a method to create a route
-                navController.navigateSafely(Screen.AlbumDetail.createRoute(song.albumId))
+                Screen.AlbumDetail.createRouteForSong(song)?.let { navController.navigateSafely(it) }
                 showSongInfoSheet = false
             },
             onNavigateToArtist = {
@@ -317,8 +324,10 @@ fun DailyMixScreen(
                                 lineHeight = 20.sp
                             )
                         }
+                        val dailyMixSpin = rememberShuffleSpin()
                         FilledTonalButton(
                             onClick = {
+                                dailyMixSpin.play()
                                 if (dailyMixSongs.isNotEmpty()) {
                                     playerViewModel.playSongsShuffled(
                                         songsToPlay = dailyMixSongs,
@@ -340,7 +349,7 @@ fun DailyMixScreen(
                             contentPadding = PaddingValues(horizontal = 10.dp),
                         ) {
                             Icon(Icons.Rounded.Shuffle, contentDescription = shuffleLabel, modifier = Modifier.size(
-                                ButtonDefaults.IconSize))
+                                ButtonDefaults.IconSize).shuffleSpin(dailyMixSpin))
                             Spacer(Modifier.size(ButtonDefaults.IconSpacing))
                             TightWrapText(
                                 text = shuffleLabel,
@@ -371,7 +380,7 @@ fun DailyMixScreen(
         }
 
         FilledIconButton(
-            onClick = { navController.popBackStack() },
+            onClick = { navController.popBackStackSafely() },
             colors = IconButtonDefaults.filledIconButtonColors(
                 containerColor = MaterialTheme.colorScheme.surface,
                 contentColor = MaterialTheme.colorScheme.onSurface
@@ -498,9 +507,13 @@ private fun ExpressiveDailyMixHeader(
                                     .clip(shape)
                             ) {
                                 SmartImage(
-                                    model = artUrl ?: R.drawable.rounded_album_24,
+                                    model = artUrl,
                                     contentDescription = null,
                                     contentScale = ContentScale.Crop,
+                                    shape = shape,
+                                    placeholderResId = R.drawable.rounded_album_24,
+                                    errorResId = R.drawable.rounded_album_24,
+                                    indicatorSize = 36.dp,
                                     modifier = Modifier.fillMaxSize()
                                 )
                             }
@@ -513,9 +526,13 @@ private fun ExpressiveDailyMixHeader(
                                 .clip(shape)
                         ) {
                             SmartImage(
-                                model = artUrl ?: R.drawable.rounded_album_24,
+                                model = artUrl,
                                 contentDescription = null,
                                 contentScale = ContentScale.Crop,
+                                shape = shape,
+                                placeholderResId = R.drawable.rounded_album_24,
+                                errorResId = R.drawable.rounded_album_24,
+                                indicatorSize = 36.dp,
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
@@ -562,19 +579,16 @@ private fun ExpressiveDailyMixHeader(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(Modifier.height(4.dp))
-                Text(
+                // "[♪] 25 · 1h 59m", the same as every playlist page.
+                com.theveloper.pixelplay.presentation.components.CompactCountBadge(
                     modifier = Modifier.padding(start = 3.dp),
-                    text = pluralStringResource(
-                        R.plurals.daily_mix_songs_dot_duration,
-                        songs.size,
-                        songs.size,
-                        formatDuration(totalDuration)
-                    ),
+                    count = songs.size,
+                    trailing = totalDuration.takeIf { it > 0 }?.let(com.theveloper.pixelplay.presentation.components.CompactMeta::duration),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
                 )
             }
-            LargeExtendedFloatingActionButton(
+            if (com.theveloper.pixelplay.data.ai.nano.DeviceAi.isPixel) LargeExtendedFloatingActionButton(
                 modifier = Modifier,
                 onClick = onShowMenu,
                 shape = RoundedStarShape(

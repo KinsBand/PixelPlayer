@@ -57,7 +57,7 @@ class LyricExpressionTest {
 
     @Test
     fun `louder moments get heavier words`() {
-        val profile = LyricExpressionEngine.build(song, analysis(), null, null, 100_000L)
+        val profile = LyricExpressionEngine.build(song, analysis(), null, null, null, 100_000L)
         val quiet = lineExpr("hello there", 10_000, profile).restSpans.first().item.fontWeight!!.weight
         val loud = lineExpr("hello there", 80_000, profile).restSpans.first().item.fontWeight!!.weight
         assertTrue(loud > quiet, "loud=$loud quiet=$quiet")
@@ -65,7 +65,7 @@ class LyricExpressionTest {
 
     @Test
     fun `current line is always heavier than the same word at rest`() {
-        val profile = LyricExpressionEngine.build(song, analysis(), null, null, 100_000L)
+        val profile = LyricExpressionEngine.build(song, analysis(), null, null, null, 100_000L)
         val expr = lineExpr("one two three", 80_000, profile)
         expr.restSpans.zip(expr.activeSpans).forEach { (r, a) ->
             assertTrue(a.item.fontWeight!!.weight > r.item.fontWeight!!.weight)
@@ -76,7 +76,7 @@ class LyricExpressionTest {
 
     @Test
     fun `backing vocals in brackets sit back`() {
-        val profile = LyricExpressionEngine.build(song, analysis(), null, null, 100_000L)
+        val profile = LyricExpressionEngine.build(song, analysis(), null, null, null, 100_000L)
         val expr = lineExpr("sing (sing)", 80_000, profile)
         val main = expr.restSpans[0].item.fontWeight!!.weight
         val backing = expr.restSpans[1].item.fontWeight!!.weight
@@ -94,7 +94,7 @@ class LyricExpressionTest {
             lyricsFingerprint = "x"
         )
         val flat = analysis().copy(waveform = ByteArray(1000) { 150.toByte() })
-        val profile = LyricExpressionEngine.build(song, flat, null, structure, 100_000L)
+        val profile = LyricExpressionEngine.build(song, flat, null, null, structure, 100_000L)
         val verse = lineExpr("words here", 20_000, profile).restSpans.first().item.fontSize.value
         val chorus = lineExpr("words here", 70_000, profile).restSpans.first().item.fontSize.value
         assertTrue(chorus > verse, "chorus=$chorus verse=$verse")
@@ -102,15 +102,15 @@ class LyricExpressionTest {
 
     @Test
     fun `calm songs start lighter than driving songs`() {
-        val calm = LyricExpressionEngine.build(song, analysis(energy = 0.2f), null, null, 100_000L)
-        val driving = LyricExpressionEngine.build(song, analysis(energy = 0.9f), null, null, 100_000L)
+        val calm = LyricExpressionEngine.build(song, analysis(energy = 0.2f), null, null, null, 100_000L)
+        val driving = LyricExpressionEngine.build(song, analysis(energy = 0.9f), null, null, null, 100_000L)
         assertTrue(calm.baseWeightShift < driving.baseWeightShift)
         assertTrue(calm.baseTracking > driving.baseTracking)
     }
 
     @Test
     fun `songs without analysis still produce readable spans`() {
-        val profile = LyricExpressionEngine.build(song, null, null, null, 100_000L)
+        val profile = LyricExpressionEngine.build(song, null, null, null, null, 100_000L)
         val expr = lineExpr("PLAIN words!", 10_000, profile)
         assertEquals(2, expr.restSpans.size)
         expr.restSpans.forEach { r ->
@@ -128,12 +128,14 @@ class LyricExpressionTest {
         val ballad = LyricExpressionEngine.build(
             song.copy(id = "2", genre = "Ballad"),
             null,
+            null,
             syncedLyrics(List(12) { "slow and gentle" }, gapMs = 4_000),
             null,
             100_000L
         )
         val rap = LyricExpressionEngine.build(
             song.copy(id = "3", genre = "Hip Hop"),
+            null,
             null,
             syncedLyrics(List(12) { "fast words packed in tight every single bar LOUD" }, gapMs = 2_000),
             null,
@@ -148,7 +150,7 @@ class LyricExpressionTest {
 
     @Test
     fun `the song voice changes the whole line style`() {
-        val driving = LyricExpressionEngine.build(song, analysis(energy = 0.95f), null, null, 100_000L)
+        val driving = LyricExpressionEngine.build(song, analysis(energy = 0.95f), null, null, null, 100_000L)
         val base = androidx.compose.ui.text.TextStyle(
             fontSize = androidx.compose.ui.unit.TextUnit(20f, androidx.compose.ui.unit.TextUnitType.Sp),
             lineHeight = androidx.compose.ui.unit.TextUnit(28f, androidx.compose.ui.unit.TextUnitType.Sp),
@@ -175,5 +177,85 @@ class LyricExpressionTest {
         assertTrue(letterLiftAmount(2f, 2f) in 0.01f..0.99f)
         assertEquals(0f, letterLiftAmount(3.5f, 2f))
     }
-}
 
+    // ─── Every song: streamed, long, plain ─────────────────────────────────────────────
+
+    private val streamedSong = song.copy(
+        id = "yt_abc123",
+        genre = null,
+        contentUriString = "youtube://abc123",
+        youtubeId = "abc123",
+        duration = 200_000L
+    )
+
+    /** A measured voice: quiet first half, loud second half, over the whole 200 s song. */
+    private fun voice(energy: Float = 0.7f) = com.theveloper.pixelplay.data.lyrics.voice.SongVoice(
+        songId = streamedSong.id,
+        envelope = FloatArray(2_000) { if (it < 1_000) 0.45f else 0.85f },
+        stepMs = 100,
+        energy = energy,
+        dynamics = 0.6f,
+        bpm = 128,
+        musicKey = "Am",
+        analysedAt = 0L
+    )
+
+    @Test
+    fun `streamed songs with a measured voice follow their loudness`() {
+        val profile = LyricExpressionEngine.build(streamedSong, null, voice(), null, null, 200_000L)
+        assertEquals(ExpressionSource.MEASURED_VOICE, profile.source)
+        assertEquals(128, profile.bpm)
+        assertTrue(profile.hasEnvelope)
+        val quiet = lineExpr("hello there", 30_000, profile).restSpans.first().item.fontWeight!!.weight
+        val loud = lineExpr("hello there", 160_000, profile).restSpans.first().item.fontWeight!!.weight
+        assertTrue(loud > quiet, "loud=$loud quiet=$quiet")
+    }
+
+    @Test
+    fun `streamed songs use the measured energy`() {
+        val calm = LyricExpressionEngine.build(streamedSong, null, voice(energy = 0.15f), null, null, 200_000L)
+        val driving = LyricExpressionEngine.build(streamedSong, null, voice(energy = 0.95f), null, null, 200_000L)
+        assertTrue(calm.baseWeightShift < driving.baseWeightShift)
+        assertTrue(calm.sizeScale < driving.sizeScale)
+    }
+
+    @Test
+    fun `streamed songs without audio use carried metadata`() {
+        val tagged = streamedSong.copy(
+            mixIntelligence = com.theveloper.pixelplay.data.model.MixIntelligence(energy = 0.9f, valence = 0.8f)
+        )
+        val profile = LyricExpressionEngine.build(tagged, null, null, null, null, 200_000L)
+        assertEquals(ExpressionSource.METADATA, profile.source)
+        assertEquals(0.9f, profile.energy, 1e-4f)
+    }
+
+    @Test
+    fun `the library waveform of a long song only covers its analysed head`() {
+        val long = song.copy(duration = 400_000L)
+        val profile = LyricExpressionEngine.build(long, analysis(), null, null, null, 400_000L)
+        // 150 s sits in the loud half of the 180 s window (mapped onto 400 s it would read quiet).
+        assertTrue(profile.intensityAt(150_000) > profile.intensityAt(60_000))
+        // Past the analysed window there's no loudness data: neutral.
+        assertEquals(0f, profile.intensityAt(300_000))
+    }
+
+    @Test
+    fun `plain lyrics still give pacing`() {
+        val plain = com.theveloper.pixelplay.data.model.Lyrics(plain = List(20) { "words in a plain line here" })
+        val stats = LyricExpressionEngine.lyricStats(plain, 200_000L)
+        assertTrue(stats != null)
+        assertTrue(stats!!.wordsPerSecond > 0f)
+    }
+
+    @Test
+    fun `plain lines get word cues without timing`() {
+        val profile = LyricExpressionEngine.build(song, null, null, null, null, 100_000L)
+        val text = "sing it LOUD (softly)"
+        val spans = buildUntimedLineExpression(text, profile, FontWeight.Normal)
+        val loud = spans.first { text.substring(it.start, it.end) == "LOUD" }.item.fontWeight!!.weight
+        val soft = spans.first { text.substring(it.start, it.end) == "(softly)" }.item.fontWeight!!.weight
+        assertTrue(loud > FontWeight.Normal.weight)
+        assertTrue(soft < FontWeight.Normal.weight)
+        assertTrue(spans.none { text.substring(it.start, it.end) == "sing" })
+    }
+}

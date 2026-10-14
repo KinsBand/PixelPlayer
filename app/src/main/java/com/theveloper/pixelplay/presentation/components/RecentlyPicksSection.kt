@@ -1,13 +1,16 @@
 package com.theveloper.pixelplay.presentation.components
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,9 +19,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.gestures.snapping.SnapPosition
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Surface
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -30,19 +37,31 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.theveloper.pixelplay.data.model.Song
+import com.theveloper.pixelplay.ui.theme.MotionTokens
+import com.theveloper.pixelplay.ui.theme.rememberSystemReducedMotion
 
-/** Which of the two lists the selector is showing. */
-enum class RecentlyMode { Listened, Liked }
+/** Which list the "Back again" selector is showing. */
+enum class RecentlyMode(val label: String, val queueName: String, val emptyText: String) {
+    Listened("Recent", "Recently Played", "Nothing played yet."),
+    Liked("Liked", "Your Likes", "No liked tracks yet."),
+    Forgotten("Forgotten", "Forgotten favourites", "No forgotten favourites yet."),
+    OnThisDay("On this day", "On this day", "Nothing from this day yet.")
+}
+
+/** A song for the On this day list and the year you played it. */
+data class OnThisDaySong(val song: Song, val year: Int)
 
 /**
- * The "Recently" block that sits under the speed dial row.
- *
- * A small "Recently" label sits above a two-button selector — Listened on the
- * left, Liked on the right — and the list below is rendered with the same row
- * and paging as Quick picks, so the two sections read as one family.
+ * "Back again": your own library resurfacing, in one shelf instead of four.
+ * Recent · Liked · Forgotten (loved once, not played in 60 days) · On this day (played on this
+ * date in an earlier year). Rows and paging match Quick picks. Modes with nothing in them are
+ * hidden, except Recent, which always shows.
  */
 @Composable
 fun RecentlyPicksSection(
@@ -53,85 +72,125 @@ fun RecentlyPicksSection(
     onSongClick: (Song, RecentlyMode) -> Unit,
     onSongMoreClick: (Song) -> Unit,
     modifier: Modifier = Modifier,
-    maxPages: Int = 5
+    forgottenSongs: List<Song> = emptyList(),
+    onThisDaySongs: List<OnThisDaySong> = emptyList(),
+    maxPages: Int = 5,
+    /** Tapping the already-selected pill opens the full history for that mode. */
+    onViewAllHistory: (RecentlyMode) -> Unit = {}
 ) {
     var mode by rememberSaveable { mutableStateOf(RecentlyMode.Listened) }
     val colors = MaterialTheme.colorScheme
-    val listState = rememberLazyListState()
+    val reducedMotion = rememberSystemReducedMotion()
 
-    val songs = remember(mode, listenedSongs, likedSongs) {
-        if (mode == RecentlyMode.Listened) listenedSongs else likedSongs
+    val available = remember(likedSongs, forgottenSongs, onThisDaySongs) {
+        RecentlyMode.entries.filter { m ->
+            when (m) {
+                RecentlyMode.Listened -> true
+                RecentlyMode.Liked -> likedSongs.isNotEmpty()
+                RecentlyMode.Forgotten -> forgottenSongs.isNotEmpty()
+                RecentlyMode.OnThisDay -> onThisDaySongs.isNotEmpty()
+            }
+        }
     }
-    val pages = remember(songs, maxPages) {
-        songs.chunked(QuickPicksRowsPerPage)
-            .filter { it.isNotEmpty() }
-            .take(maxPages)
+    val shownMode = if (mode in available) mode else RecentlyMode.Listened
+    val yearById = remember(onThisDaySongs) { onThisDaySongs.associate { it.song.id to it.year } }
+
+    fun songsFor(m: RecentlyMode): List<Song> = when (m) {
+        RecentlyMode.Listened -> listenedSongs
+        RecentlyMode.Liked -> likedSongs
+        RecentlyMode.Forgotten -> forgottenSongs
+        RecentlyMode.OnThisDay -> onThisDaySongs.map { it.song }
     }
 
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Small label row above the selector.
-        Text(
-            text = "Recently",
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = colors.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
-
-        // Two-button selector: Listened | Liked.
+        // Title and the mode selector share one row: title left, compact segmented pill right.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .height(44.dp)
-                .clip(RoundedCornerShape(22.dp))
-                .background(colors.surfaceContainerHighest),
+                .padding(horizontal = 16.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            ToggleSegmentButton(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(44.dp),
-                active = mode == RecentlyMode.Listened,
-                activeColor = colors.primary,
-                inactiveColor = colors.surfaceContainerHighest,
-                activeContentColor = colors.onPrimary,
-                inactiveContentColor = colors.onSurfaceVariant,
-                activeCornerRadius = 22.dp,
-                onClick = { mode = RecentlyMode.Listened },
-                text = "Listened"
+            Text(
+                text = "Back again",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = colors.onSurface,
+                maxLines = 1,
+                modifier = Modifier.padding(end = 12.dp)
             )
-            ToggleSegmentButton(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(44.dp),
-                active = mode == RecentlyMode.Liked,
-                activeColor = colors.primary,
-                inactiveColor = colors.surfaceContainerHighest,
-                activeContentColor = colors.onPrimary,
-                inactiveContentColor = colors.onSurfaceVariant,
-                activeCornerRadius = 22.dp,
-                onClick = { mode = RecentlyMode.Liked },
-                text = "Liked"
-            )
+            // Compact segmented filter pill (Recent, Liked, …). Scrolls if all four don't fit.
+            Surface(
+                shape = CircleShape,
+                color = colors.surfaceContainerHigh,
+                tonalElevation = 2.dp,
+                modifier = Modifier.weight(1f, fill = false)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .horizontalScroll(rememberScrollState())
+                        .padding(3.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    available.forEach { m ->
+                        val selected = m == shownMode
+                        val segmentColor by animateColorAsState(
+                            targetValue = if (selected) colors.primary else Color.Transparent,
+                            animationSpec = tween(MotionTokens.DurationShort4),
+                            label = "back_again_segment_bg"
+                        )
+                        val labelColor by animateColorAsState(
+                            targetValue = if (selected) colors.onPrimary else colors.onSurfaceVariant,
+                            animationSpec = tween(MotionTokens.DurationShort4),
+                            label = "back_again_segment_fg"
+                        )
+                        Box(
+                            modifier = Modifier
+                                .height(34.dp)
+                                .clip(CircleShape)
+                                .background(segmentColor)
+                                .clickable {
+                                    if (selected) onViewAllHistory(m) else mode = m
+                                }
+                                .semantics {
+                                    stateDescription = if (selected) "Showing ${m.label}, selected. Tap again to open all" else "Show ${m.label}"
+                                }
+                                .padding(horizontal = 12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = m.label,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                color = labelColor,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+            }
         }
 
-        // The list — same rows and same paging as Quick picks.
+        // The list: same rows and paging as Quick picks. A plain crossfade, no slide.
         AnimatedContent(
-            targetState = mode,
+            targetState = shownMode,
             transitionSpec = {
-                (fadeIn(tween(220, delayMillis = 90)) +
-                    slideInVertically(tween(220, delayMillis = 90)) { it / 3 })
-                    .togetherWith(
-                        fadeOut(tween(90)) + slideOutVertically(tween(90)) { it / 3 }
-                    )
+                if (reducedMotion) {
+                    EnterTransition.None togetherWith ExitTransition.None
+                } else {
+                    fadeIn(tween(MotionTokens.DurationMedium1, easing = MotionTokens.EmphasizedDecelerate)) togetherWith
+                        fadeOut(tween(MotionTokens.DurationShort3, easing = MotionTokens.EmphasizedAccelerate))
+                }
             },
-            label = "RecentlyModeSwitch"
+            label = "BackAgainModeSwitch"
         ) { targetMode ->
+            val pages = remember(targetMode, listenedSongs, likedSongs, forgottenSongs, onThisDaySongs, maxPages) {
+                songsFor(targetMode).chunked(QuickPicksRowsPerPage).filter { it.isNotEmpty() }.take(maxPages)
+            }
             if (pages.isEmpty()) {
                 Box(
                     modifier = Modifier
@@ -140,38 +199,44 @@ fun RecentlyPicksSection(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = if (targetMode == RecentlyMode.Listened) {
-                            "Nothing played yet."
-                        } else {
-                            "No liked tracks yet."
-                        },
+                        text = targetMode.emptyText,
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.onSurfaceVariant
                     )
                 }
             } else {
-                LazyRow(
-                    state = listState,
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(
-                        count = pages.size,
-                        key = { index -> "recently_${targetMode.name}_page_$index" }
-                    ) { index ->
-                        Column(
-                            modifier = Modifier.fillParentMaxWidth(0.88f),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            pages[index].forEach { song ->
-                                QuickPickRow(
-                                    song = song,
-                                    isCurrent = song.id == currentSongId,
-                                    isPlaying = isPlaying,
-                                    onClick = { onSongClick(song, targetMode) },
-                                    onMoreClick = { onSongMoreClick(song) }
-                                )
-                            }
+                val pagerState = androidx.compose.runtime.key(targetMode) {
+                    rememberPagerState(initialPage = 0) { pages.size }
+                }
+                LaunchedEffect(targetMode) {
+                    pagerState.scrollToPage(0)
+                }
+                HorizontalPager(
+                    state = pagerState,
+                    contentPadding = PaddingValues(start = 16.dp, end = 40.dp),
+                    pageSpacing = 10.dp,
+                    snapPosition = SnapPosition.Start,
+                    modifier = Modifier.fillMaxWidth(),
+                    key = { index -> "recently_${targetMode.name}_page_$index" }
+                ) { pageIndex ->
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        pages[pageIndex].forEach { song ->
+                            QuickPickRow(
+                                song = song,
+                                isCurrent = song.id == currentSongId,
+                                isPlaying = isPlaying,
+                                onClick = { onSongClick(song, targetMode) },
+                                onMoreClick = { onSongMoreClick(song) },
+                                subtitle = when (targetMode) {
+                                    RecentlyMode.OnThisDay -> yearById[song.id]?.let { "${song.displayArtist} · $it" }
+                                    RecentlyMode.Forgotten -> song.userActivityStats.playCount
+                                        .takeIf { it > 0 }?.let { "${song.displayArtist} · $it plays, not lately" }
+                                    else -> null
+                                }
+                            )
                         }
                     }
                 }

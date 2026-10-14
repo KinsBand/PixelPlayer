@@ -97,6 +97,11 @@
         <item quantity="other">%d tracks lined up.</item>
     </plurals>
     <string name="queue_source_fallback_label">Queue</string>
+    <plurals name="queue_track_count">
+        <item quantity="one">1 track</item>
+        <item quantity="other">%d tracks</item>
+    </plurals>
+    <string name="queue_source_open_cd">Open %1$s</string>
     <string name="queue_empty_label">Queue is empty.</string>
     <string name="queue_cd_reorder_song">Reorder song</string>
     <string name="queue_cd_toggle_shuffle_action">Toggle shuffle</string>
@@ -129,6 +134,25 @@
     <!-- LyricsSheet -->
     <string name="lyrics_title">Lyrics</string>
     <string name="lyrics_loading">Loading lyrics…</string>
+    <string name="lyrics_finding">Finding lyrics…</string>
+    <string name="drum_kit_pads">Pads</string>
+    <string name="drum_kit_pads_count">Pads (%1$d)</string>
+    <string name="drum_kit_assign_armed">Hit a pad for %1$s</string>
+    <string name="drum_kit_assigned">Pad %1$d → %2$s</string>
+    <string name="drum_kit_bt_short">Bluetooth adds delay</string>
+    <string name="radio_player_header">Radio</string>
+    <string name="radio_open_with_filters_cd">Open Radio with the filters you used</string>
+    <string name="radio_live">Live</string>
+    <string name="radio_go_live_cd">Go to live</string>
+    <string name="radio_behind_live">Rewound, %1$s behind live</string>
+    <string name="radio_now_bar_cd">On the radio now: %1$s by %2$s. Show history</string>
+    <string name="radio_like_station">Like station</string>
+    <string name="radio_unlike_station">Unlike station</string>
+    <string name="radio_like_song">Like song</string>
+    <string name="radio_unlike_song">Unlike song</string>
+    <string name="radio_song_not_found">Couldn\'t find “%1$s”</string>
+    <string name="radio_like_song_cd">Like %1$s</string>
+    <string name="radio_unlike_song_cd">Unlike %1$s</string>
     <string name="lyrics_mode_synced">Synced</string>
     <string name="lyrics_mode_static">Static</string>
     <string name="lyrics_options">Lyrics options</string>
@@ -175,6 +199,8 @@
     <string name="lyrics_controls_section">Controls</string>
     <string name="lyrics_controls_adjust_sync">Adjust sync</string>
     <string name="lyrics_controls_hide_sync">Hide sync controls</string>
+    <string name="tab_timing_adjust">Adjust tab timing</string>
+    <string name="tab_timing_hide">Hide tab timing</string>
     <string name="lyrics_controls_show_romanization">Show romanization</string>
     <string name="lyrics_controls_show_translations">Show translations</string>
     <string name="lyrics_controls_disable_immersive_once">Disable immersive (once)</string>
@@ -201,4 +227,10 @@
     <string name="lyrics_provided_by">Lyrics provided by</string>
     <string name="lyrics_lrclib_uri">https://lrclib.net/</string>
     <string name="lyrics_no_lyrics">No lyrics</string>
+    <string name="player_loading">Loading</string>
+    <string name="playing_badge_now_playing">Now playing</string>
+    <string name="playing_badge_paused">Paused</string>
+    <string name="queue_open_artist">Open artist</string>
+    <string name="up_next_channel_name">Up next</string>
+    <string name="up_next_notification_title">Up next</string>
 </resources>

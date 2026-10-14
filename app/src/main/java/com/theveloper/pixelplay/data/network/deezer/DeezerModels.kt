@@ -54,7 +54,9 @@ data class DeezerAlbum(
     @SerializedName("release_date") val releaseDate: String? = null,
     /** "album", "single", "ep" or "compile". */
     @SerializedName("record_type") val recordType: String? = null,
-    @SerializedName("fans") val fans: Long = 0L
+    @SerializedName("fans") val fans: Long = 0L,
+    /** Present in search results (not in an artist's own album list). */
+    @SerializedName("artist") val artist: DeezerArtistRef? = null
 )
 
 data class DeezerAlbumResponse(

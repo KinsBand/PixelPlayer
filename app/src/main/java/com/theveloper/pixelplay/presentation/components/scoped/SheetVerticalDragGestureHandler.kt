@@ -109,12 +109,11 @@ internal class SheetVerticalDragGestureHandler(
 
         scope.launch {
             if (targetState == PlayerSheetState.EXPANDED) {
-                launch {
-                    onAnimateSheet(true, null, 0f)
+                launch(start = CoroutineStart.UNDISPATCHED) {
+                    onAnimateSheet(true, null, verticalVelocity)
                 }
                 onExpandSheetState()
             } else {
-                val dynamicDamping = collapseSpringDampingForFraction(currentFraction)
                 if (visualOvershootScaleY.value != 1f) {
                     launch {
                         visualOvershootScaleY.animateTo(
@@ -126,15 +125,10 @@ internal class SheetVerticalDragGestureHandler(
                         )
                     }
                 }
-                launch {
-                    onAnimateSheet(
-                        false,
-                        spring(
-                            dampingRatio = dynamicDamping,
-                            stiffness = Spring.StiffnessLow
-                        ),
-                        verticalVelocity
-                    )
+                // Same spatial spring as expanding (motionScheme), seeded with the release speed,
+                // so a slow release and a flick both glide into the mini player.
+                launch(start = CoroutineStart.UNDISPATCHED) {
+                    onAnimateSheet(false, null, verticalVelocity)
                 }
                 onCollapseSheetState()
             }

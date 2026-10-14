@@ -1,5 +1,6 @@
 package com.theveloper.pixelplay.presentation.components.subcomps
 
+import com.theveloper.pixelplay.presentation.components.offlineVeil
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -22,7 +23,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -43,6 +43,16 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp as lerpColor
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.material3.CircularProgressIndicator
+import com.theveloper.pixelplay.presentation.components.loadingOutlineTrace
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalDensity
@@ -80,7 +90,7 @@ private fun lerpFloat(start: Float, stop: Float, fraction: Float): Float {
  * @param isSelected Whether this item is selected in multi-selection mode
  * @param isSelectionMode Whether multi-selection mode is active
  * @param onLongPress Callback for long press gesture (activates selection)
- * @param onMoreOptionsClick Callback for more options button
+ * @param onMoreOptionsClick Opens the song's options; called on long press (cards have no ⋮ button)
  * @param onClick Callback for tap gesture
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -98,13 +108,23 @@ fun EnhancedSongListItem(
     isSelected: Boolean = false,
     selectionIndex: Int? = null,
     isSelectionMode: Boolean = false,
+    /** False = this card has no options menu; hold then toggles selection instead. */
     showMoreOptionsButton: Boolean = true,
     onLongPress: () -> Unit = {},
     /** Optional action shown just left of the options button (e.g. Versions). */
     extraTrailing: (@Composable () -> Unit)? = null,
+    /** Optional content under the artist line (Search's "+N versions" pill). */
+    belowSubtitle: (@Composable () -> Unit)? = null,
+    /**
+     * This card was just tapped: STARTING until audio starts (a trace runs round the card),
+     * FAILED if it couldn't (error colours; tapping again retries). Null = normal.
+     */
+    startPhase: com.theveloper.pixelplay.presentation.viewmodel.SongStartPhase? =
+        com.theveloper.pixelplay.presentation.viewmodel.SongStartReducer.phaseFor(LocalSongStartRequest.current.value, song.id),
     onMoreOptionsClick: (Song) -> Unit,
     onClick: () -> Unit
 ) {
+    val haptic = LocalHapticFeedback.current
     val albumArtTargetSizePx = with(LocalDensity.current) { albumArtSize.roundToPx() }
     val isHighlighted = isCurrentSong && !isLoading
     val transition = updateTransition(
@@ -242,11 +262,36 @@ fun EnhancedSongListItem(
         }
     } else {
         // Actual Song Item Layout
+        // Offline and not on the device: blurred with "Offline", tap shakes instead of playing.
+        val offlineBlocked = com.theveloper.pixelplay.presentation.components.rememberSongOfflineBlocked(song) && !isSelectionMode
+        val start = rememberSongStartVisuals(startPhase)
+        val startedContainer = lerpColor(containerColor, colors.primaryContainer, start.starting.value * 0.7f)
+        val cardContainerColor = lerpColor(startedContainer, colors.errorContainer, start.failed.value)
+        val cardContentColor = lerpColor(contentColor, colors.onErrorContainer, start.failed.value)
+        val startingLabel = stringResource(R.string.song_card_starting)
+        val failedLabel = stringResource(R.string.song_card_failed)
+        val shakePx = with(LocalDensity.current) { SongStartShake.toPx() }
         Surface(
             modifier = modifier
                 .fillMaxWidth()
+                .graphicsLayer { translationX = start.shakeOffset() * shakePx }
                 .scale(selectionScale)
                 .clip(surfaceShape)
+                .loadingOutlineTrace(
+                    active = startPhase == com.theveloper.pixelplay.presentation.viewmodel.SongStartPhase.STARTING,
+                    color = colors.primary
+                ) { surfaceShape }
+                .offlineVeil(offlineBlocked, surfaceShape)
+                .semantics {
+                    when (startPhase) {
+                        com.theveloper.pixelplay.presentation.viewmodel.SongStartPhase.STARTING -> stateDescription = startingLabel
+                        com.theveloper.pixelplay.presentation.viewmodel.SongStartPhase.FAILED -> {
+                            stateDescription = failedLabel
+                            liveRegion = LiveRegionMode.Polite
+                        }
+                        null -> Unit
+                    }
+                }
                 .then(
                     if (showSelectionDecoration) {
                         Modifier.border(
@@ -258,7 +303,12 @@ fun EnhancedSongListItem(
                         Modifier
                     }
                 )
-                .pointerInput(isSelectionMode) {
+                .semantics {
+                    if (!isSelectionMode && showMoreOptionsButton) {
+                        onLongClick(label = "Song options") { onMoreOptionsClick(song); true }
+                    }
+                }
+                .pointerInput(isSelectionMode, showMoreOptionsButton) {
                     detectTapGestures(
                         onTap = { 
                             if (isSelectionMode) {
@@ -269,13 +319,19 @@ fun EnhancedSongListItem(
                             }
                         },
                         onLongPress = {
-                            // Long press always activates/toggles selection
-                            onLongPress()
+                            // Hold opens the song's options (no ⋮ button on the card any more).
+                            // In selection mode, or where a card has no options, hold toggles selection.
+                            if (!isSelectionMode && showMoreOptionsButton) {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onMoreOptionsClick(song)
+                            } else {
+                                onLongPress()
+                            }
                         }
                     )
                 },
             shape = surfaceShape,
-            color = containerColor,
+            color = cardContainerColor,
         ) {
             Row(
                 modifier = Modifier
@@ -297,6 +353,23 @@ fun EnhancedSongListItem(
                             modifier = Modifier.fillMaxSize(),
                             songId = song.id
                         )
+
+                        // Starting: a tinted scrim with a small spinner over the cover.
+                        if (start.starting.value > 0.001f) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer { alpha = start.starting.value }
+                                    .background(colors.primary.copy(alpha = 0.55f), albumShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                // Same expressive indicator as the friend history rows and the Friends screen.
+                                com.theveloper.pixelplay.presentation.components.SongCoverLoadingIndicator(
+                                    size = albumArtSize * 0.56f,
+                                    color = colors.onPrimary
+                                )
+                            }
+                        }
                         
                         // Selection check overlay on album art
                         if (showSelectionDecoration) {
@@ -349,12 +422,20 @@ fun EnhancedSongListItem(
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
-                            color = contentColor,
+                            color = cardContentColor,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
                     Spacer(modifier = Modifier.height(4.dp))
-                    Row(
+                    if (startPhase == com.theveloper.pixelplay.presentation.viewmodel.SongStartPhase.FAILED) {
+                        Text(
+                            text = "$failedLabel · ${stringResource(R.string.song_card_retry)}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = cardContentColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    } else Row(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         TrackStatusBadges(
@@ -370,10 +451,14 @@ fun EnhancedSongListItem(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
+                    if (belowSubtitle != null && !isSelectionMode) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        belowSubtitle()
+                    }
                 }
                 
                 val showPlayingIndicator = isCurrentSong && !isSelectionMode
-                val showTrailingAction = showMoreOptionsButton && !isSelectionMode
+                val showTrailingAction = extraTrailing != null && !isSelectionMode
 
                 if (showPlayingIndicator) {
                      PlayingEqIcon(
@@ -394,25 +479,69 @@ fun EnhancedSongListItem(
                     Spacer(modifier = Modifier.width(8.dp))
                 }
 
-                if (showTrailingAction) {
-                    FilledIconButton(
-                        onClick = { onMoreOptionsClick(song) },
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = mvContentColor,
-                            contentColor = mvContainerColor
-                        ),
-                        modifier = Modifier
-                            .size(36.dp)
-                            .padding(end = 4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.MoreVert,
-                            contentDescription = stringResource(R.string.common_more_options_for, song.title),
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                }
             }
         }
     }
 }
+
+/** How far the card moves sideways when it shakes on a failed start. */
+private val SongStartShake = 4.dp
+
+/** Animated values for a song card's start state (see [EnhancedSongListItem]'s startPhase). */
+private class SongStartVisuals(
+    val starting: androidx.compose.runtime.State<Float>,
+    val failed: androidx.compose.runtime.State<Float>,
+    private val shake: androidx.compose.animation.core.Animatable<Float, androidx.compose.animation.core.AnimationVector1D>,
+) {
+    /** -1..1 sideways offset; a decaying wobble while the shake runs. Read in the draw phase. */
+    fun shakeOffset(): Float {
+        val p = shake.value
+        if (p <= 0f || p >= 1f) return 0f
+        return kotlin.math.sin(p * 3f * kotlin.math.PI.toFloat()) * (1f - p)
+    }
+}
+
+@Composable
+private fun rememberSongStartVisuals(
+    phase: com.theveloper.pixelplay.presentation.viewmodel.SongStartPhase?
+): SongStartVisuals {
+    val reduced = com.theveloper.pixelplay.ui.theme.rememberSystemReducedMotion()
+    val isStarting = phase == com.theveloper.pixelplay.presentation.viewmodel.SongStartPhase.STARTING
+    val isFailed = phase == com.theveloper.pixelplay.presentation.viewmodel.SongStartPhase.FAILED
+    val starting = androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (isStarting) 1f else 0f,
+        animationSpec = if (isStarting) {
+            tween(com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort4, easing = com.theveloper.pixelplay.ui.theme.MotionTokens.Emphasized)
+        } else {
+            tween(com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort3, easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate)
+        },
+        label = "songStartStarting"
+    )
+    val failed = androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (isFailed) 1f else 0f,
+        animationSpec = if (isFailed) {
+            tween(com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium2, easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedDecelerate)
+        } else {
+            tween(com.theveloper.pixelplay.ui.theme.MotionTokens.DurationShort4, easing = com.theveloper.pixelplay.ui.theme.MotionTokens.EmphasizedAccelerate)
+        },
+        label = "songStartFailed"
+    )
+    val shake = remember { androidx.compose.animation.core.Animatable(0f) }
+    androidx.compose.runtime.LaunchedEffect(isFailed, reduced) {
+        if (isFailed && !reduced) {
+            shake.snapTo(0f)
+            shake.animateTo(1f, tween(com.theveloper.pixelplay.ui.theme.MotionTokens.DurationMedium1))
+        } else {
+            shake.snapTo(0f)
+        }
+    }
+    return remember(starting, failed, shake) { SongStartVisuals(starting, failed, shake) }
+}
+
+/**
+ * The song card that was just tapped (PlayerViewModel.songStart), provided once by MainActivity
+ * as a State, so only the cards that read it recompose when it changes. Previews get null.
+ */
+val LocalSongStartRequest = androidx.compose.runtime.staticCompositionLocalOf<
+    androidx.compose.runtime.State<com.theveloper.pixelplay.presentation.viewmodel.SongStartRequest?>
+    > { androidx.compose.runtime.mutableStateOf(null) }

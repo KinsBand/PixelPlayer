@@ -43,6 +43,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.FileOpen
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -112,7 +113,9 @@ fun PlaylistCreationTypeDialog(
     onManualSelected: () -> Unit,
     onAiSelected: () -> Unit,
     isAiEnabled: Boolean = true,
-    onSetupAiClick: (() -> Unit)? = null
+    onSetupAiClick: (() -> Unit)? = null,
+    /** Non-null adds "Import .m3u playlist" under Manual / AI. */
+    onImportM3uSelected: (() -> Unit)? = null
 ) {
     if (!visible) return
 
@@ -180,7 +183,7 @@ fun PlaylistCreationTypeDialog(
                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                 )
 
-                CreationModeCard(
+                if (com.theveloper.pixelplay.data.ai.nano.DeviceAi.isPixel) CreationModeCard(
                     title = stringResource(R.string.playlist_creation_mode_ai_title),
                     subtitle = if (isAiEnabled) {
                         stringResource(R.string.playlist_creation_mode_ai_subtitle_enabled)
@@ -212,7 +215,25 @@ fun PlaylistCreationTypeDialog(
                     }
                 )
 
-                if (!isAiEnabled) {
+                if (onImportM3uSelected != null) {
+                    CreationModeCard(
+                        title = "Import .m3u playlist",
+                        subtitle = "Bring in a playlist file: as a new playlist, or merged into / replacing one you have",
+                        icon = {
+                            Icon(
+                                imageVector = Icons.Rounded.FileOpen,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        },
+                        onClick = onImportM3uSelected,
+                        enabled = true,
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
+
+                if (!isAiEnabled && com.theveloper.pixelplay.data.ai.nano.DeviceAi.isPixel) {
                     FilledTonalButton(
                         onClick = {
                             onDismiss()
@@ -1039,6 +1060,7 @@ private fun LevelSelector(
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
             (1..5).forEach { level ->
                 SegmentedButton(
+                    icon = {},
                     selected = selectedLevel == level,
                     enabled = enabled,
                     onClick = { onLevelSelected(level) },

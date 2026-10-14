@@ -56,10 +56,10 @@ fun EasterEggScreen(
         BrickBreakerOverlay(
             isMiniPlayerVisible = currentSong != null,
             onPlayRandom = { viewModel.playRandomSong() },
-            onClose = {
-                isVisible = false
-                onNavigationIconClick()
-            },
+            // Let the navigation pop transition play the exit on its own. Hiding this
+            // AnimatedVisibility at the same time ran a second (shrink + fade) exit on top
+            // of the slide, which made the close look broken.
+            onClose = onNavigationIconClick,
         )
     }
 }

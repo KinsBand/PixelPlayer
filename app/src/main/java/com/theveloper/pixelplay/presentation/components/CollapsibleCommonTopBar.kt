@@ -57,6 +57,8 @@ fun CollapsibleCommonTopBar(
     titleMinWidthAxis: Float = 78f,
     syncStatusBarWithContainer: Boolean = true,
     supportingContent: (@Composable () -> Unit)? = null,
+    /** A thin full-width line along the header's bottom edge (Settings' online status). Off by default. */
+    bottomAccentColor: Color? = null,
     actions: @Composable RowScope.() -> Unit = {}
 ) {
     // Logic from GenreDetailScreen:
@@ -139,6 +141,15 @@ fun CollapsibleCommonTopBar(
             ) {
                 actions()
             }
+        }
+        if (bottomAccentColor != null) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(ConnectivityStrokeWidth)
+                    .background(bottomAccentColor)
+            )
         }
     }
 }

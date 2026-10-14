@@ -23,6 +23,9 @@ class PlayerDownloadViewModel @Inject constructor(
     fun download(song: Song, quality: DownloadQuality? = null) = coordinator.download(song, quality)
     suspend fun downloadOptions(song: Song): List<DownloadOption> = coordinator.downloadOptions(song)
     fun estimateSeconds(bytes: Long): Long = coordinator.estimateSeconds(bytes)
+    /** Starred download quality: a tap on download uses it straight away. */
+    val preferredQuality: StateFlow<DownloadQuality?> = coordinator.preferredQuality
+    fun setPreferredQuality(quality: DownloadQuality?) = coordinator.setPreferredQuality(quality)
     fun togglePause(songId: String) = coordinator.togglePause(songId)
     fun cancelDownload(songId: String) = coordinator.cancel(songId)
 

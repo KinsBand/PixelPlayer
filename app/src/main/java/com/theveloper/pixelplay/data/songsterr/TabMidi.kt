@@ -14,6 +14,17 @@ object TabMidi {
     private const val PPQ = 480
     private const val TICK_DIV = (TabParser.TICKS_PER_QUARTER / PPQ).toInt() // 14
 
+    /**
+     * Brings a transposed note back into General MIDI's 0..127 by whole octaves, so a note pushed
+     * out of range keeps its pitch class instead of piling up on 0 or 127.
+     */
+    fun foldToMidiRange(note: Int): Int {
+        var n = note
+        while (n > 127) n -= 12
+        while (n < 0) n += 12
+        return n
+    }
+
     data class Options(
         val speed: Float = 1f,
         /** Semitones added to every pitched note (pitch shift). Ignored for drums. */
@@ -29,7 +40,26 @@ object TabMidi {
          * General MIDI synth; they come back in [Result.strings].
          */
         val realStrings: Boolean = false,
+        /**
+         * Plays like a person: each note lands a few ms off the grid and a little louder or
+         * softer, and chords on non-string parts roll slightly. Seeded per note, so every loop
+         * pass sounds the same and stays gapless.
+         */
+        val humanize: Boolean = false,
     )
+
+    /** Deterministic -1..1 for note [a]/[b]/[c] (same input, same value, every build). */
+    private fun jitter(a: Int, b: Int, c: Int): Double {
+        var h = a * 73856093 xor b * 19349663 xor c * 83492791
+        h = h xor (h ushr 13)
+        h *= 0x5bd1e995
+        h = h xor (h ushr 15)
+        return ((h and 0xFFFF) / 32767.5) - 1.0
+    }
+
+    private const val HUMANIZE_MS = 7.0
+    private const val HUMANIZE_VELOCITY = 0.06
+    private const val ROLL_MS = 4.0
 
     data class Result(
         val bytes: ByteArray,
@@ -172,7 +202,14 @@ object TabMidi {
                                 beat.velocity?.let { v -> DYNAMICS[v.lowercase()]?.let { velocities[pi] = it } }
                                 if (beat.isRest) continue
                                 val lenMs = beat.durationTicks.toDouble() / TabParser.TICKS_PER_QUARTER * quarterMs
-                                strings.addBeat(pi, part.track, beat, at(beat.onsetTicks), lenMs, quarterMs, velocities[pi])
+                                var onMs = at(beat.onsetTicks)
+                                var dyn = velocities[pi]
+                                if (options.humanize) {
+                                    val seed = e.measure * 4096 + beat.onsetTicks.toInt()
+                                    onMs = (onMs + jitter(seed, pi, 1) * HUMANIZE_MS).coerceAtLeast(ms)
+                                    dyn = (dyn * (1.0 + jitter(seed, pi, 2) * HUMANIZE_VELOCITY)).roundToInt().coerceIn(1, 127)
+                                }
+                                strings.addBeat(pi, part.track, beat, onMs, lenMs, quarterMs, dyn)
                             }
                             for (g in slot.graces) strings.addGrace(pi, part.track, g, at(slot.onsetTicks), quarterMs, velocities[pi])
                         }
@@ -183,12 +220,20 @@ object TabMidi {
                             beat.velocity?.let { v -> DYNAMICS[v.lowercase()]?.let { velocities[pi] = it } }
                             if (beat.isRest) continue
                             val velocity = velocities[pi]
-                            val on = barStart + beat.onsetTicks / TICK_DIV
+                            val baseOn = barStart + beat.onsetTicks / TICK_DIV
+                            // Ticks per ms at this bar's tempo (the file runs at the playing speed).
+                            val ticksPerMs = PPQ * currentBpm * speed / 60_000.0
+                            val seed = e.measure * 4096 + beat.onsetTicks.toInt()
                             var len = max(1L, beat.durationTicks / TICK_DIV)
                             if (beat.palmMute || beat.notes.all { it.staccato }) len = max(1L, len / 2)
                             if (isDrums) len = max(1L, minOf(len, PPQ / 4L))
-                            for (n in beat.notes) {
-                                val pitch = (n.pitch + shift).coerceIn(0, 127)
+                            for ((ni, n) in beat.notes.withIndex()) {
+                                val on = if (options.humanize && !n.isTie) {
+                                    val offMs = jitter(seed, pi, 10 + ni) * HUMANIZE_MS * (if (isDrums) 0.5 else 1.0) +
+                                        (if (!isDrums && beat.notes.size > 1) ni * ROLL_MS else 0.0)
+                                    max(barStart, baseOn + (offMs * ticksPerMs).roundToLong())
+                                } else baseOn
+                                val pitch = foldToMidiRange(n.pitch + shift)
                                 val key = ch * 128 + pitch
                                 if (n.isTie && !isDrums) {
                                     // Continue the sounding note instead of striking again.
@@ -204,6 +249,7 @@ object TabMidi {
                                 if (n.isGhost) vel = (vel * 0.55).roundToInt()
                                 if (n.accent == 1) vel += 14
                                 if (n.accent == 2) vel += 24
+                                if (options.humanize) vel = (vel * (1.0 + jitter(seed, pi, 40 + ni) * HUMANIZE_VELOCITY)).roundToInt()
                                 val noteLen = if (n.isDead) max(1L, PPQ / 16L) else len
                                 events += Ev(on, 2, byteArrayOf((0x90 or ch).toByte(), pitch.toByte(), vel.coerceIn(1, 127).toByte()))
                                 events += Ev(on + noteLen, 1, byteArrayOf((0x80 or ch).toByte(), pitch.toByte(), 0))
@@ -216,7 +262,7 @@ object TabMidi {
                         // Flams and other grace notes: just before the beat.
                         for (g in slot.graces) for (n in g.notes) {
                             val at = max(0L, barStart + slot.onsetTicks / TICK_DIV - PPQ / 16)
-                            val pitch = (n.pitch + shift).coerceIn(0, 127)
+                            val pitch = foldToMidiRange(n.pitch + shift)
                             events += Ev(at, 2, byteArrayOf((0x90 or ch).toByte(), pitch.toByte(), (velocities[pi] * 0.6).roundToInt().coerceIn(1, 127).toByte()))
                             events += Ev(at + PPQ / 16, 1, byteArrayOf((0x80 or ch).toByte(), pitch.toByte(), 0))
                         }

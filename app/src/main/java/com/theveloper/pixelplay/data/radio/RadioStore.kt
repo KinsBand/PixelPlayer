@@ -9,7 +9,8 @@ import org.json.JSONObject
 
 /**
  * The radio's memory: six preset buttons, favourites, recently played, a hand-picked home
- * location and the last scope/view. Kept in SharedPreferences as JSON (station snapshots, so
+ * location, the last device-resolved home (so the next visit starts instantly) and the last
+ * scope/view. Kept in SharedPreferences as JSON (station snapshots, so
  * presets still play when the directory is unreachable); one shared instance for the whole app.
  */
 class RadioStore private constructor(context: Context) {
@@ -59,7 +60,51 @@ class RadioStore private constructor(context: Context) {
             }
         }
 
+    /**
+     * The last home worked out from the device (location fix + geocoding can take seconds).
+     * The radio opens on this straight away and re-checks the real location in the background.
+     */
+    var lastResolvedHome: RadioHome?
+        get() {
+            val raw = prefs.getString(KEY_LAST_HOME, null) ?: return null
+            return runCatching {
+                val o = JSONObject(raw)
+                RadioHome(
+                    countryCode = o.optString("cc").takeIf { it.isNotBlank() },
+                    countryName = o.optString("country").takeIf { it.isNotBlank() },
+                    state = o.optString("state").takeIf { it.isNotBlank() },
+                    city = o.optString("city").takeIf { it.isNotBlank() },
+                    lat = if (o.has("lat")) o.optDouble("lat").takeIf { !it.isNaN() } else null,
+                    lon = if (o.has("lon")) o.optDouble("lon").takeIf { !it.isNaN() } else null,
+                )
+            }.getOrNull()
+        }
+        set(value) {
+            if (value == null || value.isManual) {
+                prefs.edit().remove(KEY_LAST_HOME).apply()
+            } else {
+                val o = JSONObject()
+                value.countryCode?.let { o.put("cc", it) }
+                value.countryName?.let { o.put("country", it) }
+                value.state?.let { o.put("state", it) }
+                value.city?.let { o.put("city", it) }
+                value.lat?.let { o.put("lat", it) }
+                value.lon?.let { o.put("lon", it) }
+                prefs.edit().putString(KEY_LAST_HOME, o.toString()).apply()
+            }
+        }
+
     fun isFavorite(uuid: String): Boolean = _favorites.value.any { it.uuid == uuid }
+
+    /** A station we have saved anywhere (favourites, recents, presets). */
+    fun find(uuid: String): RadioStation? =
+        _favorites.value.firstOrNull { it.uuid == uuid }
+            ?: _recents.value.firstOrNull { it.uuid == uuid }
+            ?: _presets.value.firstOrNull { it?.uuid == uuid }
+
+    /** Which preset buttons hold this station (0-based). */
+    fun presetSlotsOf(uuid: String): List<Int> =
+        _presets.value.mapIndexedNotNull { i, s -> if (s?.uuid == uuid) i else null }
 
     fun toggleFavorite(station: RadioStation) = synchronized(this) {
         val list = _favorites.value
@@ -117,6 +162,7 @@ class RadioStore private constructor(context: Context) {
         private const val KEY_SCOPE = "scope"
         private const val KEY_VIEW = "view"
         private const val KEY_HOME = "manual_home"
+        private const val KEY_LAST_HOME = "last_resolved_home"
 
         @Volatile
         private var instance: RadioStore? = null

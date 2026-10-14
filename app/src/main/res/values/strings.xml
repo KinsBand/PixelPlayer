@@ -9,6 +9,8 @@
     <!-- Navigation Bar Labels -->
     <string name="nav_bar_home">Home</string>
     <string name="nav_bar_search">Search</string>
+    <string name="nav_bar_friends">Friends</string>
+    <string name="nav_bar_radio">Radio</string>
     <string name="nav_bar_library">Library</string>
 
     <!-- All files access dialog-->
@@ -103,6 +105,8 @@
     <string name="common_unknown_track">Unknown track</string>
     <string name="common_unknown_artist">Unknown artist</string>
     <string name="common_unknown_album">Unknown album</string>
+    <string name="metadata_not_available">N/A</string>
+    <string name="song_info_refresh_metadata">Search metadata again</string>
     <string name="common_close">Close</string>
     <string name="common_add">Add</string>
     <string name="common_remove">Remove</string>
@@ -153,4 +157,10 @@
     <string name="voice_search_cd_unlike">Remove from favourites</string>
     <string name="cutout_accessibility_service_name">PixelPlayer Dynamic Island</string>
     <string name="cutout_accessibility_description">Enables direct tap and gesture interaction on the camera cutout for the Dynamic Island overlay.</string>
+    <string name="song_search_reader_service_name">PixelPlayer song search reader</string>
+    <string name="song_search_reader_description">Reads only the song Google\u2019s song search found, and only right after you tap Listen or Hum in PixelPlayer, so it can be saved to Recently heard and you\u2019re brought back to the app you were in. Nothing else on your screen is read or stored.</string>
+    <string name="song_search_reader_dialog_title">Bring found songs back</string>
+    <string name="song_search_reader_dialog_body">Listen and Hum open Google\u2019s song search. To save the song it finds to Recently heard and bring you straight back, turn on \u201cPixelPlayer song search reader\u201d in Accessibility settings.\n\nIt only reads Google\u2019s song search result, only right after you tap Listen or Hum. Nothing else is read or stored.\n\nOn Android 13+, if it\u2019s greyed out: App info \u2192 \u22ee \u2192 Allow restricted settings.</string>
+    <string name="song_search_reader_dialog_turn_on">Turn on</string>
+    <string name="song_search_reader_dialog_not_now">Not now</string>
 </resources>

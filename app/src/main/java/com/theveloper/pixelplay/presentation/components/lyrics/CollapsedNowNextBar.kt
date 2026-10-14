@@ -84,6 +84,13 @@ internal fun CollapsedNowNextBar(
     nowClickLabel: String? = null,
     /** Face-to-face has no room for the full card, so it hides the expand button. */
     showExpand: Boolean = true,
+    /**
+     * Only the song playing now, across the whole bar (no Next half): the radio's "on now" bar,
+     * where nothing is queued after it.
+     */
+    nowOnly: Boolean = false,
+    /** Show the artist on a second line under the title. */
+    showArtist: Boolean = false,
 ) {
     val haptics = LocalHapticFeedback.current
 
@@ -109,7 +116,7 @@ internal fun CollapsedNowNextBar(
                 targetState = currentSong,
                 contentKey = { it?.id },
                 transitionSpec = { nowNextTransition(progressed) },
-                modifier = Modifier.widthIn(max = halfWidth),
+                modifier = if (nowOnly) Modifier.weight(1f) else Modifier.widthIn(max = halfWidth),
                 label = "collapsedNow"
             ) { song ->
                 Row(
@@ -135,14 +142,25 @@ internal fun CollapsedNowNextBar(
                         contentScale = ContentScale.Crop
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = song?.title.orEmpty(),
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
-                        color = contentColor,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
+                    Column(Modifier.weight(1f, fill = nowOnly)) {
+                        Text(
+                            text = song?.title.orEmpty(),
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = contentColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        val artist = song?.artist?.takeIf { showArtist && it.isNotBlank() }
+                        if (artist != null) {
+                            Text(
+                                text = artist,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = contentColor.copy(alpha = 0.72f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
                     if (showExpand) {
                         IconButton(
                             onClick = onExpand,
@@ -160,7 +178,7 @@ internal fun CollapsedNowNextBar(
             }
 
             // ── Next ── (the whole surface is one button: skip to this song now)
-            Box(
+            if (!nowOnly) Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()

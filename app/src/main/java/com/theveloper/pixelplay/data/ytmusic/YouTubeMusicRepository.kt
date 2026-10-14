@@ -94,8 +94,18 @@ internal object MusicBrowseParser {
         val duration = fixed.map { it.trim() }.firstOrNull { it.matches(timePattern) }
             ?: flex.drop(1).flatMap { text(it).split(" • ", "•") }.map { it.trim() }.lastOrNull { it.matches(timePattern) }
         val seconds = duration?.split(':')?.fold(0L) { acc, part -> acc * 60 + part.toInt() } ?: 0
+        // Album: the third column, unless that column holds the time or a play count (it does in
+        // some layouts); then the middle of "Artist • Album • 3:45" if the subtitle has one.
+        val album = text(flex.getOrNull(2)).trim()
+            .takeUnless { com.theveloper.pixelplay.data.library.CollectionKeys.isNotAnAlbumName(it) }
+            ?.takeIf { it.isNotBlank() }
+            ?: text(flex.getOrNull(1)).split(" • ", "•").map { it.trim() }
+                .takeIf { it.size >= 3 }
+                ?.getOrNull(1)
+                ?.takeUnless { com.theveloper.pixelplay.data.library.CollectionKeys.isNotAnAlbumName(it) }
+                .orEmpty()
         YouTubeMusicTrack(id ?: "unavailable:$index:${text(flex.firstOrNull()).hashCode()}",
-            text(flex.firstOrNull()).ifBlank { "Unavailable track" }, artist, text(flex.getOrNull(2)),
+            text(flex.firstOrNull()).ifBlank { "Unavailable track" }, artist, album,
             (seconds * 1000).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), thumbnail(row), setVideoId)
     }
 }
@@ -168,6 +178,27 @@ class YouTubeMusicRepository @Inject constructor(private val authManager: YouTub
             return json
         }
     }
+    /**
+     * The connected Google account's profile picture (YouTube Music's account menu), cached in
+     * the vault. Null when not connected, offline, or the account has no picture.
+     */
+    suspend fun accountPhotoUrl(): String? = withContext(Dispatchers.IO) {
+        authManager.photoUrl.takeIf { it.isNotBlank() }?.let { return@withContext it }
+        val fetched = runCatching {
+            val session = currentSession()
+            if (session.sapisid.isBlank()) return@runCatching null
+            val url = "https://music.youtube.com/youtubei/v1/account/account_menu?prettyPrint=false".toHttpUrl()
+            okHttpClient.newCall(authorizedRequest(url, contextBody(), session)).execute().use { response ->
+                if (!response.isSuccessful) return@use null
+                val json = JSONObject(response.body.string().ifBlank { "{}" })
+                val photo = MusicBrowseParser.objects(json, "activeAccountHeaderRenderer").firstOrNull()
+                    ?.optJSONObject("accountPhoto")?.optJSONArray("thumbnails")
+                photo?.optJSONObject(photo.length() - 1)?.optString("url")?.takeIf { it.isNotBlank() }
+            }
+        }.getOrNull()
+        fetched?.also { authManager.setPhotoUrl(it) }
+    }
+
     suspend fun validateSession(session: YouTubeMusicSession) = withContext(Dispatchers.IO) {
         browse("FEmusic_liked_playlists", session = session)
         Unit
@@ -224,6 +255,19 @@ class YouTubeMusicRepository @Inject constructor(private val authManager: YouTub
         require(bareId.matches(Regex("[a-zA-Z0-9_-]+")))
         val page = browse("VL$bareId")
         MusicBrowseParser.objects(page, "musicEditablePlaylistDetailHeaderRenderer").isNotEmpty()
+    }
+
+    /**
+     * Creates a new playlist on the connected YouTube Music account and returns its ID.
+     */
+    suspend fun createPlaylist(title: String, description: String = "Exported from PixelPlayer"): String = withContext(Dispatchers.IO) {
+        val body = contextBody().put("title", title.ifBlank { "New Playlist" }).put("privacyStatus", "PRIVATE")
+        if (description.isNotBlank()) body.put("description", description)
+        val response = action("playlist/create", body)
+        val id = response.optString("playlistId").takeIf { it.isNotBlank() }
+            ?: MusicBrowseParser.objects(response, "createPlaylistServiceEndpoint").firstOrNull()?.optString("playlistId")
+            ?: error("YouTube Music did not return a playlist ID.")
+        id
     }
 
     /**

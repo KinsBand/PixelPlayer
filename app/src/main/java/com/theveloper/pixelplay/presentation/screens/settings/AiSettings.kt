@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Science
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -57,6 +58,7 @@ import com.theveloper.pixelplay.presentation.screens.ActionSettingsItem
 import com.theveloper.pixelplay.presentation.screens.AiSystemPromptItem
 import com.theveloper.pixelplay.presentation.screens.AiUsageDateHeader
 import com.theveloper.pixelplay.presentation.screens.AiUsageLogItem
+import com.theveloper.pixelplay.presentation.screens.SettingsItem
 import com.theveloper.pixelplay.presentation.screens.SliderSettingsItem
 import com.theveloper.pixelplay.presentation.screens.SwitchSettingItem
 import com.theveloper.pixelplay.presentation.screens.ThemeSelectorItem
@@ -77,6 +79,9 @@ internal fun AiSettingsContent(
     var advancedExpanded by remember { mutableStateOf(false) }
     val rotation by animateFloatAsState(targetValue = if (advancedExpanded) 180f else 0f)
 
+    // On-device AI first: what it does, the engine (Gemini Nano / Gemma 4) and the models.
+    if (com.theveloper.pixelplay.data.ai.nano.DeviceAi.isPixel) OnDeviceAiSection()
+
     SettingsSubsection(title = stringResource(R.string.settings_ai_network_section)) {
         SwitchSettingItem(
             settingKey = "offline_mode",
@@ -88,46 +93,15 @@ internal fun AiSettingsContent(
         )
     }
 
-    // AI Engine - Gemini Nano
-    SettingsSubsection(title = stringResource(R.string.settings_ai_local_engine_section)) {
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = stringResource(R.string.settings_ai_engine_name),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = stringResource(R.string.settings_ai_engine_privacy_body),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    androidx.compose.material3.AssistChip(
-                        onClick = { showPromptDialog = true },
-                        label = { Text(stringResource(R.string.settings_ai_system_prompt_chip)) },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Rounded.Science,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    )
-                }
-            }
-        }
+    // AI playlists (the cloud provider): how it's instructed, and the token guard.
+    if (com.theveloper.pixelplay.data.ai.nano.DeviceAi.isPixel) SettingsSubsection(title = stringResource(R.string.ai_playlists_section)) {
+        SettingsItem(
+            title = stringResource(R.string.settings_ai_system_prompt_chip),
+            subtitle = stringResource(R.string.ai_system_prompt_subtitle),
+            leadingIcon = { Icon(Icons.Rounded.Science, null, tint = MaterialTheme.colorScheme.secondary) },
+            trailingIcon = { Icon(Icons.Rounded.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+            onClick = { showPromptDialog = true }
+        )
 
         SwitchSettingItem(
             settingKey = "safe_token",
