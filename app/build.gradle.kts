@@ -332,9 +332,9 @@ dependencies {
     implementation(libs.vorbisjava.core)
     implementation(libs.wavy.slider)
     implementation(libs.androidx.graphics.shapes)
-    implementation("com.google.ai.edge.litert:litert:1.4.2")
+    implementation("com.google.ai.edge.litert:litert:2.3.2")
     // On-device lyrics word sync (wav2vec2 CTC model, downloaded at runtime; see data/lyrics/align)
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.31.1")
 
     // Networking & Serialization
     implementation(libs.retrofit)
@@ -397,7 +397,7 @@ dependencies {
     testRuntimeOnly(libs.junit.vintage.engine)
     testRuntimeOnly(libs.junitplatformlauncher)
     testImplementation(libs.kotlinx.coroutines.test)
-    testImplementation("org.json:json:20240303")
+    testImplementation("org.json:json:20260814")
     testImplementation(libs.mockk)
     testImplementation(libs.turbine)
     testImplementation(libs.truth)
